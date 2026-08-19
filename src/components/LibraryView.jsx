@@ -4,16 +4,16 @@ import { getTrickplayStyle, getTrickplayInfo } from '../utils/trickplay';
 import { detectDuplicateMedia } from '../utils/duplicateChecker';
 import { 
   Play, Shuffle, Star, Eye, EyeOff, Search, 
-  Edit3, Sparkles, Trash2, Filter, Folder, Film, 
-  ArrowUpDown, Check, X, RefreshCw, Copy, Layers
+  Edit3, Sparkles, Trash2, Folder, Film, 
+  ArrowUpDown, X, RefreshCw, Layers, Loader2
 } from 'lucide-react';
 
 const BASE_STATUS_FILTERS = [
   { id: 'all', label: '全部' },
-  { id: 'favorites', label: '⭐ 仅最爱' },
-  { id: 'unplayed', label: '👀 仅未看' },
-  { id: 'played', label: '✅ 仅已看' },
-  { id: 'duplicates', label: '🔴 仅重复项' }
+  { id: 'favorites', label: '⭐ 最爱' },
+  { id: 'unplayed', label: '👀 未看' },
+  { id: 'played', label: '✅ 已看' },
+  { id: 'duplicates', label: '🔴 重复项' }
 ];
 
 const SORT_OPTIONS = [
@@ -50,19 +50,18 @@ function MovieCard({
   // Trickplay Animation on Hover
   useEffect(() => {
     if (isHovered) {
-      // Start Trickplay animation after 350ms hover delay
       hoverTimerRef.current = setTimeout(() => {
         const tp = getTrickplayInfo(item);
         const duration = item.RunTimeTicks ? item.RunTimeTicks / 10000000 : 7200;
         let currentTime = 0;
-        const step = Math.max(15, duration / 50); // Step through ~50 frames
+        const step = Math.max(15, duration / 50);
 
         setTrickplayTime(currentTime);
 
         animTimerRef.current = setInterval(() => {
           currentTime = (currentTime + step) % duration;
           setTrickplayTime(currentTime);
-        }, 300); // 3.3 fps
+        }, 300);
       }, 350);
     } else {
       if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
@@ -117,15 +116,15 @@ function MovieCard({
           />
         )}
 
-        {/* Duplicate Badge (Top-Left) */}
+        {/* Duplicate Badge */}
         {isDuplicate && (
           <div className="absolute top-2 left-2 flex items-center gap-1 px-1.5 py-0.5 rounded bg-red-600/90 backdrop-blur-md border border-red-400/50 text-[10px] font-mono font-bold text-white shadow-lg animate-pulse z-10">
             <Layers size={10} />
-            <span>重复项</span>
+            <span>重复</span>
           </div>
         )}
 
-        {/* Play Count Badge (Top-Left if not duplicate) */}
+        {/* Play Count Badge */}
         {!isDuplicate && (
           <div className="absolute top-2 left-2 flex items-center gap-1 px-1.5 py-0.5 rounded bg-black/60 backdrop-blur-md border border-white/10 text-[10px] font-mono text-cyan-300 z-10">
             <Eye size={11} className="text-cyan-400" />
@@ -133,7 +132,7 @@ function MovieCard({
           </div>
         )}
 
-        {/* Community Rating (Top-Right) */}
+        {/* Community Rating */}
         {item.CommunityRating && (
           <div className="absolute top-2 right-2 flex items-center gap-1 px-1.5 py-0.5 rounded bg-black/60 backdrop-blur-md border border-white/10 text-[10px] font-mono text-amber-300 z-10">
             <Star size={10} className="fill-amber-400 text-amber-400" />
@@ -223,6 +222,7 @@ function MovieCard({
 
 export default function LibraryView({
   items = [],
+  totalRecordCount = 0,
   userViews = [],
   selectedViewId,
   onSelectView,
@@ -239,20 +239,34 @@ export default function LibraryView({
   onOpenMetadataEditor,
   onOpenIdentify,
   onRefreshLibrary,
-  isRefreshing
+  isRefreshing,
+  isLoadingMore,
+  onLoadMore,
+  hasMore
 }) {
+  const scrollContainerRef = useRef(null);
+
   // Duplicate detection
   const { duplicateItemIds, duplicateCount } = useMemo(() => {
     return detectDuplicateMedia(items);
   }, [items]);
 
-  // Filtered items (incorporating duplicates filter)
   const displayItems = useMemo(() => {
     if (statusFilter === 'duplicates') {
       return items.filter(it => duplicateItemIds.has(it.Id));
     }
     return items;
   }, [items, statusFilter, duplicateItemIds]);
+
+  // Infinite Scroll Listener
+  const handleScroll = () => {
+    const el = scrollContainerRef.current;
+    if (!el || isLoadingMore || !hasMore) return;
+    const { scrollTop, scrollHeight, clientHeight } = el;
+    if (scrollHeight - scrollTop - clientHeight < 400) {
+      if (onLoadMore) onLoadMore();
+    }
+  };
 
   // Toggle Favorite
   const handleToggleFavorite = async (item) => {
@@ -343,7 +357,7 @@ export default function LibraryView({
             title="以多视口随机看板播放当前筛选出的媒体"
           >
             <Shuffle size={14} />
-            <span>开启随机看板 ({displayItems.length} 部)</span>
+            <span>开启随机看板 ({totalRecordCount > 0 ? `${totalRecordCount} 部` : '0'})</span>
           </button>
         </div>
 
@@ -357,7 +371,7 @@ export default function LibraryView({
               type="text"
               value={searchKeyword}
               onChange={(e) => onSearchChange(e.target.value)}
-              placeholder="搜索影片名称、演员、年份..."
+              placeholder="搜索影片名称、年份..."
               className="w-full pl-9 pr-8 py-1.5 rounded-xl bg-black/50 border border-white/10 text-white placeholder-gray-500 focus:outline-none focus:border-cyan-400 transition"
             />
             {searchKeyword && (
@@ -370,10 +384,10 @@ export default function LibraryView({
             )}
           </div>
 
-          {/* Status Filters (including Duplicates) */}
+          {/* Status Filters */}
           <div className="flex items-center bg-black/40 p-1 rounded-xl border border-white/5 gap-0.5">
             {BASE_STATUS_FILTERS.map(f => {
-              const label = f.id === 'duplicates' && duplicateCount > 0 ? `🔴 重复项 (${duplicateCount})` : f.label;
+              const label = f.id === 'duplicates' && duplicateCount > 0 ? `🔴 重复 (${duplicateCount})` : f.label;
               return (
                 <button
                   key={f.id}
@@ -411,36 +425,50 @@ export default function LibraryView({
             onClick={onRefreshLibrary}
             disabled={isRefreshing}
             className="p-2 rounded-xl bg-black/40 hover:bg-white/10 border border-white/5 text-gray-400 hover:text-white transition disabled:opacity-50"
-            title="从服务器全量同步媒体库"
+            title="刷新数据"
           >
             <RefreshCw size={14} className={isRefreshing ? 'animate-spin text-cyan-400' : ''} />
           </button>
         </div>
       </div>
 
-      {/* Media Cards Grid */}
-      <div className="flex-1 overflow-y-auto p-4 pb-20">
-        {displayItems.length === 0 ? (
+      {/* Media Cards Infinite Grid */}
+      <div 
+        ref={scrollContainerRef}
+        onScroll={handleScroll}
+        className="flex-1 overflow-y-auto p-4 pb-20"
+      >
+        {displayItems.length === 0 && !isRefreshing ? (
           <div className="h-full flex flex-col items-center justify-center text-gray-500 gap-3">
             <Film size={48} className="text-gray-700 animate-pulse" />
             <div className="text-sm">没有找到符合当前筛选条件的媒体</div>
           </div>
         ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-3.5">
-            {displayItems.map(item => (
-              <MovieCard
-                key={item.Id}
-                item={item}
-                isDuplicate={duplicateItemIds.has(item.Id)}
-                onPlay={onPlaySingleItem}
-                onToggleFavorite={handleToggleFavorite}
-                onTogglePlayed={handleTogglePlayed}
-                onOpenMetadataEditor={onOpenMetadataEditor}
-                onOpenIdentify={onOpenIdentify}
-                onDelete={handleDelete}
-              />
-            ))}
-          </div>
+          <>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-3.5">
+              {displayItems.map(item => (
+                <MovieCard
+                  key={item.Id}
+                  item={item}
+                  isDuplicate={duplicateItemIds.has(item.Id)}
+                  onPlay={onPlaySingleItem}
+                  onToggleFavorite={handleToggleFavorite}
+                  onTogglePlayed={handleTogglePlayed}
+                  onOpenMetadataEditor={onOpenMetadataEditor}
+                  onOpenIdentify={onOpenIdentify}
+                  onDelete={handleDelete}
+                />
+              ))}
+            </div>
+
+            {/* Infinite Scroll Loading Spinner */}
+            {isLoadingMore && (
+              <div className="w-full py-6 flex items-center justify-center gap-2 text-xs text-cyan-300">
+                <Loader2 size={16} className="animate-spin" />
+                <span>正在加载更多影片...</span>
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>

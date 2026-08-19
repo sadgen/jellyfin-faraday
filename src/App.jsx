@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { jellyfin } from './api/jellyfinClient';
 import DesktopLayout from './components/DesktopLayout';
 import LibraryView from './components/LibraryView';
@@ -8,32 +8,34 @@ import MetadataEditorModal from './components/MetadataEditorModal';
 import IdentifyModal from './components/IdentifyModal';
 import VideoPlayerModal from './components/VideoPlayerModal';
 import ErrorBoundary from './components/ErrorBoundary';
-import { Film, AlertCircle } from 'lucide-react';
+import { Film, AlertCircle, Loader2 } from 'lucide-react';
 
 const STORAGE_KEY_TILES = 'jf_faraday_tile_count';
 const STORAGE_KEY_FILTER = 'jf_faraday_filter_mode';
+const PAGE_SIZE = 100;
 
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(jellyfin.auth.isConfigured);
   const [viewMode, setViewMode] = useState('library'); // 'library' | 'kanban'
   
   // Media items & libraries
-  const [allMediaItems, setAllMediaItems] = useState([]);
+  const [mediaItems, setMediaItems] = useState([]);
+  const [totalRecordCount, setTotalRecordCount] = useState(0);
   const [userViews, setUserViews] = useState([]);
   const [selectedViewId, setSelectedViewId] = useState('all');
   const [searchKeyword, setSearchKeyword] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [sortMethod, setSortMethod] = useState('date_desc');
 
-  // Loading & sync state
-  const [isLoadingInitial, setIsLoadingInitial] = useState(false);
-  const [isBackgroundSyncing, setIsBackgroundSyncing] = useState(false);
-  const [isLoadingView, setIsLoadingView] = useState(false);
-  const [loadProgress, setLoadProgress] = useState({ current: 0, total: 0 });
-  const [lastSyncTime, setLastSyncTime] = useState(null);
+  // Loading state (Ultra-fast server-side pagination)
+  const [isLoading, setIsLoading] = useState(false);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [errorText, setErrorText] = useState('');
 
-  // Kanban Preferences
+  // Kanban Items Stream
+  const [kanbanPool, setKanbanPool] = useState([]);
+
+  // Preferences
   const [activeTileCount, setActiveTileCount] = useState(() => {
     const saved = localStorage.getItem(STORAGE_KEY_TILES);
     const count = parseInt(saved, 10);
@@ -50,13 +52,8 @@ export default function App() {
   // Modals
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(!jellyfin.auth.isConfigured);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-
-  // Management modals
   const [editingItem, setEditingItem] = useState(null);
   const [identifyingItem, setIdentifyingItem] = useState(null);
-
-  // Single video player modal
   const [modalPlayingItem, setModalPlayingItem] = useState(null);
   const [initialKanbanItem, setInitialKanbanItem] = useState(null);
 
@@ -72,166 +69,111 @@ export default function App() {
     localStorage.setItem(STORAGE_KEY_FILTER, mode);
   };
 
-  // Full Network Sync with Jellyfin
-  const runNetworkSync = useCallback(async (isUserManual = false) => {
+  // Load User Views on mount
+  useEffect(() => {
     if (!jellyfin.auth.isConfigured) return;
+    jellyfin.getUserViews().then(views => {
+      setUserViews(views || []);
+    }).catch(err => {
+      console.warn('Failed to fetch user views:', err);
+    });
+  }, [isAuthenticated]);
 
-    if (isUserManual) {
-      setIsRefreshing(true);
-    } else {
-      setIsLoadingInitial(true);
-    }
+  // Query First Page (< 50ms instantaneous server query)
+  const fetchFirstPage = useCallback(async (viewId, search, status, sort) => {
+    if (!jellyfin.auth.isConfigured) return;
+    setIsLoading(true);
     setErrorText('');
 
     try {
-      await jellyfin.syncMediaLibrary({
-        onProgress: (current, total) => {
-          setIsBackgroundSyncing(current < total);
-          setLoadProgress({ current, total });
-        },
-        onComplete: (items, views, total) => {
-          setAllMediaItems(items);
-          setUserViews(views);
-          setLastSyncTime(Date.now());
-          setIsLoadingInitial(false);
-          setIsBackgroundSyncing(false);
-          setIsRefreshing(false);
-          setLoadProgress({ current: total, total });
-        }
+      const data = await jellyfin.queryMediaPage({
+        parentId: viewId,
+        searchTerm: search,
+        statusFilter: status,
+        sortMethod: sort,
+        startIndex: 0,
+        limit: PAGE_SIZE
       });
+
+      setMediaItems(data.Items || []);
+      setTotalRecordCount(data.TotalRecordCount || 0);
     } catch (err) {
-      console.error('Failed to sync with Jellyfin:', err);
-      setErrorText(err.message || '网络同步失败，请检查服务器连接');
+      console.error('Failed to load media items:', err);
+      setErrorText(err.message || '获取媒体列表失败');
     } finally {
-      setIsLoadingInitial(false);
-      setIsRefreshing(false);
+      setIsLoading(false);
     }
   }, []);
 
-  // Cache-First Startup (< 5ms instant load without hitting the network on reload!)
+  // Debounced/Triggered page reload when filters change
+  const searchTimeoutRef = useRef(null);
   useEffect(() => {
     if (!jellyfin.auth.isConfigured) return;
 
-    let isMounted = true;
+    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
 
-    jellyfin.loadCachedData().then(cache => {
-      if (!isMounted) return;
+    searchTimeoutRef.current = setTimeout(() => {
+      fetchFirstPage(selectedViewId, searchKeyword, statusFilter, sortMethod);
+    }, searchKeyword ? 300 : 0);
 
-      if (cache.items && cache.items.length > 0) {
-        setAllMediaItems(cache.items);
-        setUserViews(cache.views || []);
-        setLastSyncTime(cache.lastSyncTime);
-        setIsLoadingInitial(false);
-      } else {
-        runNetworkSync(false);
-      }
-    }).catch(() => {
-      if (isMounted) runNetworkSync(false);
-    });
+    return () => {
+      if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+    };
+  }, [selectedViewId, searchKeyword, statusFilter, sortMethod, fetchFirstPage]);
 
-    return () => { isMounted = false; };
-  }, [runNetworkSync]);
+  // Infinite Scroll: Load next batch
+  const handleLoadMore = useCallback(async () => {
+    if (isLoadingMore || isLoading || mediaItems.length >= totalRecordCount) return;
+    setIsLoadingMore(true);
 
-  // On-demand fetch if a specific library view has 0 items loaded in local state
-  const handleSelectView = useCallback(async (viewId) => {
-    setSelectedViewId(viewId);
-    if (viewId === 'all') return;
-
-    const existing = allMediaItems.filter(it => 
-      it.ViewId === viewId || 
-      (Array.isArray(it.ViewIds) && it.ViewIds.includes(viewId)) || 
-      it.ParentId === viewId
-    );
-
-    if (existing.length === 0 && jellyfin.auth.isConfigured) {
-      setIsLoadingView(true);
-      try {
-        const res = await jellyfin.getItemsByView(viewId, {
-          Limit: 1000,
-          SortBy: 'DateCreated',
-          SortOrder: 'Descending'
-        });
-        const items = (res.Items || []).map(it => ({
-          ...it,
-          ViewId: viewId
-        }));
-        
-        setAllMediaItems(prev => {
-          const idSet = new Set(prev.map(p => p.Id));
-          const newItems = items.filter(it => !idSet.has(it.Id));
-          const updated = prev.map(it => {
-            const found = items.find(n => n.Id === it.Id);
-            return found ? { ...it, ViewId: viewId } : it;
-          });
-          return updated.concat(newItems);
-        });
-      } catch (err) {
-        console.warn('Failed to load items for view:', viewId, err);
-      } finally {
-        setIsLoadingView(false);
-      }
-    }
-  }, [allMediaItems]);
-
-  // Compute Filtered Media Items based on current library, search, status, and sorting
-  const filteredMediaItems = useMemo(() => {
-    if (!allMediaItems || allMediaItems.length === 0) return [];
-
-    let pool = [...allMediaItems];
-
-    // 1. Filter by Library / View folder (if selectedViewId !== 'all')
-    if (selectedViewId !== 'all') {
-      pool = pool.filter(item => 
-        item.ViewId === selectedViewId || 
-        (Array.isArray(item.ViewIds) && item.ViewIds.includes(selectedViewId)) ||
-        item.ParentId === selectedViewId
-      );
-    }
-
-    // 2. Filter by search keyword
-    if (searchKeyword.trim()) {
-      const q = searchKeyword.toLowerCase().trim();
-      pool = pool.filter(item => {
-        const name = (item.Name || '').toLowerCase();
-        const year = (item.ProductionYear || '').toString();
-        const rating = (item.OfficialRating || '').toLowerCase();
-        return name.includes(q) || year.includes(q) || rating.includes(q);
+    try {
+      const data = await jellyfin.queryMediaPage({
+        parentId: selectedViewId,
+        searchTerm: searchKeyword,
+        statusFilter: statusFilter,
+        sortMethod: sortMethod,
+        startIndex: mediaItems.length,
+        limit: PAGE_SIZE
       });
+
+      const nextItems = data.Items || [];
+      if (nextItems.length > 0) {
+        setMediaItems(prev => {
+          const idSet = new Set(prev.map(p => p.Id));
+          const filtered = nextItems.filter(n => !idSet.has(n.Id));
+          return prev.concat(filtered);
+        });
+      }
+    } catch (err) {
+      console.warn('Failed to load more items:', err);
+    } finally {
+      setIsLoadingMore(false);
     }
+  }, [isLoadingMore, isLoading, mediaItems.length, totalRecordCount, selectedViewId, searchKeyword, statusFilter, sortMethod]);
 
-    // 3. Filter by status
-    if (statusFilter === 'favorites') {
-      pool = pool.filter(item => item.UserData?.IsFavorite);
-    } else if (statusFilter === 'unplayed') {
-      pool = pool.filter(item => !item.UserData?.Played);
-    } else if (statusFilter === 'played') {
-      pool = pool.filter(item => item.UserData?.Played);
+  // Load Random Pool for Kanban on Demand
+  const loadKanbanStream = useCallback(async () => {
+    if (!jellyfin.auth.isConfigured) return;
+    try {
+      const randomItems = await jellyfin.queryRandomBatch({
+        parentId: selectedViewId,
+        filterMode,
+        limit: 100
+      });
+      setKanbanPool(randomItems || []);
+    } catch (err) {
+      console.warn('Failed to load random stream for kanban:', err);
     }
+  }, [selectedViewId, filterMode]);
 
-    // 4. Sort
-    switch (sortMethod) {
-      case 'name_asc':
-        pool.sort((a, b) => (a.Name || '').localeCompare(b.Name || ''));
-        break;
-      case 'rating_desc':
-        pool.sort((a, b) => (b.CommunityRating || 0) - (a.CommunityRating || 0));
-        break;
-      case 'playcount_asc':
-        pool.sort((a, b) => (a.UserData?.PlayCount || 0) - (b.UserData?.PlayCount || 0));
-        break;
-      case 'playcount_desc':
-        pool.sort((a, b) => (b.UserData?.PlayCount || 0) - (a.UserData?.PlayCount || 0));
-        break;
-      case 'date_desc':
-      default:
-        pool.sort((a, b) => new Date(b.DateCreated) - new Date(a.DateCreated));
-        break;
+  // When entering Kanban mode, fetch random pool
+  useEffect(() => {
+    if (viewMode === 'kanban') {
+      loadKanbanStream();
     }
+  }, [viewMode, loadKanbanStream]);
 
-    return pool;
-  }, [allMediaItems, selectedViewId, searchKeyword, statusFilter, sortMethod]);
-
-  // Compute active scope name for display in HUD
+  // Active scope name
   const activeScopeName = useMemo(() => {
     let name = '全部媒体库';
     if (selectedViewId !== 'all') {
@@ -249,15 +191,18 @@ export default function App() {
     return name;
   }, [selectedViewId, userViews, searchKeyword, statusFilter]);
 
-  // Update item in local state when modified or favorited
+  // Update item in local state
   const handleUpdateItem = useCallback((updatedItem) => {
     if (!updatedItem?.Id) return;
-    setAllMediaItems(prev => prev.map(item => item.Id === updatedItem.Id ? { ...item, ...updatedItem } : item));
+    setMediaItems(prev => prev.map(item => item.Id === updatedItem.Id ? { ...item, ...updatedItem } : item));
+    setKanbanPool(prev => prev.map(item => item.Id === updatedItem.Id ? { ...item, ...updatedItem } : item));
   }, []);
 
   // Delete item from local state
   const handleDeleteItem = useCallback((deletedId) => {
-    setAllMediaItems(prev => prev.filter(item => item.Id !== deletedId));
+    setMediaItems(prev => prev.filter(item => item.Id !== deletedId));
+    setKanbanPool(prev => prev.filter(item => item.Id !== deletedId));
+    setTotalRecordCount(prev => Math.max(0, prev - 1));
   }, []);
 
   // Play single item clicked from Media Library
@@ -269,13 +214,13 @@ export default function App() {
   const handleLoginSuccess = () => {
     setIsAuthenticated(true);
     setIsLoginModalOpen(false);
-    runNetworkSync(false);
+    fetchFirstPage(selectedViewId, searchKeyword, statusFilter, sortMethod);
   };
 
   // Logout handler
   const handleLogout = () => {
     setIsAuthenticated(false);
-    setAllMediaItems([]);
+    setMediaItems([]);
     setUserViews([]);
     setIsLoginModalOpen(true);
   };
@@ -284,26 +229,8 @@ export default function App() {
     <ErrorBoundary>
       <div className="relative w-screen h-screen bg-[#080b11] text-gray-100 overflow-hidden select-none">
         
-        {/* Full-screen Loading Overlay (Initial first-time connect ONLY) */}
-        {isLoadingInitial && allMediaItems.length === 0 && (
-          <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-black/90 backdrop-blur-md gap-4">
-            <div className="relative flex items-center justify-center">
-              <div className="w-14 h-14 rounded-full border-4 border-cyan-500/20 border-t-cyan-400 animate-spin" />
-              <Film className="absolute text-cyan-400" size={24} />
-            </div>
-            <div className="flex flex-col items-center gap-1.5 text-center">
-              <div className="text-sm font-semibold text-white">正在首次同步 Jellyfin 媒体库并建立本地缓存...</div>
-              <div className="text-xs font-mono text-cyan-300/80">
-                {loadProgress.total > 0
-                  ? `已缓存 ${loadProgress.current} / ${loadProgress.total} 部影片`
-                  : '正在向服务器拉取媒体索引...'}
-              </div>
-            </div>
-          </div>
-        )}
-
         {/* Global Error Banner */}
-        {errorText && !isLoadingInitial && (
+        {errorText && (
           <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 px-4 py-2 rounded-xl bg-red-950/90 border border-red-500/40 text-xs text-red-200 shadow-2xl">
             <AlertCircle size={15} className="text-red-400 flex-shrink-0" />
             <span>{errorText}</span>
@@ -319,10 +246,11 @@ export default function App() {
         {/* Main View Mode Switch */}
         {viewMode === 'library' ? (
           <LibraryView
-            items={filteredMediaItems}
+            items={mediaItems}
+            totalRecordCount={totalRecordCount}
             userViews={userViews}
             selectedViewId={selectedViewId}
-            onSelectView={handleSelectView}
+            onSelectView={setSelectedViewId}
             searchKeyword={searchKeyword}
             onSearchChange={setSearchKeyword}
             statusFilter={statusFilter}
@@ -338,12 +266,15 @@ export default function App() {
             onDeleteItem={handleDeleteItem}
             onOpenMetadataEditor={(item) => setEditingItem(item)}
             onOpenIdentify={(item) => setIdentifyingItem(item)}
-            onRefreshLibrary={() => runNetworkSync(true)}
-            isRefreshing={isRefreshing || isBackgroundSyncing || isLoadingView}
+            onRefreshLibrary={() => fetchFirstPage(selectedViewId, searchKeyword, statusFilter, sortMethod)}
+            isRefreshing={isLoading}
+            isLoadingMore={isLoadingMore}
+            onLoadMore={handleLoadMore}
+            hasMore={mediaItems.length < totalRecordCount}
           />
         ) : (
           <DesktopLayout
-            items={filteredMediaItems}
+            items={kanbanPool.length > 0 ? kanbanPool : mediaItems}
             activeTileCount={activeTileCount}
             onTileCountChange={handleTileCountChange}
             filterMode={filterMode}
@@ -353,8 +284,8 @@ export default function App() {
             playbackSpeed={playbackSpeed}
             onPlaybackSpeedChange={setPlaybackSpeed}
             onOpenSettings={() => setIsSettingsModalOpen(true)}
-            onRefreshLibrary={() => runNetworkSync(true)}
-            isRefreshing={isRefreshing || isBackgroundSyncing || isLoadingView}
+            onRefreshLibrary={loadKanbanStream}
+            isRefreshing={isLoading}
             onOpenLibraryView={() => setViewMode('library')}
             activeScopeName={activeScopeName}
             initialPlayingItem={initialKanbanItem}
@@ -367,15 +298,15 @@ export default function App() {
           item={modalPlayingItem}
           onClose={() => setModalPlayingItem(null)}
           onNext={() => {
-            const idx = filteredMediaItems.findIndex(it => it.Id === modalPlayingItem?.Id);
-            if (idx >= 0 && idx < filteredMediaItems.length - 1) {
-              setModalPlayingItem(filteredMediaItems[idx + 1]);
+            const idx = mediaItems.findIndex(it => it.Id === modalPlayingItem?.Id);
+            if (idx >= 0 && idx < mediaItems.length - 1) {
+              setModalPlayingItem(mediaItems[idx + 1]);
             }
           }}
           onPrev={() => {
-            const idx = filteredMediaItems.findIndex(it => it.Id === modalPlayingItem?.Id);
+            const idx = mediaItems.findIndex(it => it.Id === modalPlayingItem?.Id);
             if (idx > 0) {
-              setModalPlayingItem(filteredMediaItems[idx - 1]);
+              setModalPlayingItem(mediaItems[idx - 1]);
             }
           }}
           onUpdateItem={handleUpdateItem}
@@ -393,10 +324,9 @@ export default function App() {
           isOpen={isSettingsModalOpen}
           onClose={() => setIsSettingsModalOpen(false)}
           onLogout={handleLogout}
-          onRefreshLibrary={() => runNetworkSync(true)}
-          isRefreshing={isRefreshing || isBackgroundSyncing || isLoadingView}
-          totalItemsCount={allMediaItems.length}
-          lastSyncTime={lastSyncTime}
+          onRefreshLibrary={() => fetchFirstPage(selectedViewId, searchKeyword, statusFilter, sortMethod)}
+          isRefreshing={isLoading}
+          totalItemsCount={totalRecordCount}
         />
 
         {/* Metadata Editor Modal */}

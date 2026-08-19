@@ -27,6 +27,7 @@ export default function App() {
   // Loading & sync state
   const [isLoadingInitial, setIsLoadingInitial] = useState(false);
   const [isBackgroundSyncing, setIsBackgroundSyncing] = useState(false);
+  const [isLoadingView, setIsLoadingView] = useState(false);
   const [loadProgress, setLoadProgress] = useState({ current: 0, total: 0 });
   const [errorText, setErrorText] = useState('');
 
@@ -78,7 +79,8 @@ export default function App() {
 
     try {
       // Load user views (Categories/Libraries)
-      jellyfin.getUserViews().then(views => setUserViews(views)).catch(() => {});
+      const views = await jellyfin.getUserViews();
+      setUserViews(views || []);
 
       await jellyfin.syncMediaLibrary({
         onFirstBatch: (batchItems, total, isFromCache) => {
@@ -117,6 +119,49 @@ export default function App() {
     }
   }, [startMediaSync]);
 
+  // On-demand fetch if a specific library view has 0 items loaded in local state
+  const handleSelectView = useCallback(async (viewId) => {
+    setSelectedViewId(viewId);
+    if (viewId === 'all') return;
+
+    // Check if we already have items tagged with this ViewId
+    const existing = allMediaItems.filter(it => 
+      it.ViewId === viewId || 
+      (Array.isArray(it.ViewIds) && it.ViewIds.includes(viewId)) || 
+      it.ParentId === viewId
+    );
+
+    if (existing.length === 0 && jellyfin.auth.isConfigured) {
+      setIsLoadingView(true);
+      try {
+        const res = await jellyfin.getItemsByView(viewId, {
+          Limit: 1000,
+          SortBy: 'DateCreated',
+          SortOrder: 'Descending'
+        });
+        const items = (res.Items || []).map(it => ({
+          ...it,
+          ViewId: viewId
+        }));
+        
+        // Merge with existing items
+        setAllMediaItems(prev => {
+          const idSet = new Set(prev.map(p => p.Id));
+          const newItems = items.filter(it => !idSet.has(it.Id));
+          const updated = prev.map(it => {
+            const found = items.find(n => n.Id === it.Id);
+            return found ? { ...it, ViewId: viewId } : it;
+          });
+          return updated.concat(newItems);
+        });
+      } catch (err) {
+        console.warn('Failed to load items for view:', viewId, err);
+      } finally {
+        setIsLoadingView(false);
+      }
+    }
+  }, [allMediaItems]);
+
   // Compute Filtered Media Items based on current library, search, status, and sorting
   const filteredMediaItems = useMemo(() => {
     if (!allMediaItems || allMediaItems.length === 0) return [];
@@ -125,7 +170,11 @@ export default function App() {
 
     // 1. Filter by Library / View folder (if selectedViewId !== 'all')
     if (selectedViewId !== 'all') {
-      pool = pool.filter(item => item.ParentId === selectedViewId);
+      pool = pool.filter(item => 
+        item.ViewId === selectedViewId || 
+        (Array.isArray(item.ViewIds) && item.ViewIds.includes(selectedViewId)) ||
+        item.ParentId === selectedViewId
+      );
     }
 
     // 2. Filter by search keyword
@@ -261,7 +310,7 @@ export default function App() {
             items={filteredMediaItems}
             userViews={userViews}
             selectedViewId={selectedViewId}
-            onSelectView={setSelectedViewId}
+            onSelectView={handleSelectView}
             searchKeyword={searchKeyword}
             onSearchChange={setSearchKeyword}
             statusFilter={statusFilter}
@@ -275,7 +324,7 @@ export default function App() {
             onOpenMetadataEditor={(item) => setEditingItem(item)}
             onOpenIdentify={(item) => setIdentifyingItem(item)}
             onRefreshLibrary={() => startMediaSync(true)}
-            isRefreshing={isRefreshing || isBackgroundSyncing}
+            isRefreshing={isRefreshing || isBackgroundSyncing || isLoadingView}
           />
         ) : (
           <DesktopLayout
@@ -290,7 +339,7 @@ export default function App() {
             onPlaybackSpeedChange={setPlaybackSpeed}
             onOpenSettings={() => setIsSettingsModalOpen(true)}
             onRefreshLibrary={() => startMediaSync(true)}
-            isRefreshing={isRefreshing || isBackgroundSyncing}
+            isRefreshing={isRefreshing || isBackgroundSyncing || isLoadingView}
             onOpenLibraryView={() => setViewMode('library')}
             activeScopeName={activeScopeName}
           />
@@ -309,7 +358,7 @@ export default function App() {
           onClose={() => setIsSettingsModalOpen(false)}
           onLogout={handleLogout}
           onRefreshLibrary={() => startMediaSync(true)}
-          isRefreshing={isRefreshing || isBackgroundSyncing}
+          isRefreshing={isRefreshing || isBackgroundSyncing || isLoadingView}
           totalItemsCount={allMediaItems.length}
         />
 

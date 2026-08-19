@@ -4,7 +4,8 @@ import { jellyfin } from '../api/jellyfinClient';
 import { useExternalPlayer } from '../hooks/useExternalPlayer';
 import { 
   Play, Pause, SkipForward, Volume2, VolumeX, Maximize, 
-  Star, Eye, EyeOff, Tv, Film, ExternalLink, Zap
+  Star, Eye, EyeOff, ExternalLink, Zap, Image as ImageIcon,
+  X, Info, Tag, Calendar, Film
 } from 'lucide-react';
 
 export default function VideoTile({
@@ -26,13 +27,15 @@ export default function VideoTile({
   const [hasError, setHasError] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [showPlayerMenu, setShowPlayerMenu] = useState(false);
+  const [showPosterModal, setShowPosterModal] = useState(false);
+  const [showPinnedPoster, setShowPinnedPoster] = useState(false);
   const [progress, setProgress] = useState(0);
   const [currentTimeText, setCurrentTimeText] = useState('00:00');
   const [durationText, setDurationText] = useState('00:00');
 
   const { launchPlayer } = useExternalPlayer();
 
-  // Sync mute with global setting unless user explicitly changed tile
+  // Sync mute with global setting
   useEffect(() => {
     setIsTileMuted(isGlobalMuted);
     if (videoRef.current) {
@@ -71,21 +74,18 @@ export default function VideoTile({
     const directStreamUrl = jellyfin.getStreamUrl(item.Id);
     const hlsUrl = jellyfin.getHlsUrl(item.Id);
 
-    // Try direct HTML5 stream first
     const setupDirectPlay = () => {
       videoEl.src = directStreamUrl;
       videoEl.playbackRate = playbackSpeed;
       videoEl.muted = isTileMuted;
       videoEl.play().catch(err => {
         console.warn(`[Tile ${tileId}] Direct play autoplay blocked or failed:`, err);
-        // Autoplay may need user gesture or muted
         videoEl.muted = true;
         setIsTileMuted(true);
         videoEl.play().catch(() => {});
       });
     };
 
-    // Try HLS playback if direct play fails or browser supports HLS
     const setupHlsPlay = () => {
       if (Hls.isSupported()) {
         const hls = new Hls({
@@ -112,7 +112,6 @@ export default function VideoTile({
           }
         });
       } else if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
-        // Native Safari HLS
         videoEl.src = hlsUrl;
         videoEl.play().catch(() => {});
       } else {
@@ -120,7 +119,6 @@ export default function VideoTile({
       }
     };
 
-    // Start with direct playback, fallback to HLS on error
     const handleDirectError = () => {
       console.warn(`[Tile ${tileId}] Direct stream error, falling back to HLS`);
       setupHlsPlay();
@@ -140,7 +138,6 @@ export default function VideoTile({
     };
   }, [item?.Id, tileId]);
 
-  // Video event listeners for progress and duration
   const formatTime = (seconds) => {
     if (!seconds || isNaN(seconds)) return '00:00';
     const m = Math.floor(seconds / 60);
@@ -215,7 +212,6 @@ export default function VideoTile({
     const isFav = !!item.UserData?.IsFavorite;
     const nextFav = !isFav;
     
-    // Optimistic UI update
     if (onUpdateItem) {
       onUpdateItem({
         ...item,
@@ -252,7 +248,7 @@ export default function VideoTile({
     }
   };
 
-  const posterUrl = item?.Id ? jellyfin.getImageUrl(item.Id, item.ImageTags?.Primary, 'Primary', 800) : null;
+  const posterUrl = item?.Id ? jellyfin.getImageUrl(item.Id, item.ImageTags?.Primary, 'Primary', 1000) : null;
   const isFavorite = !!item?.UserData?.IsFavorite;
   const playCount = item?.UserData?.PlayCount || 0;
 
@@ -266,15 +262,19 @@ export default function VideoTile({
         setShowPlayerMenu(false);
       }}
       className="relative w-full h-full bg-black overflow-hidden group select-none border border-slate-800/80 rounded-lg shadow-2xl flex flex-col justify-center items-center"
-      title="鼠标中键点击直接切片，左键点击播放/暂停"
+      title="鼠标中键点击直接换片，左键点击播放/暂停"
     >
-      {/* Fallback Poster Background */}
+      {/* Fallback & Paused Poster Cover Artwork */}
       {posterUrl && (
         <img
           src={posterUrl}
           alt={item?.Name || 'Poster'}
-          className={`absolute inset-0 w-full h-full object-cover blur-md opacity-30 transition-opacity duration-700 pointer-events-none ${
-            isLoading ? 'opacity-50' : 'opacity-20'
+          className={`absolute inset-0 w-full h-full object-cover transition-all duration-700 pointer-events-none ${
+            isLoading 
+              ? 'opacity-60 blur-sm scale-105' 
+              : !isPlaying 
+                ? 'opacity-40 blur-xs scale-100' 
+                : 'opacity-15 blur-md'
           }`}
         />
       )}
@@ -295,11 +295,42 @@ export default function VideoTile({
         onTimeUpdate={handleTimeUpdate}
       />
 
+      {/* Pinned Poster Floating PIP View (if toggled) */}
+      {showPinnedPoster && posterUrl && (
+        <div 
+          className="absolute top-12 right-2.5 z-30 w-28 aspect-[2/3] rounded-xl overflow-hidden shadow-2xl border border-cyan-500/40 bg-black/80 backdrop-blur-md animate-in zoom-in-95 duration-200"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <img src={posterUrl} alt="Cover" className="w-full h-full object-cover" />
+          <button
+            onClick={() => setShowPinnedPoster(false)}
+            className="absolute top-1 right-1 p-1 rounded-full bg-black/70 text-white/80 hover:text-white"
+          >
+            <X size={12} />
+          </button>
+        </div>
+      )}
+
       {/* Loading Spinner */}
       {isLoading && !hasError && (
         <div className="absolute z-20 flex flex-col items-center justify-center pointer-events-none gap-2">
           <div className="w-10 h-10 border-4 border-jf-accent/30 border-t-jf-accent rounded-full animate-spin" />
           <span className="text-xs font-mono text-cyan-200/80 drop-shadow">加载视频流...</span>
+        </div>
+      )}
+
+      {/* Paused Center Overlay Indicator */}
+      {!isPlaying && !isLoading && !hasError && (
+        <div 
+          onClick={togglePlay}
+          className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/30 backdrop-blur-xs cursor-pointer group/play"
+        >
+          <div className="w-14 h-14 rounded-full bg-black/60 border border-white/20 flex items-center justify-center text-white shadow-2xl group-hover/play:scale-110 group-hover/play:bg-jf-accent transition-all duration-300">
+            <Play size={24} className="ml-1 fill-white" />
+          </div>
+          <span className="text-xs font-medium text-gray-200 mt-2.5 drop-shadow bg-black/50 px-2.5 py-1 rounded-full border border-white/10">
+            已暂停 (点击继续播放)
+          </span>
         </div>
       )}
 
@@ -318,7 +349,7 @@ export default function VideoTile({
 
       {/* Top Left Badges: Play Count & Type */}
       <div className="absolute top-2.5 left-2.5 z-20 flex items-center gap-1.5 pointer-events-none">
-        {/* Play Count Badge (from jellyfin-packet) */}
+        {/* Play Count Badge */}
         <div 
           className="flex items-center gap-1 px-2 py-0.5 rounded bg-black/60 backdrop-blur-md border border-white/10 text-[11px] font-mono font-medium text-cyan-300 shadow-sm"
           title={`已播放 ${playCount} 次`}
@@ -336,8 +367,25 @@ export default function VideoTile({
         )}
       </div>
 
-      {/* Top Right Quick Actions (Middle-Click Hint & Favorite) */}
+      {/* Top Right Quick Actions (Middle-Click Hint & Favorite & Poster Toggle) */}
       <div className={`absolute top-2.5 right-2.5 z-20 flex items-center gap-1.5 transition-opacity duration-200 ${isHovered ? 'opacity-100' : 'opacity-0 md:opacity-0 group-hover:opacity-100'}`}>
+        
+        {/* Toggle Poster PIP View */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            setShowPinnedPoster(!showPinnedPoster);
+          }}
+          className={`p-1.5 rounded-md backdrop-blur-md border transition-all ${
+            showPinnedPoster 
+              ? 'bg-cyan-500/30 border-cyan-400 text-cyan-300' 
+              : 'bg-black/60 border-white/10 text-gray-300 hover:text-cyan-400 hover:bg-black/80'
+          }`}
+          title="浮动展示高清海报 (Poster PIP)"
+        >
+          <ImageIcon size={14} />
+        </button>
+
         {/* Favorite Button */}
         <button
           onClick={handleToggleFavorite}
@@ -422,16 +470,16 @@ export default function VideoTile({
         </button>
       </div>
 
-      {/* Bottom Floating Scrubber & Info Bar */}
+      {/* Bottom Floating Scrubber & Info Bar with Crisp Poster Preview */}
       <div 
-        className={`absolute bottom-0 inset-x-0 z-20 bg-gradient-to-t from-black/95 via-black/70 to-transparent p-3 pt-6 transition-all duration-300 ${
+        className={`absolute bottom-0 inset-x-0 z-20 bg-gradient-to-t from-black/95 via-black/80 to-transparent p-3 pt-6 transition-all duration-300 ${
           isHovered ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2 pointer-events-none'
         }`}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Progress Bar (Clickable) */}
         <div 
-          className="w-full h-1.5 bg-white/20 hover:h-2.5 rounded-full cursor-pointer transition-all relative overflow-hidden mb-2"
+          className="w-full h-1.5 bg-white/20 hover:h-2.5 rounded-full cursor-pointer transition-all relative overflow-hidden mb-2.5"
           onClick={handleSeek}
         >
           <div 
@@ -440,20 +488,41 @@ export default function VideoTile({
           />
         </div>
 
-        <div className="flex items-center justify-between text-xs text-gray-300">
-          {/* Title & Metadata */}
-          <div className="flex flex-col min-w-0 pr-2">
-            <div className="font-semibold text-white truncate max-w-[240px] text-sm drop-shadow" title={item?.Name}>
-              {item?.Name || '未知影片'}
-            </div>
-            <div className="text-[11px] text-gray-400 flex items-center gap-2">
-              <span>{currentTimeText} / {durationText}</span>
-              {item?.ProductionYear && <span>• {item.ProductionYear}</span>}
-              {item?.OfficialRating && <span className="px-1 bg-white/10 rounded text-[9px]">{item.OfficialRating}</span>}
+        <div className="flex items-center justify-between text-xs text-gray-300 gap-2">
+          
+          {/* Left: Poster Thumbnail + Title & Metadata */}
+          <div className="flex items-center gap-2.5 min-w-0 pr-2">
+            {/* Clickable Crisp Poster Thumbnail */}
+            {posterUrl && (
+              <div 
+                onClick={() => setShowPosterModal(true)}
+                className="relative w-9 h-13 rounded-md overflow-hidden bg-black/60 border border-white/20 hover:border-cyan-400 shadow-md cursor-pointer flex-shrink-0 group/poster hover:scale-105 transition"
+                title="点击查看高清海报与完整元数据"
+              >
+                <img src={posterUrl} alt="Cover" className="w-full h-full object-cover" />
+                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/poster:opacity-100 flex items-center justify-center text-white transition">
+                  <ImageIcon size={13} />
+                </div>
+              </div>
+            )}
+
+            <div className="flex flex-col min-w-0">
+              <div 
+                onClick={() => setShowPosterModal(true)}
+                className="font-semibold text-white truncate max-w-[220px] text-sm drop-shadow hover:text-cyan-300 cursor-pointer transition" 
+                title={item?.Name}
+              >
+                {item?.Name || '未知影片'}
+              </div>
+              <div className="text-[11px] text-gray-400 flex items-center gap-2 mt-0.5">
+                <span>{currentTimeText} / {durationText}</span>
+                {item?.ProductionYear && <span>• {item.ProductionYear}</span>}
+                {item?.OfficialRating && <span className="px-1 bg-white/10 rounded text-[9px]">{item.OfficialRating}</span>}
+              </div>
             </div>
           </div>
 
-          {/* Player Mini Controls */}
+          {/* Right: Mini Player Controls */}
           <div className="flex items-center gap-1.5 flex-shrink-0">
             <button
               onClick={togglePlay}
@@ -487,6 +556,74 @@ export default function VideoTile({
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-10 pointer-events-none bg-black/40 backdrop-blur-xs px-3 py-1.5 rounded-full border border-white/5 text-[11px] text-gray-300/60 font-mono flex items-center gap-1.5">
           <Zap size={12} className="text-cyan-400" />
           <span>中键点击换片</span>
+        </div>
+      )}
+
+      {/* Full High-Resolution Poster Lightbox Modal */}
+      {showPosterModal && posterUrl && (
+        <div 
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4 animate-in fade-in duration-200"
+          onClick={() => setShowPosterModal(false)}
+        >
+          <div 
+            className="relative max-w-md w-full glass-panel rounded-2xl overflow-hidden shadow-2xl border border-white/10 flex flex-col max-h-[90vh]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="p-3.5 border-b border-white/5 flex items-center justify-between bg-black/40">
+              <div className="flex items-center gap-2 min-w-0 pr-2">
+                <Film size={16} className="text-cyan-400 flex-shrink-0" />
+                <span className="text-sm font-bold text-white truncate">{item?.Name}</span>
+              </div>
+              <button
+                onClick={() => setShowPosterModal(false)}
+                className="p-1 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Poster Image */}
+            <div className="relative w-full max-h-[55vh] bg-black/80 flex items-center justify-center overflow-hidden">
+              <img
+                src={posterUrl}
+                alt={item?.Name}
+                className="max-h-[55vh] w-auto object-contain shadow-2xl"
+              />
+            </div>
+
+            {/* Metadata Footer */}
+            <div className="p-4 flex flex-col gap-2 bg-slate-900/90 text-xs text-gray-300 overflow-y-auto">
+              <div className="flex items-center justify-between">
+                <span className="font-mono text-cyan-300">{item?.ProductionYear || '未知年份'}</span>
+                {item?.CommunityRating && (
+                  <span className="flex items-center gap-1 font-mono text-amber-300 font-bold">
+                    <Star size={12} className="fill-amber-400" />
+                    {item.CommunityRating.toFixed(1)}
+                  </span>
+                )}
+              </div>
+
+              {item?.Overview && (
+                <div className="text-[11px] text-gray-400 leading-relaxed max-h-24 overflow-y-auto">
+                  {item.Overview}
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2 mt-1">
+                <button
+                  onClick={() => {
+                    setShowPosterModal(false);
+                    if (onSkip) onSkip(tileId);
+                  }}
+                  className="px-3 py-1.5 rounded-lg bg-jf-accent hover:bg-cyan-400 text-white text-xs font-medium flex items-center gap-1"
+                >
+                  <SkipForward size={13} />
+                  <span>换下一个视频</span>
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>

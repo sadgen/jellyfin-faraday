@@ -131,6 +131,7 @@ export class JellyfinClient {
     const cleanUrl = this.sanitizeServerUrl(serverUrl);
     const authHeader = `MediaBrowser Client="${this.clientName}", Device="${this.deviceName}", DeviceId="${this.deviceId}", Version="${this.clientVersion}", Token="${apiKey}"`;
 
+    // Fetch user or system info
     const res = await fetch(`${cleanUrl}/Users`, {
       headers: {
         'Accept': 'application/json',
@@ -204,7 +205,7 @@ export class JellyfinClient {
     const query = new URLSearchParams({
       IncludeItemTypes: 'Movie,Video,Episode',
       Recursive: 'true',
-      Fields: 'PrimaryImageAspectRatio,UserData,CommunityRating,DateCreated,RunTimeTicks,ProductionYear,OfficialRating,ParentId',
+      Fields: 'PrimaryImageAspectRatio,UserData,CommunityRating,DateCreated,RunTimeTicks,ProductionYear,OfficialRating,ParentId,Overview,Genres,Tags',
       EnableImages: 'true',
       ...params
     });
@@ -218,6 +219,16 @@ export class JellyfinClient {
     }
 
     return res.json();
+  }
+
+  /**
+   * Fetch items strictly for a specific view/folder
+   */
+  async getItemsByView(viewId, params = {}) {
+    return this.getItems({
+      ParentId: viewId,
+      ...params
+    });
   }
 
   /**
@@ -267,7 +278,6 @@ export class JellyfinClient {
       })
     });
     if (!res.ok) {
-      // Fallback for series/video
       const seriesRes = await fetch(`${this.auth.serverUrl}/Items/RemoteSearch/Series`, {
         method: 'POST',
         headers: this.getAuthHeaders(),
@@ -317,7 +327,7 @@ export class JellyfinClient {
   }
 
   /**
-   * Progressive Media Sync with Instant First Frame (< 300ms) and IndexedDB caching
+   * Progressive Media Sync with View Tagging and IndexedDB caching
    */
   async syncMediaLibrary({ onFirstBatch, onProgress, onComplete }) {
     if (!this.auth.isConfigured) return [];
@@ -329,61 +339,109 @@ export class JellyfinClient {
     }
 
     try {
-      // 2. Fetch first fast batch from network (50 items) if no cache or refreshing
-      const firstBatchLimit = cachedItems.length > 0 ? 500 : 50;
-      const firstRes = await this.getItems({
-        StartIndex: 0,
-        Limit: firstBatchLimit,
-        SortBy: 'DateCreated',
-        SortOrder: 'Descending'
-      });
+      // 2. Fetch User Views first so we can tag each item with its ViewId
+      const views = await this.getUserViews();
+      let allItems = [];
+      let totalCount = 0;
 
-      const total = firstRes.TotalRecordCount || 0;
-      let allItems = firstRes.Items || [];
+      if (views && views.length > 0) {
+        // Sync items per view
+        for (const view of views) {
+          let viewStartIndex = 0;
+          const batchSize = 500;
+          let viewTotal = Infinity;
 
-      // Deliver first frame instantly to unblock UI
-      if (cachedItems.length === 0 && onFirstBatch) {
-        onFirstBatch(allItems, total, false);
-      }
+          while (viewStartIndex < viewTotal) {
+            const res = await this.getItems({
+              ParentId: view.Id,
+              StartIndex: viewStartIndex,
+              Limit: batchSize,
+              SortBy: 'DateCreated',
+              SortOrder: 'Descending'
+            });
 
-      if (onProgress) {
-        onProgress(allItems.length, total);
-      }
+            viewTotal = res.TotalRecordCount || 0;
+            const items = res.Items || [];
+            if (items.length === 0) break;
 
-      // 3. Stream remaining items in larger, lightweight background chunks
-      let startIndex = allItems.length;
-      const batchSize = 500;
+            // Tag each item with ViewId and ViewName
+            const taggedItems = items.map(it => ({
+              ...it,
+              ViewId: view.Id,
+              ViewName: view.Name
+            }));
 
-      while (startIndex < total) {
-        const nextRes = await this.getItems({
-          StartIndex: startIndex,
-          Limit: batchSize,
-          SortBy: 'DateCreated',
-          SortOrder: 'Descending'
-        });
+            allItems = allItems.concat(taggedItems);
+            viewStartIndex += taggedItems.length;
+            totalCount += viewTotal;
 
-        const nextItems = nextRes.Items || [];
-        if (nextItems.length === 0) break;
+            // Deliver first batch to unblock UI
+            if (allItems.length <= batchSize && cachedItems.length === 0 && onFirstBatch) {
+              onFirstBatch(allItems, totalCount, false);
+            }
 
-        allItems = allItems.concat(nextItems);
-        startIndex += nextItems.length;
-
-        if (onProgress) {
-          onProgress(allItems.length, total);
+            if (onProgress) {
+              onProgress(allItems.length, totalCount);
+            }
+          }
         }
+      } else {
+        // Fallback if no views
+        let startIndex = 0;
+        const batchSize = 500;
+        let total = Infinity;
+
+        while (allItems.length < total) {
+          const res = await this.getItems({
+            StartIndex: startIndex,
+            Limit: batchSize,
+            SortBy: 'DateCreated',
+            SortOrder: 'Descending'
+          });
+
+          total = res.TotalRecordCount || 0;
+          const items = res.Items || [];
+          if (items.length === 0) break;
+
+          allItems = allItems.concat(items);
+          startIndex += items.length;
+
+          if (allItems.length <= batchSize && cachedItems.length === 0 && onFirstBatch) {
+            onFirstBatch(allItems, total, false);
+          }
+
+          if (onProgress) {
+            onProgress(allItems.length, total);
+          }
+        }
+        totalCount = total;
       }
 
-      // 4. Save full synced catalog to IndexedDB
-      saveLibraryToCache(allItems);
+      // Deduplicate items by Id just in case
+      const uniqueMap = new Map();
+      allItems.forEach(it => {
+        if (!uniqueMap.has(it.Id)) {
+          uniqueMap.set(it.Id, it);
+        } else {
+          // If already exists, merge ViewIds if multiple
+          const existing = uniqueMap.get(it.Id);
+          if (it.ViewId && (!existing.ViewIds || !existing.ViewIds.includes(it.ViewId))) {
+            existing.ViewIds = (existing.ViewIds || [existing.ViewId]).concat([it.ViewId]);
+          }
+        }
+      });
+      const finalItems = Array.from(uniqueMap.values());
+
+      // Save full synced catalog to IndexedDB
+      saveLibraryToCache(finalItems);
 
       if (onComplete) {
-        onComplete(allItems, total);
+        onComplete(finalItems, finalItems.length);
       }
 
-      return allItems;
+      return finalItems;
     } catch (err) {
       console.warn('Network sync error:', err);
-      // Fallback to cache if network fails
       if (cachedItems.length > 0) {
         if (onComplete) onComplete(cachedItems, cachedItems.length);
         return cachedItems;
@@ -420,9 +478,9 @@ export class JellyfinClient {
   /**
    * Get Poster/Backdrop Image URL
    */
-  getImageUrl(itemId, tag = null, type = 'Primary', maxWidth = 600) {
+  getImageUrl(itemId, tag = null, type = 'Primary', maxWidth = 800) {
     if (!this.auth.serverUrl || !itemId) return '';
-    let url = `${this.auth.serverUrl}/Items/${itemId}/Images/${type}?maxWidth=${maxWidth}&quality=85`;
+    let url = `${this.auth.serverUrl}/Items/${itemId}/Images/${type}?maxWidth=${maxWidth}&quality=90`;
     if (tag) {
       url += `&tag=${tag}`;
     }

@@ -1,9 +1,15 @@
 /**
- * Jellyfin REST API Client (Ultra Lightweight & Optimized)
+ * Jellyfin REST API Client (Ultra Lightweight & Cache-First Architecture)
  * Lightweight, zero-dependency, handles authentication, media streaming, fast metadata sync, and library management.
  */
 
-import { getLibraryFromCache, saveLibraryToCache, clearLibraryCache } from '../utils/mediaCache';
+import { 
+  loadFullCache, 
+  saveFullCache, 
+  updateItemInCache, 
+  deleteItemFromCache, 
+  clearLibraryCache 
+} from '../utils/mediaCache';
 
 const STORAGE_KEY = 'jellyfin_faraday_auth';
 
@@ -131,7 +137,6 @@ export class JellyfinClient {
     const cleanUrl = this.sanitizeServerUrl(serverUrl);
     const authHeader = `MediaBrowser Client="${this.clientName}", Device="${this.deviceName}", DeviceId="${this.deviceId}", Version="${this.clientVersion}", Token="${apiKey}"`;
 
-    // Fetch user or system info
     const res = await fetch(`${cleanUrl}/Users`, {
       headers: {
         'Accept': 'application/json',
@@ -257,6 +262,8 @@ export class JellyfinClient {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.message || `保存元数据失败 (HTTP ${res.status})`);
     }
+    // Update local cache
+    updateItemInCache({ Id: itemId, ...itemData });
     return true;
   }
 
@@ -323,29 +330,29 @@ export class JellyfinClient {
     if (!res.ok) {
       throw new Error(`删除失败，可能没有管理员/写权限 (HTTP ${res.status})`);
     }
+    deleteItemFromCache(itemId);
     return true;
   }
 
   /**
-   * Progressive Media Sync with View Tagging and IndexedDB caching
+   * Instant Load from Cache
    */
-  async syncMediaLibrary({ onFirstBatch, onProgress, onComplete }) {
+  async loadCachedData() {
+    return loadFullCache();
+  }
+
+  /**
+   * Full Sync Media Library & Views (Only runs when no cache or forced by user)
+   */
+  async syncMediaLibrary({ onProgress, onComplete } = {}) {
     if (!this.auth.isConfigured) return [];
 
-    // 1. Check local IndexedDB cache first (instant hit < 10ms!)
-    const cachedItems = await getLibraryFromCache();
-    if (cachedItems && cachedItems.length > 0) {
-      if (onFirstBatch) onFirstBatch(cachedItems, cachedItems.length, true);
-    }
-
     try {
-      // 2. Fetch User Views first so we can tag each item with its ViewId
       const views = await this.getUserViews();
       let allItems = [];
       let totalCount = 0;
 
       if (views && views.length > 0) {
-        // Sync items per view
         for (const view of views) {
           let viewStartIndex = 0;
           const batchSize = 500;
@@ -364,7 +371,6 @@ export class JellyfinClient {
             const items = res.Items || [];
             if (items.length === 0) break;
 
-            // Tag each item with ViewId and ViewName
             const taggedItems = items.map(it => ({
               ...it,
               ViewId: view.Id,
@@ -375,18 +381,12 @@ export class JellyfinClient {
             viewStartIndex += taggedItems.length;
             totalCount += viewTotal;
 
-            // Deliver first batch to unblock UI
-            if (allItems.length <= batchSize && cachedItems.length === 0 && onFirstBatch) {
-              onFirstBatch(allItems, totalCount, false);
-            }
-
             if (onProgress) {
               onProgress(allItems.length, totalCount);
             }
           }
         }
       } else {
-        // Fallback if no views
         let startIndex = 0;
         const batchSize = 500;
         let total = Infinity;
@@ -406,10 +406,6 @@ export class JellyfinClient {
           allItems = allItems.concat(items);
           startIndex += items.length;
 
-          if (allItems.length <= batchSize && cachedItems.length === 0 && onFirstBatch) {
-            onFirstBatch(allItems, total, false);
-          }
-
           if (onProgress) {
             onProgress(allItems.length, total);
           }
@@ -417,13 +413,12 @@ export class JellyfinClient {
         totalCount = total;
       }
 
-      // Deduplicate items by Id just in case
+      // Deduplicate items by Id
       const uniqueMap = new Map();
       allItems.forEach(it => {
         if (!uniqueMap.has(it.Id)) {
           uniqueMap.set(it.Id, it);
         } else {
-          // If already exists, merge ViewIds if multiple
           const existing = uniqueMap.get(it.Id);
           if (it.ViewId && (!existing.ViewIds || !existing.ViewIds.includes(it.ViewId))) {
             existing.ViewIds = (existing.ViewIds || [existing.ViewId]).concat([it.ViewId]);
@@ -432,20 +427,16 @@ export class JellyfinClient {
       });
       const finalItems = Array.from(uniqueMap.values());
 
-      // Save full synced catalog to IndexedDB
-      saveLibraryToCache(finalItems);
+      // Save complete package to local persistent cache
+      await saveFullCache(finalItems, views);
 
       if (onComplete) {
-        onComplete(finalItems, finalItems.length);
+        onComplete(finalItems, views, finalItems.length);
       }
 
-      return finalItems;
+      return { items: finalItems, views };
     } catch (err) {
       console.warn('Network sync error:', err);
-      if (cachedItems.length > 0) {
-        if (onComplete) onComplete(cachedItems, cachedItems.length);
-        return cachedItems;
-      }
       throw err;
     }
   }

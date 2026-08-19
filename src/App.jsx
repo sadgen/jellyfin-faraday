@@ -7,7 +7,7 @@ import SettingsModal from './components/SettingsModal';
 import MetadataEditorModal from './components/MetadataEditorModal';
 import IdentifyModal from './components/IdentifyModal';
 import ErrorBoundary from './components/ErrorBoundary';
-import { Film, Loader2, AlertCircle } from 'lucide-react';
+import { Film, Loader2, AlertCircle, Database } from 'lucide-react';
 
 const STORAGE_KEY_TILES = 'jf_faraday_tile_count';
 const STORAGE_KEY_FILTER = 'jf_faraday_filter_mode';
@@ -29,6 +29,7 @@ export default function App() {
   const [isBackgroundSyncing, setIsBackgroundSyncing] = useState(false);
   const [isLoadingView, setIsLoadingView] = useState(false);
   const [loadProgress, setLoadProgress] = useState({ current: 0, total: 0 });
+  const [lastSyncTime, setLastSyncTime] = useState(null);
   const [errorText, setErrorText] = useState('');
 
   // Kanban Preferences
@@ -66,11 +67,11 @@ export default function App() {
     localStorage.setItem(STORAGE_KEY_FILTER, mode);
   };
 
-  // Sync Media Library and user views
-  const startMediaSync = useCallback(async (isUserManualRefresh = false) => {
+  // Full Network Sync with Jellyfin (Only triggered when cache is empty or user manually refreshes)
+  const runNetworkSync = useCallback(async (isUserManual = false) => {
     if (!jellyfin.auth.isConfigured) return;
 
-    if (isUserManualRefresh) {
+    if (isUserManual) {
       setIsRefreshing(true);
     } else {
       setIsLoadingInitial(true);
@@ -78,25 +79,15 @@ export default function App() {
     setErrorText('');
 
     try {
-      // Load user views (Categories/Libraries)
-      const views = await jellyfin.getUserViews();
-      setUserViews(views || []);
-
       await jellyfin.syncMediaLibrary({
-        onFirstBatch: (batchItems, total, isFromCache) => {
-          setAllMediaItems(batchItems);
-          setIsLoadingInitial(false);
-          if (!isFromCache) {
-            setIsBackgroundSyncing(true);
-            setLoadProgress({ current: batchItems.length, total });
-          }
-        },
         onProgress: (current, total) => {
           setIsBackgroundSyncing(current < total);
           setLoadProgress({ current, total });
         },
-        onComplete: (fullItems, total) => {
-          setAllMediaItems(fullItems);
+        onComplete: (items, views, total) => {
+          setAllMediaItems(items);
+          setUserViews(views);
+          setLastSyncTime(Date.now());
           setIsLoadingInitial(false);
           setIsBackgroundSyncing(false);
           setIsRefreshing(false);
@@ -104,20 +95,39 @@ export default function App() {
         }
       });
     } catch (err) {
-      console.error('Failed to sync media library:', err);
-      setErrorText(err.message || '获取媒体库失败，请检查服务器网络或凭据');
+      console.error('Failed to sync with Jellyfin:', err);
+      setErrorText(err.message || '网络同步失败，请检查服务器连接');
     } finally {
       setIsLoadingInitial(false);
       setIsRefreshing(false);
     }
   }, []);
 
-  // Initial load on mount
+  // Cache-First Startup (< 5ms instant load without hitting the network on reload!)
   useEffect(() => {
-    if (jellyfin.auth.isConfigured) {
-      startMediaSync(false);
-    }
-  }, [startMediaSync]);
+    if (!jellyfin.auth.isConfigured) return;
+
+    let isMounted = true;
+
+    jellyfin.loadCachedData().then(cache => {
+      if (!isMounted) return;
+
+      if (cache.items && cache.items.length > 0) {
+        // INSTANT CACHE HIT: Render immediately without any network wait!
+        setAllMediaItems(cache.items);
+        setUserViews(cache.views || []);
+        setLastSyncTime(cache.lastSyncTime);
+        setIsLoadingInitial(false);
+      } else {
+        // Cache empty (first time login) -> run network sync
+        runNetworkSync(false);
+      }
+    }).catch(() => {
+      if (isMounted) runNetworkSync(false);
+    });
+
+    return () => { isMounted = false; };
+  }, [runNetworkSync]);
 
   // On-demand fetch if a specific library view has 0 items loaded in local state
   const handleSelectView = useCallback(async (viewId) => {
@@ -258,13 +268,14 @@ export default function App() {
   const handleLoginSuccess = () => {
     setIsAuthenticated(true);
     setIsLoginModalOpen(false);
-    startMediaSync(false);
+    runNetworkSync(false);
   };
 
   // Logout handler
   const handleLogout = () => {
     setIsAuthenticated(false);
     setAllMediaItems([]);
+    setUserViews([]);
     setIsLoginModalOpen(true);
   };
 
@@ -272,7 +283,7 @@ export default function App() {
     <ErrorBoundary>
       <div className="relative w-screen h-screen bg-[#080b11] text-gray-100 overflow-hidden select-none">
         
-        {/* Full-screen Loading Overlay (Initial connect only) */}
+        {/* Full-screen Loading Overlay (Initial first-time connect ONLY) */}
         {isLoadingInitial && allMediaItems.length === 0 && (
           <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-black/90 backdrop-blur-md gap-4">
             <div className="relative flex items-center justify-center">
@@ -280,11 +291,11 @@ export default function App() {
               <Film className="absolute text-cyan-400" size={24} />
             </div>
             <div className="flex flex-col items-center gap-1.5 text-center">
-              <div className="text-sm font-semibold text-white">正在极速建立 Jellyfin 媒体索引...</div>
+              <div className="text-sm font-semibold text-white">正在首次同步 Jellyfin 媒体库并建立本地缓存...</div>
               <div className="text-xs font-mono text-cyan-300/80">
                 {loadProgress.total > 0
-                  ? `已同步 ${loadProgress.current} / ${loadProgress.total} 部影片`
-                  : '正在连接服务器...'}
+                  ? `已缓存 ${loadProgress.current} / ${loadProgress.total} 部影片`
+                  : '正在向服务器拉取媒体索引...'}
               </div>
             </div>
           </div>
@@ -323,7 +334,7 @@ export default function App() {
             onDeleteItem={handleDeleteItem}
             onOpenMetadataEditor={(item) => setEditingItem(item)}
             onOpenIdentify={(item) => setIdentifyingItem(item)}
-            onRefreshLibrary={() => startMediaSync(true)}
+            onRefreshLibrary={() => runNetworkSync(true)}
             isRefreshing={isRefreshing || isBackgroundSyncing || isLoadingView}
           />
         ) : (
@@ -338,7 +349,7 @@ export default function App() {
             playbackSpeed={playbackSpeed}
             onPlaybackSpeedChange={setPlaybackSpeed}
             onOpenSettings={() => setIsSettingsModalOpen(true)}
-            onRefreshLibrary={() => startMediaSync(true)}
+            onRefreshLibrary={() => runNetworkSync(true)}
             isRefreshing={isRefreshing || isBackgroundSyncing || isLoadingView}
             onOpenLibraryView={() => setViewMode('library')}
             activeScopeName={activeScopeName}
@@ -357,9 +368,10 @@ export default function App() {
           isOpen={isSettingsModalOpen}
           onClose={() => setIsSettingsModalOpen(false)}
           onLogout={handleLogout}
-          onRefreshLibrary={() => startMediaSync(true)}
+          onRefreshLibrary={() => runNetworkSync(true)}
           isRefreshing={isRefreshing || isBackgroundSyncing || isLoadingView}
           totalItemsCount={allMediaItems.length}
+          lastSyncTime={lastSyncTime}
         />
 
         {/* Metadata Editor Modal */}

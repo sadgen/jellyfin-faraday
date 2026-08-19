@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import Hls from 'hls.js';
 import { jellyfin } from '../api/jellyfinClient';
 import { useExternalPlayer } from '../hooks/useExternalPlayer';
+import TrickplayScrubberThumbnail from './TrickplayScrubberThumbnail';
 import { 
   Play, Pause, SkipForward, Volume2, VolumeX, Maximize, 
   Star, Eye, EyeOff, ExternalLink, Zap, Image as ImageIcon,
@@ -19,6 +20,7 @@ export default function VideoTile({
   const videoRef = useRef(null);
   const hlsRef = useRef(null);
   const containerRef = useRef(null);
+  const scrubberRef = useRef(null);
 
   const [isPlaying, setIsPlaying] = useState(true);
   const [isTileMuted, setIsTileMuted] = useState(isGlobalMuted);
@@ -29,9 +31,16 @@ export default function VideoTile({
   const [showPlayerMenu, setShowPlayerMenu] = useState(false);
   const [showPosterModal, setShowPosterModal] = useState(false);
   const [showPinnedPoster, setShowPinnedPoster] = useState(false);
+  
+  // Progress & Duration
   const [progress, setProgress] = useState(0);
   const [currentTimeText, setCurrentTimeText] = useState('00:00');
   const [durationText, setDurationText] = useState('00:00');
+
+  // Trickplay Hover State
+  const [hoverScrubberTime, setHoverScrubberTime] = useState(null);
+  const [hoverScrubberPercent, setHoverScrubberPercent] = useState(0);
+  const [scrubberWidth, setScrubberWidth] = useState(300);
 
   const { launchPlayer } = useExternalPlayer();
 
@@ -61,11 +70,11 @@ export default function VideoTile({
     setHasError(false);
     setErrorMessage('');
     setProgress(0);
+    setHoverScrubberTime(null);
 
     const videoEl = videoRef.current;
     if (!videoEl) return;
 
-    // Clean up previous HLS instance
     if (hlsRef.current) {
       hlsRef.current.destroy();
       hlsRef.current = null;
@@ -161,6 +170,21 @@ export default function VideoTile({
     const rect = e.currentTarget.getBoundingClientRect();
     const pos = (e.clientX - rect.left) / rect.width;
     video.currentTime = pos * video.duration;
+  };
+
+  // Trickplay Hover Scrubber Handler
+  const handleScrubberMouseMove = (e) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const pos = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    const duration = videoRef.current?.duration || (item?.RunTimeTicks ? item.RunTimeTicks / 10000000 : 0);
+    
+    setHoverScrubberTime(duration * pos);
+    setHoverScrubberPercent(pos);
+    setScrubberWidth(rect.width);
+  };
+
+  const handleScrubberMouseLeave = () => {
+    setHoverScrubberTime(null);
   };
 
   const togglePlay = (e) => {
@@ -470,22 +494,36 @@ export default function VideoTile({
         </button>
       </div>
 
-      {/* Bottom Floating Scrubber & Info Bar with Crisp Poster Preview */}
+      {/* Bottom Floating Scrubber & Info Bar with Crisp Poster Preview & Trickplay */}
       <div 
         className={`absolute bottom-0 inset-x-0 z-20 bg-gradient-to-t from-black/95 via-black/80 to-transparent p-3 pt-6 transition-all duration-300 ${
           isHovered ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2 pointer-events-none'
         }`}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Progress Bar (Clickable) */}
-        <div 
-          className="w-full h-1.5 bg-white/20 hover:h-2.5 rounded-full cursor-pointer transition-all relative overflow-hidden mb-2.5"
-          onClick={handleSeek}
-        >
-          <div 
-            className="absolute top-0 left-0 bottom-0 bg-jf-accent rounded-full transition-all duration-100"
-            style={{ width: `${progress}%` }}
+        {/* Progress Bar Container with Trickplay Scrubber Floating Preview */}
+        <div className="relative w-full mb-2.5">
+          {/* Trickplay Hover Floating Preview Thumbnail */}
+          <TrickplayScrubberThumbnail
+            item={item}
+            hoverTime={hoverScrubberTime}
+            hoverPercent={hoverScrubberPercent}
+            containerWidth={scrubberWidth}
           />
+
+          {/* Clickable Progress Bar */}
+          <div 
+            ref={scrubberRef}
+            className="w-full h-1.5 bg-white/20 hover:h-2.5 rounded-full cursor-pointer transition-all relative overflow-hidden"
+            onClick={handleSeek}
+            onMouseMove={handleScrubberMouseMove}
+            onMouseLeave={handleScrubberMouseLeave}
+          >
+            <div 
+              className="absolute top-0 left-0 bottom-0 bg-jf-accent rounded-full transition-all duration-100"
+              style={{ width: `${progress}%` }}
+            />
+          </div>
         </div>
 
         <div className="flex items-center justify-between text-xs text-gray-300 gap-2">

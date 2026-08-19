@@ -1,16 +1,19 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { jellyfin } from '../api/jellyfinClient';
+import { getTrickplayStyle, getTrickplayInfo } from '../utils/trickplay';
+import { detectDuplicateMedia } from '../utils/duplicateChecker';
 import { 
   Play, Shuffle, Star, Eye, EyeOff, Search, 
   Edit3, Sparkles, Trash2, Filter, Folder, Film, 
-  ArrowUpDown, Check, X, RefreshCw
+  ArrowUpDown, Check, X, RefreshCw, Copy, Layers
 } from 'lucide-react';
 
-const STATUS_FILTERS = [
+const BASE_STATUS_FILTERS = [
   { id: 'all', label: '全部' },
   { id: 'favorites', label: '⭐ 仅最爱' },
   { id: 'unplayed', label: '👀 仅未看' },
   { id: 'played', label: '✅ 仅已看' },
+  { id: 'duplicates', label: '🔴 仅重复项' }
 ];
 
 const SORT_OPTIONS = [
@@ -20,6 +23,203 @@ const SORT_OPTIONS = [
   { id: 'playcount_asc', label: '最少播放' },
   { id: 'playcount_desc', label: '最多播放' },
 ];
+
+/**
+ * Individual Movie Card with Card-Hover Trickplay Animation
+ */
+function MovieCard({
+  item,
+  isDuplicate,
+  onPlay,
+  onToggleFavorite,
+  onTogglePlayed,
+  onOpenMetadataEditor,
+  onOpenIdentify,
+  onDelete
+}) {
+  const [isHovered, setIsHovered] = useState(false);
+  const [trickplayTime, setTrickplayTime] = useState(null);
+  const hoverTimerRef = useRef(null);
+  const animTimerRef = useRef(null);
+
+  const posterUrl = jellyfin.getImageUrl(item.Id, item.ImageTags?.Primary, 'Primary', 400);
+  const isFavorite = !!item.UserData?.IsFavorite;
+  const isPlayed = !!item.UserData?.Played;
+  const playCount = item.UserData?.PlayCount || 0;
+
+  // Trickplay Animation on Hover
+  useEffect(() => {
+    if (isHovered) {
+      // Start Trickplay animation after 350ms hover delay
+      hoverTimerRef.current = setTimeout(() => {
+        const tp = getTrickplayInfo(item);
+        const duration = item.RunTimeTicks ? item.RunTimeTicks / 10000000 : 7200;
+        let currentTime = 0;
+        const step = Math.max(15, duration / 50); // Step through ~50 frames
+
+        setTrickplayTime(currentTime);
+
+        animTimerRef.current = setInterval(() => {
+          currentTime = (currentTime + step) % duration;
+          setTrickplayTime(currentTime);
+        }, 300); // 3.3 fps
+      }, 350);
+    } else {
+      if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+      if (animTimerRef.current) clearInterval(animTimerRef.current);
+      setTrickplayTime(null);
+    }
+
+    return () => {
+      if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+      if (animTimerRef.current) clearInterval(animTimerRef.current);
+    };
+  }, [isHovered, item]);
+
+  const tpStyle = useMemo(() => {
+    if (trickplayTime === null) return null;
+    return getTrickplayStyle(item, trickplayTime);
+  }, [item, trickplayTime]);
+
+  return (
+    <div
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+      className={`group relative flex flex-col bg-slate-900/40 rounded-xl overflow-hidden border transition-all duration-300 transform hover:-translate-y-1 ${
+        isDuplicate 
+          ? 'border-red-500/60 shadow-lg shadow-red-500/10' 
+          : 'border-white/5 hover:border-cyan-500/40 hover:shadow-xl hover:shadow-cyan-500/10'
+      }`}
+    >
+      {/* Poster Image Container */}
+      <div className="relative w-full aspect-[2/3] bg-black/60 overflow-hidden">
+        {/* Static Poster */}
+        {posterUrl ? (
+          <img
+            src={posterUrl}
+            alt={item.Name}
+            loading="lazy"
+            className={`w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 ${
+              tpStyle ? 'opacity-0' : 'opacity-100'
+            }`}
+          />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center text-gray-600">
+            <Film size={32} />
+          </div>
+        )}
+
+        {/* Dynamic Trickplay Frame Animation on Hover */}
+        {tpStyle && (
+          <div 
+            className="absolute inset-0 w-full h-full animate-in fade-in duration-200"
+            style={tpStyle}
+          />
+        )}
+
+        {/* Duplicate Badge (Top-Left) */}
+        {isDuplicate && (
+          <div className="absolute top-2 left-2 flex items-center gap-1 px-1.5 py-0.5 rounded bg-red-600/90 backdrop-blur-md border border-red-400/50 text-[10px] font-mono font-bold text-white shadow-lg animate-pulse z-10">
+            <Layers size={10} />
+            <span>重复项</span>
+          </div>
+        )}
+
+        {/* Play Count Badge (Top-Left if not duplicate) */}
+        {!isDuplicate && (
+          <div className="absolute top-2 left-2 flex items-center gap-1 px-1.5 py-0.5 rounded bg-black/60 backdrop-blur-md border border-white/10 text-[10px] font-mono text-cyan-300 z-10">
+            <Eye size={11} className="text-cyan-400" />
+            <span>{playCount}</span>
+          </div>
+        )}
+
+        {/* Community Rating (Top-Right) */}
+        {item.CommunityRating && (
+          <div className="absolute top-2 right-2 flex items-center gap-1 px-1.5 py-0.5 rounded bg-black/60 backdrop-blur-md border border-white/10 text-[10px] font-mono text-amber-300 z-10">
+            <Star size={10} className="fill-amber-400 text-amber-400" />
+            <span>{item.CommunityRating.toFixed(1)}</span>
+          </div>
+        )}
+
+        {/* Hover Quick Actions Overlay */}
+        <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/50 to-black/30 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex flex-col justify-between p-2.5 z-20">
+          
+          {/* Top Action Row */}
+          <div className="flex justify-end gap-1.5">
+            <button
+              onClick={(e) => { e.stopPropagation(); onToggleFavorite(item); }}
+              className={`p-1.5 rounded-lg backdrop-blur-md border transition ${
+                isFavorite 
+                  ? 'bg-amber-500/20 border-amber-500/40 text-amber-400' 
+                  : 'bg-black/60 border-white/10 text-gray-300 hover:text-amber-400'
+              }`}
+              title={isFavorite ? '取消收藏' : '加入收藏'}
+            >
+              <Star size={13} className={isFavorite ? 'fill-amber-400' : ''} />
+            </button>
+
+            <button
+              onClick={(e) => { e.stopPropagation(); onTogglePlayed(item); }}
+              className="p-1.5 rounded-lg bg-black/60 hover:bg-black/80 backdrop-blur-md border border-white/10 text-gray-300 hover:text-cyan-400 transition"
+              title={isPlayed ? '标记未播' : '标记已播'}
+            >
+              {isPlayed ? <EyeOff size={13} /> : <Eye size={13} />}
+            </button>
+          </div>
+
+          {/* Center Play Button */}
+          <div className="flex justify-center">
+            <button
+              onClick={() => onPlay(item)}
+              className="w-11 h-11 rounded-full bg-jf-accent hover:bg-cyan-400 text-white flex items-center justify-center shadow-lg shadow-cyan-500/40 transition transform hover:scale-110"
+              title="开始播放"
+            >
+              <Play size={18} className="ml-0.5 fill-white" />
+            </button>
+          </div>
+
+          {/* Bottom Management Row */}
+          <div className="flex justify-between items-center gap-1">
+            <button
+              onClick={(e) => { e.stopPropagation(); onOpenMetadataEditor(item); }}
+              className="p-1.5 rounded-lg bg-black/60 hover:bg-white/20 border border-white/10 text-gray-300 hover:text-white transition"
+              title="编辑元数据"
+            >
+              <Edit3 size={13} />
+            </button>
+
+            <button
+              onClick={(e) => { e.stopPropagation(); onOpenIdentify(item); }}
+              className="p-1.5 rounded-lg bg-black/60 hover:bg-white/20 border border-white/10 text-gray-300 hover:text-cyan-300 transition"
+              title="识别/重新刮削"
+            >
+              <Sparkles size={13} />
+            </button>
+
+            <button
+              onClick={(e) => { e.stopPropagation(); onDelete(item); }}
+              className="p-1.5 rounded-lg bg-black/60 hover:bg-red-900/60 border border-white/10 text-gray-400 hover:text-red-400 transition"
+              title="删除媒体"
+            >
+              <Trash2 size={13} />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Title & Info */}
+      <div className="p-2 flex flex-col gap-0.5 min-w-0">
+        <div className="text-xs font-medium text-white truncate group-hover:text-cyan-300 transition" title={item.Name}>
+          {item.Name}
+        </div>
+        <div className="text-[10px] text-gray-400 flex items-center justify-between">
+          <span>{item.ProductionYear || '未知年份'}</span>
+          {item.OfficialRating && <span className="px-1 bg-white/5 rounded">{item.OfficialRating}</span>}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function LibraryView({
   items = [],
@@ -41,9 +241,21 @@ export default function LibraryView({
   onRefreshLibrary,
   isRefreshing
 }) {
+  // Duplicate detection
+  const { duplicateItemIds, duplicateCount } = useMemo(() => {
+    return detectDuplicateMedia(items);
+  }, [items]);
+
+  // Filtered items (incorporating duplicates filter)
+  const displayItems = useMemo(() => {
+    if (statusFilter === 'duplicates') {
+      return items.filter(it => duplicateItemIds.has(it.Id));
+    }
+    return items;
+  }, [items, statusFilter, duplicateItemIds]);
+
   // Toggle Favorite
-  const handleToggleFavorite = async (e, item) => {
-    e.stopPropagation();
+  const handleToggleFavorite = async (item) => {
     const nextFav = !item.UserData?.IsFavorite;
     if (onUpdateItem) {
       onUpdateItem({
@@ -59,8 +271,7 @@ export default function LibraryView({
   };
 
   // Toggle Played Status
-  const handleTogglePlayed = async (e, item) => {
-    e.stopPropagation();
+  const handleTogglePlayed = async (item) => {
     const nextPlayed = !item.UserData?.Played;
     const playCount = nextPlayed ? (item.UserData?.PlayCount || 0) + 1 : Math.max(0, (item.UserData?.PlayCount || 1) - 1);
     if (onUpdateItem) {
@@ -77,8 +288,7 @@ export default function LibraryView({
   };
 
   // Delete Item
-  const handleDelete = async (e, item) => {
-    e.stopPropagation();
+  const handleDelete = async (item) => {
     if (!confirm(`确定要从媒体库和磁盘中永久删除「${item.Name}」吗？`)) return;
     try {
       await jellyfin.deleteItem(item.Id);
@@ -133,7 +343,7 @@ export default function LibraryView({
             title="以多视口随机看板播放当前筛选出的媒体"
           >
             <Shuffle size={14} />
-            <span>开启随机看板 ({items.length} 部)</span>
+            <span>开启随机看板 ({displayItems.length} 部)</span>
           </button>
         </div>
 
@@ -160,21 +370,24 @@ export default function LibraryView({
             )}
           </div>
 
-          {/* Status Filters */}
+          {/* Status Filters (including Duplicates) */}
           <div className="flex items-center bg-black/40 p-1 rounded-xl border border-white/5 gap-0.5">
-            {STATUS_FILTERS.map(f => (
-              <button
-                key={f.id}
-                onClick={() => onStatusFilterChange(f.id)}
-                className={`px-2.5 py-1 rounded-lg transition ${
-                  statusFilter === f.id
-                    ? 'bg-slate-700 text-cyan-300 font-medium shadow'
-                    : 'text-gray-400 hover:text-white'
-                }`}
-              >
-                {f.label}
-              </button>
-            ))}
+            {BASE_STATUS_FILTERS.map(f => {
+              const label = f.id === 'duplicates' && duplicateCount > 0 ? `🔴 重复项 (${duplicateCount})` : f.label;
+              return (
+                <button
+                  key={f.id}
+                  onClick={() => onStatusFilterChange(f.id)}
+                  className={`px-2.5 py-1 rounded-lg transition ${
+                    statusFilter === f.id
+                      ? 'bg-slate-700 text-cyan-300 font-medium shadow'
+                      : 'text-gray-400 hover:text-white'
+                  }`}
+                >
+                  {label}
+                </button>
+              );
+            })}
           </div>
 
           {/* Sort Selector */}
@@ -198,7 +411,7 @@ export default function LibraryView({
             onClick={onRefreshLibrary}
             disabled={isRefreshing}
             className="p-2 rounded-xl bg-black/40 hover:bg-white/10 border border-white/5 text-gray-400 hover:text-white transition disabled:opacity-50"
-            title="同步媒体库"
+            title="从服务器全量同步媒体库"
           >
             <RefreshCw size={14} className={isRefreshing ? 'animate-spin text-cyan-400' : ''} />
           </button>
@@ -207,132 +420,26 @@ export default function LibraryView({
 
       {/* Media Cards Grid */}
       <div className="flex-1 overflow-y-auto p-4 pb-20">
-        {items.length === 0 ? (
+        {displayItems.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center text-gray-500 gap-3">
             <Film size={48} className="text-gray-700 animate-pulse" />
             <div className="text-sm">没有找到符合当前筛选条件的媒体</div>
           </div>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-3.5">
-            {items.map(item => {
-              const posterUrl = jellyfin.getImageUrl(item.Id, item.ImageTags?.Primary, 'Primary', 400);
-              const isFavorite = !!item.UserData?.IsFavorite;
-              const isPlayed = !!item.UserData?.Played;
-              const playCount = item.UserData?.PlayCount || 0;
-
-              return (
-                <div
-                  key={item.Id}
-                  className="group relative flex flex-col bg-slate-900/40 rounded-xl overflow-hidden border border-white/5 hover:border-cyan-500/40 hover:shadow-xl hover:shadow-cyan-500/10 transition-all duration-300 transform hover:-translate-y-1"
-                >
-                  {/* Poster Image Container */}
-                  <div className="relative w-full aspect-[2/3] bg-black/60 overflow-hidden">
-                    {posterUrl ? (
-                      <img
-                        src={posterUrl}
-                        alt={item.Name}
-                        loading="lazy"
-                        className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                      />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center text-gray-600">
-                        <Film size={32} />
-                      </div>
-                    )}
-
-                    {/* Play Count Badge (Top-Left) */}
-                    <div className="absolute top-2 left-2 flex items-center gap-1 px-1.5 py-0.5 rounded bg-black/60 backdrop-blur-md border border-white/10 text-[10px] font-mono text-cyan-300">
-                      <Eye size={11} className="text-cyan-400" />
-                      <span>{playCount}</span>
-                    </div>
-
-                    {/* Community Rating (Top-Right) */}
-                    {item.CommunityRating && (
-                      <div className="absolute top-2 right-2 flex items-center gap-1 px-1.5 py-0.5 rounded bg-black/60 backdrop-blur-md border border-white/10 text-[10px] font-mono text-amber-300">
-                        <Star size={10} className="fill-amber-400 text-amber-400" />
-                        <span>{item.CommunityRating.toFixed(1)}</span>
-                      </div>
-                    )}
-
-                    {/* Hover Quick Actions Overlay */}
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/50 to-black/30 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex flex-col justify-between p-2.5">
-                      
-                      {/* Top Action Row */}
-                      <div className="flex justify-end gap-1.5">
-                        <button
-                          onClick={(e) => handleToggleFavorite(e, item)}
-                          className={`p-1.5 rounded-lg backdrop-blur-md border transition ${
-                            isFavorite 
-                              ? 'bg-amber-500/20 border-amber-500/40 text-amber-400' 
-                              : 'bg-black/60 border-white/10 text-gray-300 hover:text-amber-400'
-                          }`}
-                          title={isFavorite ? '取消收藏' : '加入收藏'}
-                        >
-                          <Star size={13} className={isFavorite ? 'fill-amber-400' : ''} />
-                        </button>
-
-                        <button
-                          onClick={(e) => handleTogglePlayed(e, item)}
-                          className="p-1.5 rounded-lg bg-black/60 hover:bg-black/80 backdrop-blur-md border border-white/10 text-gray-300 hover:text-cyan-400 transition"
-                          title={isPlayed ? '标记未播' : '标记已播'}
-                        >
-                          {isPlayed ? <EyeOff size={13} /> : <Eye size={13} />}
-                        </button>
-                      </div>
-
-                      {/* Center Play Button */}
-                      <div className="flex justify-center">
-                        <button
-                          onClick={() => onPlaySingleItem(item)}
-                          className="w-11 h-11 rounded-full bg-jf-accent hover:bg-cyan-400 text-white flex items-center justify-center shadow-lg shadow-cyan-500/40 transition transform hover:scale-110"
-                          title="开始播放"
-                        >
-                          <Play size={18} className="ml-0.5 fill-white" />
-                        </button>
-                      </div>
-
-                      {/* Bottom Management Row */}
-                      <div className="flex justify-between items-center gap-1">
-                        <button
-                          onClick={(e) => { e.stopPropagation(); onOpenMetadataEditor(item); }}
-                          className="p-1.5 rounded-lg bg-black/60 hover:bg-white/20 border border-white/10 text-gray-300 hover:text-white transition"
-                          title="编辑元数据"
-                        >
-                          <Edit3 size={13} />
-                        </button>
-
-                        <button
-                          onClick={(e) => { e.stopPropagation(); onOpenIdentify(item); }}
-                          className="p-1.5 rounded-lg bg-black/60 hover:bg-white/20 border border-white/10 text-gray-300 hover:text-cyan-300 transition"
-                          title="识别/重新刮削"
-                        >
-                          <Sparkles size={13} />
-                        </button>
-
-                        <button
-                          onClick={(e) => handleDelete(e, item)}
-                          className="p-1.5 rounded-lg bg-black/60 hover:bg-red-900/60 border border-white/10 text-gray-400 hover:text-red-400 transition"
-                          title="删除媒体"
-                        >
-                          <Trash2 size={13} />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Title & Info */}
-                  <div className="p-2 flex flex-col gap-0.5 min-w-0">
-                    <div className="text-xs font-medium text-white truncate group-hover:text-cyan-300 transition" title={item.Name}>
-                      {item.Name}
-                    </div>
-                    <div className="text-[10px] text-gray-400 flex items-center justify-between">
-                      <span>{item.ProductionYear || '未知年份'}</span>
-                      {item.OfficialRating && <span className="px-1 bg-white/5 rounded">{item.OfficialRating}</span>}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
+            {displayItems.map(item => (
+              <MovieCard
+                key={item.Id}
+                item={item}
+                isDuplicate={duplicateItemIds.has(item.Id)}
+                onPlay={onPlaySingleItem}
+                onToggleFavorite={handleToggleFavorite}
+                onTogglePlayed={handleTogglePlayed}
+                onOpenMetadataEditor={onOpenMetadataEditor}
+                onOpenIdentify={onOpenIdentify}
+                onDelete={handleDelete}
+              />
+            ))}
           </div>
         )}
       </div>

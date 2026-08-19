@@ -1,6 +1,6 @@
 /**
- * Jellyfin REST API Client (Official Web Client-Style Infinite Stream Architecture)
- * High-performance, server-side paginated queries, instant startup (< 50ms), and infinite scrolling.
+ * Jellyfin REST API Client (Official Web Client-Style Architecture)
+ * High-performance, supports all media views, genres, persons, collections, server-side and bulk queries.
  */
 
 const STORAGE_KEY = 'jellyfin_faraday_auth';
@@ -10,7 +10,7 @@ export class JellyfinClient {
     this.auth = this.loadStoredAuth();
     this.deviceId = this.getOrCreateDeviceId();
     this.clientName = 'JellyfinFaraday';
-    this.clientVersion = '0.1.0';
+    this.clientVersion = '0.2.0';
     this.deviceName = 'Web Browser';
   }
 
@@ -193,27 +193,33 @@ export class JellyfinClient {
   }
 
   /**
-   * Server-side Paginated Query (Official Jellyfin Web Client Pattern)
-   * Super-fast (< 50ms): Server executes index query and returns requested slice only.
+   * Server-side Paginated / Bulk Query (Official Jellyfin Web Client Pattern)
+   * High performance: Server executes indexed query with lightweight fields.
    */
   async queryMediaPage({
     parentId = 'all',
     searchTerm = '',
     statusFilter = 'all',
     sortMethod = 'date_desc',
+    genre = '',
+    year = '',
+    nameStartsWithOrGreater = '',
     startIndex = 0,
-    limit = 100
+    limit = 0 // 0 means fetch all items at once!
   } = {}) {
     if (!this.auth.isConfigured) return { Items: [], TotalRecordCount: 0 };
 
     const query = new URLSearchParams({
       IncludeItemTypes: 'Movie,Video,Episode',
       Recursive: 'true',
-      Fields: 'PrimaryImageAspectRatio,UserData,CommunityRating,DateCreated,RunTimeTicks,ProductionYear,OfficialRating,ParentId,ImageTags,Trickplay',
+      Fields: 'PrimaryImageAspectRatio,UserData,CommunityRating,DateCreated,RunTimeTicks,ProductionYear,OfficialRating,ParentId,ImageTags,Trickplay,Genres,Overview',
       EnableImages: 'true',
-      StartIndex: startIndex.toString(),
-      Limit: limit.toString()
+      StartIndex: startIndex.toString()
     });
+
+    if (limit > 0) {
+      query.set('Limit', limit.toString());
+    }
 
     if (parentId && parentId !== 'all') {
       query.set('ParentId', parentId);
@@ -221,6 +227,22 @@ export class JellyfinClient {
 
     if (searchTerm && searchTerm.trim()) {
       query.set('SearchTerm', searchTerm.trim());
+    }
+
+    if (genre) {
+      query.set('Genres', genre);
+    }
+
+    if (year) {
+      query.set('Years', year.toString());
+    }
+
+    if (nameStartsWithOrGreater) {
+      if (nameStartsWithOrGreater === '#') {
+        query.set('NameLessThan', 'A');
+      } else {
+        query.set('NameStartsWith', nameStartsWithOrGreater);
+      }
     }
 
     // Status Filters
@@ -238,9 +260,17 @@ export class JellyfinClient {
         query.set('SortBy', 'SortName');
         query.set('SortOrder', 'Ascending');
         break;
+      case 'name_desc':
+        query.set('SortBy', 'SortName');
+        query.set('SortOrder', 'Descending');
+        break;
       case 'rating_desc':
         query.set('SortBy', 'CommunityRating,SortName');
         query.set('SortOrder', 'Descending');
+        break;
+      case 'rating_asc':
+        query.set('SortBy', 'CommunityRating,SortName');
+        query.set('SortOrder', 'Ascending');
         break;
       case 'playcount_asc':
         query.set('SortBy', 'PlayCount,SortName');
@@ -250,8 +280,24 @@ export class JellyfinClient {
         query.set('SortBy', 'PlayCount,SortName');
         query.set('SortOrder', 'Descending');
         break;
+      case 'runtime_desc':
+        query.set('SortBy', 'Runtime,SortName');
+        query.set('SortOrder', 'Descending');
+        break;
+      case 'year_desc':
+        query.set('SortBy', 'ProductionYear,SortName');
+        query.set('SortOrder', 'Descending');
+        break;
+      case 'year_asc':
+        query.set('SortBy', 'ProductionYear,SortName');
+        query.set('SortOrder', 'Ascending');
+        break;
       case 'random':
         query.set('SortBy', 'Random');
+        break;
+      case 'date_asc':
+        query.set('SortBy', 'DateCreated,SortName');
+        query.set('SortOrder', 'Ascending');
         break;
       case 'date_desc':
       default:
@@ -269,6 +315,83 @@ export class JellyfinClient {
     }
 
     return res.json();
+  }
+
+  /**
+   * Fetch all genres for current library or global
+   */
+  async getGenres(parentId = 'all') {
+    if (!this.auth.isConfigured) return [];
+    try {
+      const query = new URLSearchParams({
+        userId: this.auth.userId,
+        Recursive: 'true',
+        IncludeItemTypes: 'Movie,Video,Episode'
+      });
+      if (parentId && parentId !== 'all') {
+        query.set('parentId', parentId);
+      }
+      const res = await fetch(`${this.auth.serverUrl}/Genres?${query.toString()}`, {
+        headers: this.getAuthHeaders()
+      });
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data.Items || [];
+    } catch (err) {
+      console.warn('Failed to fetch genres:', err);
+      return [];
+    }
+  }
+
+  /**
+   * Fetch all persons (Actors/Directors) for current library
+   */
+  async getPersons(parentId = 'all', limit = 100) {
+    if (!this.auth.isConfigured) return [];
+    try {
+      const query = new URLSearchParams({
+        userId: this.auth.userId,
+        Recursive: 'true',
+        Limit: limit.toString()
+      });
+      if (parentId && parentId !== 'all') {
+        query.set('parentId', parentId);
+      }
+      const res = await fetch(`${this.auth.serverUrl}/Persons?${query.toString()}`, {
+        headers: this.getAuthHeaders()
+      });
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data.Items || [];
+    } catch (err) {
+      console.warn('Failed to fetch persons:', err);
+      return [];
+    }
+  }
+
+  /**
+   * Fetch collections (BoxSets)
+   */
+  async getCollections(parentId = 'all') {
+    if (!this.auth.isConfigured) return [];
+    try {
+      const query = new URLSearchParams({
+        IncludeItemTypes: 'BoxSet',
+        Recursive: 'true'
+      });
+      if (parentId && parentId !== 'all') {
+        query.set('ParentId', parentId);
+      }
+      const res = await fetch(`${this.auth.serverUrl}/Users/${this.auth.userId}/Items?${query.toString()}`, {
+        headers: this.getAuthHeaders()
+      });
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data.Items || [];
+    } catch (err) {
+      console.warn('Failed to fetch collections:', err);
+      return [];
+    }
   }
 
   /**
@@ -331,6 +454,18 @@ export class JellyfinClient {
       throw new Error(err.message || `保存元数据失败 (HTTP ${res.status})`);
     }
     return true;
+  }
+
+  /**
+   * Trigger refresh metadata on a single item
+   */
+  async refreshItemMetadata(itemId) {
+    if (!this.auth.isConfigured || !itemId) return false;
+    const res = await fetch(`${this.auth.serverUrl}/Items/${itemId}/Refresh?Recursive=true&MetadataRefreshMode=Full&ImageRefreshMode=Full&ReplaceAllMetadata=true&ReplaceAllImages=false`, {
+      method: 'POST',
+      headers: this.getAuthHeaders()
+    });
+    return res.ok;
   }
 
   /**
@@ -408,7 +543,7 @@ export class JellyfinClient {
   }
 
   /**
-   * Get robust HLS master playlist URL (forces H.264/AAC for 100% browser compatibility)
+   * Get robust HLS master playlist URL
    */
   getHlsUrl(itemId) {
     if (!this.auth.serverUrl || !itemId) return '';

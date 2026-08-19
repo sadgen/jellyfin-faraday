@@ -12,7 +12,6 @@ import { Film, AlertCircle, Loader2 } from 'lucide-react';
 
 const STORAGE_KEY_TILES = 'jf_faraday_tile_count';
 const STORAGE_KEY_FILTER = 'jf_faraday_filter_mode';
-const PAGE_SIZE = 100;
 
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(jellyfin.auth.isConfigured);
@@ -26,10 +25,12 @@ export default function App() {
   const [searchKeyword, setSearchKeyword] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [sortMethod, setSortMethod] = useState('date_desc');
+  const [selectedGenre, setSelectedGenre] = useState('');
+  const [selectedYear, setSelectedYear] = useState('');
+  const [selectedLetter, setSelectedLetter] = useState('');
 
-  // Loading state (Ultra-fast server-side pagination)
+  // Loading state
   const [isLoading, setIsLoading] = useState(false);
-  const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [errorText, setErrorText] = useState('');
 
   // Kanban Items Stream
@@ -79,8 +80,8 @@ export default function App() {
     });
   }, [isAuthenticated]);
 
-  // Query First Page (< 50ms instantaneous server query)
-  const fetchFirstPage = useCallback(async (viewId, search, status, sort) => {
+  // Query All Media Items for the Active Filter (< 100ms lightweight fetch)
+  const fetchAllMedia = useCallback(async (viewId, search, status, sort, genre, year, letter) => {
     if (!jellyfin.auth.isConfigured) return;
     setIsLoading(true);
     setErrorText('');
@@ -91,12 +92,15 @@ export default function App() {
         searchTerm: search,
         statusFilter: status,
         sortMethod: sort,
+        genre,
+        year,
+        nameStartsWithOrGreater: letter,
         startIndex: 0,
-        limit: PAGE_SIZE
+        limit: 0 // Fetch all matching items at once!
       });
 
       setMediaItems(data.Items || []);
-      setTotalRecordCount(data.TotalRecordCount || 0);
+      setTotalRecordCount(data.TotalRecordCount || (data.Items ? data.Items.length : 0));
     } catch (err) {
       console.error('Failed to load media items:', err);
       setErrorText(err.message || '获取媒体列表失败');
@@ -105,7 +109,7 @@ export default function App() {
     }
   }, []);
 
-  // Debounced/Triggered page reload when filters change
+  // Debounced search / trigger
   const searchTimeoutRef = useRef(null);
   useEffect(() => {
     if (!jellyfin.auth.isConfigured) return;
@@ -113,43 +117,13 @@ export default function App() {
     if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
 
     searchTimeoutRef.current = setTimeout(() => {
-      fetchFirstPage(selectedViewId, searchKeyword, statusFilter, sortMethod);
+      fetchAllMedia(selectedViewId, searchKeyword, statusFilter, sortMethod, selectedGenre, selectedYear, selectedLetter);
     }, searchKeyword ? 300 : 0);
 
     return () => {
       if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
     };
-  }, [selectedViewId, searchKeyword, statusFilter, sortMethod, fetchFirstPage]);
-
-  // Infinite Scroll: Load next batch
-  const handleLoadMore = useCallback(async () => {
-    if (isLoadingMore || isLoading || mediaItems.length >= totalRecordCount) return;
-    setIsLoadingMore(true);
-
-    try {
-      const data = await jellyfin.queryMediaPage({
-        parentId: selectedViewId,
-        searchTerm: searchKeyword,
-        statusFilter: statusFilter,
-        sortMethod: sortMethod,
-        startIndex: mediaItems.length,
-        limit: PAGE_SIZE
-      });
-
-      const nextItems = data.Items || [];
-      if (nextItems.length > 0) {
-        setMediaItems(prev => {
-          const idSet = new Set(prev.map(p => p.Id));
-          const filtered = nextItems.filter(n => !idSet.has(n.Id));
-          return prev.concat(filtered);
-        });
-      }
-    } catch (err) {
-      console.warn('Failed to load more items:', err);
-    } finally {
-      setIsLoadingMore(false);
-    }
-  }, [isLoadingMore, isLoading, mediaItems.length, totalRecordCount, selectedViewId, searchKeyword, statusFilter, sortMethod]);
+  }, [selectedViewId, searchKeyword, statusFilter, sortMethod, selectedGenre, selectedYear, selectedLetter, fetchAllMedia]);
 
   // Load Random Pool for Kanban on Demand
   const loadKanbanStream = useCallback(async () => {
@@ -181,7 +155,13 @@ export default function App() {
       if (view) name = view.Name;
     }
     if (searchKeyword) {
-      name += ` • 搜索: "${searchKeyword}"`;
+      name += ` • "${searchKeyword}"`;
+    }
+    if (selectedGenre) {
+      name += ` • ${selectedGenre}`;
+    }
+    if (selectedLetter) {
+      name += ` • 字母 ${selectedLetter}`;
     }
     if (statusFilter === 'favorites') {
       name += ' • 最爱';
@@ -189,7 +169,7 @@ export default function App() {
       name += ' • 未看';
     }
     return name;
-  }, [selectedViewId, userViews, searchKeyword, statusFilter]);
+  }, [selectedViewId, userViews, searchKeyword, selectedGenre, selectedLetter, statusFilter]);
 
   // Update item in local state
   const handleUpdateItem = useCallback((updatedItem) => {
@@ -214,7 +194,7 @@ export default function App() {
   const handleLoginSuccess = () => {
     setIsAuthenticated(true);
     setIsLoginModalOpen(false);
-    fetchFirstPage(selectedViewId, searchKeyword, statusFilter, sortMethod);
+    fetchAllMedia(selectedViewId, searchKeyword, statusFilter, sortMethod, selectedGenre, selectedYear, selectedLetter);
   };
 
   // Logout handler
@@ -257,6 +237,12 @@ export default function App() {
             onStatusFilterChange={setStatusFilter}
             sortMethod={sortMethod}
             onSortMethodChange={setSortMethod}
+            selectedGenre={selectedGenre}
+            onSelectGenre={setSelectedGenre}
+            selectedYear={selectedYear}
+            onSelectYear={setSelectedYear}
+            selectedLetter={selectedLetter}
+            onSelectLetter={setSelectedLetter}
             onEnterKanban={() => {
               setInitialKanbanItem(null);
               setViewMode('kanban');
@@ -266,11 +252,8 @@ export default function App() {
             onDeleteItem={handleDeleteItem}
             onOpenMetadataEditor={(item) => setEditingItem(item)}
             onOpenIdentify={(item) => setIdentifyingItem(item)}
-            onRefreshLibrary={() => fetchFirstPage(selectedViewId, searchKeyword, statusFilter, sortMethod)}
+            onRefreshLibrary={() => fetchAllMedia(selectedViewId, searchKeyword, statusFilter, sortMethod, selectedGenre, selectedYear, selectedLetter)}
             isRefreshing={isLoading}
-            isLoadingMore={isLoadingMore}
-            onLoadMore={handleLoadMore}
-            hasMore={mediaItems.length < totalRecordCount}
           />
         ) : (
           <DesktopLayout
@@ -324,7 +307,7 @@ export default function App() {
           isOpen={isSettingsModalOpen}
           onClose={() => setIsSettingsModalOpen(false)}
           onLogout={handleLogout}
-          onRefreshLibrary={() => fetchFirstPage(selectedViewId, searchKeyword, statusFilter, sortMethod)}
+          onRefreshLibrary={() => fetchAllMedia(selectedViewId, searchKeyword, statusFilter, sortMethod, selectedGenre, selectedYear, selectedLetter)}
           isRefreshing={isLoading}
           totalItemsCount={totalRecordCount}
         />

@@ -18,7 +18,8 @@ export default function DesktopLayout({
   onRefreshLibrary,
   isRefreshing,
   onOpenLibraryView,
-  activeScopeName
+  activeScopeName,
+  initialPlayingItem = null
 }) {
   const {
     displayedItems,
@@ -27,7 +28,7 @@ export default function DesktopLayout({
     consumeNext,
     reshuffleAll,
     updateItemInTiles
-  } = useSessionQueue(items, filterMode, activeTileCount);
+  } = useSessionQueue(items, filterMode, activeTileCount, initialPlayingItem);
 
   // Dynamic CSS Grid layout classes based on active tile count
   const gridClasses = useMemo(() => {
@@ -59,22 +60,21 @@ export default function DesktopLayout({
         </div>
       )}
 
-      {/* Main Viewport Grid */}
+      {/* Video Tiles Grid Viewport */}
       {items && items.length > 0 && (
-        <div className={`flex-1 grid ${gridClasses} gap-2.5 w-full h-full min-h-0 min-w-0`}>
+        <div className={`flex-1 w-full h-full grid gap-3 ${gridClasses}`}>
           {Array.from({ length: activeTileCount }).map((_, index) => {
-            const currentItem = displayedItems[index];
+            const item = displayedItems[index] || null;
             return (
-              <div key={`tile-${index}`} className="w-full h-full min-h-0 min-w-0">
-                <VideoTile
-                  tileId={index}
-                  item={currentItem}
-                  isGlobalMuted={isGlobalMuted}
-                  playbackSpeed={playbackSpeed}
-                  onSkip={consumeNext}
-                  onUpdateItem={updateItemInTiles}
-                />
-              </div>
+              <VideoTile
+                key={item?.Id ? `${index}-${item.Id}` : `tile-${index}`}
+                tileId={index}
+                item={item}
+                isGlobalMuted={isGlobalMuted}
+                playbackSpeed={playbackSpeed}
+                onSkip={consumeNext}
+                onUpdateItem={updateItemInTiles}
+              />
             );
           })}
         </div>
@@ -82,17 +82,17 @@ export default function DesktopLayout({
 
       {/* Floating Control HUD */}
       <ControlHUD
+        totalCount={totalCount}
+        remainingCount={remainingCount}
         activeTileCount={activeTileCount}
         onTileCountChange={onTileCountChange}
         filterMode={filterMode}
         onFilterModeChange={onFilterModeChange}
-        onReshuffle={reshuffleAll}
         isGlobalMuted={isGlobalMuted}
         onToggleGlobalMute={onToggleGlobalMute}
         playbackSpeed={playbackSpeed}
         onPlaybackSpeedChange={onPlaybackSpeedChange}
-        remainingCount={remainingCount}
-        totalCount={totalCount}
+        onReshuffleAll={reshuffleAll}
         onOpenSettings={onOpenSettings}
         onRefreshLibrary={onRefreshLibrary}
         isRefreshing={isRefreshing}

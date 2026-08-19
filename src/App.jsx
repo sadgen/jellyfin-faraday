@@ -6,8 +6,9 @@ import LoginModal from './components/LoginModal';
 import SettingsModal from './components/SettingsModal';
 import MetadataEditorModal from './components/MetadataEditorModal';
 import IdentifyModal from './components/IdentifyModal';
+import VideoPlayerModal from './components/VideoPlayerModal';
 import ErrorBoundary from './components/ErrorBoundary';
-import { Film, Loader2, AlertCircle, Database } from 'lucide-react';
+import { Film, AlertCircle } from 'lucide-react';
 
 const STORAGE_KEY_TILES = 'jf_faraday_tile_count';
 const STORAGE_KEY_FILTER = 'jf_faraday_filter_mode';
@@ -21,7 +22,7 @@ export default function App() {
   const [userViews, setUserViews] = useState([]);
   const [selectedViewId, setSelectedViewId] = useState('all');
   const [searchKeyword, setSearchKeyword] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all'); // 'all' | 'favorites' | 'unplayed' | 'played'
+  const [statusFilter, setStatusFilter] = useState('all');
   const [sortMethod, setSortMethod] = useState('date_desc');
 
   // Loading & sync state
@@ -55,6 +56,10 @@ export default function App() {
   const [editingItem, setEditingItem] = useState(null);
   const [identifyingItem, setIdentifyingItem] = useState(null);
 
+  // Single video player modal
+  const [modalPlayingItem, setModalPlayingItem] = useState(null);
+  const [initialKanbanItem, setInitialKanbanItem] = useState(null);
+
   // Save tile count preference
   const handleTileCountChange = (count) => {
     setActiveTileCount(count);
@@ -67,7 +72,7 @@ export default function App() {
     localStorage.setItem(STORAGE_KEY_FILTER, mode);
   };
 
-  // Full Network Sync with Jellyfin (Only triggered when cache is empty or user manually refreshes)
+  // Full Network Sync with Jellyfin
   const runNetworkSync = useCallback(async (isUserManual = false) => {
     if (!jellyfin.auth.isConfigured) return;
 
@@ -113,13 +118,11 @@ export default function App() {
       if (!isMounted) return;
 
       if (cache.items && cache.items.length > 0) {
-        // INSTANT CACHE HIT: Render immediately without any network wait!
         setAllMediaItems(cache.items);
         setUserViews(cache.views || []);
         setLastSyncTime(cache.lastSyncTime);
         setIsLoadingInitial(false);
       } else {
-        // Cache empty (first time login) -> run network sync
         runNetworkSync(false);
       }
     }).catch(() => {
@@ -134,7 +137,6 @@ export default function App() {
     setSelectedViewId(viewId);
     if (viewId === 'all') return;
 
-    // Check if we already have items tagged with this ViewId
     const existing = allMediaItems.filter(it => 
       it.ViewId === viewId || 
       (Array.isArray(it.ViewIds) && it.ViewIds.includes(viewId)) || 
@@ -154,7 +156,6 @@ export default function App() {
           ViewId: viewId
         }));
         
-        // Merge with existing items
         setAllMediaItems(prev => {
           const idSet = new Set(prev.map(p => p.Id));
           const newItems = items.filter(it => !idSet.has(it.Id));
@@ -259,9 +260,9 @@ export default function App() {
     setAllMediaItems(prev => prev.filter(item => item.Id !== deletedId));
   }, []);
 
-  // Play single item in Kanban mode
+  // Play single item clicked from Media Library
   const handlePlaySingleItem = useCallback((item) => {
-    setViewMode('kanban');
+    setModalPlayingItem(item);
   }, []);
 
   // Login handler
@@ -328,7 +329,10 @@ export default function App() {
             onStatusFilterChange={setStatusFilter}
             sortMethod={sortMethod}
             onSortMethodChange={setSortMethod}
-            onEnterKanban={() => setViewMode('kanban')}
+            onEnterKanban={() => {
+              setInitialKanbanItem(null);
+              setViewMode('kanban');
+            }}
             onPlaySingleItem={handlePlaySingleItem}
             onUpdateItem={handleUpdateItem}
             onDeleteItem={handleDeleteItem}
@@ -353,8 +357,29 @@ export default function App() {
             isRefreshing={isRefreshing || isBackgroundSyncing || isLoadingView}
             onOpenLibraryView={() => setViewMode('library')}
             activeScopeName={activeScopeName}
+            initialPlayingItem={initialKanbanItem}
           />
         )}
+
+        {/* Full-Screen Theater Video Player Modal */}
+        <VideoPlayerModal
+          isOpen={!!modalPlayingItem}
+          item={modalPlayingItem}
+          onClose={() => setModalPlayingItem(null)}
+          onNext={() => {
+            const idx = filteredMediaItems.findIndex(it => it.Id === modalPlayingItem?.Id);
+            if (idx >= 0 && idx < filteredMediaItems.length - 1) {
+              setModalPlayingItem(filteredMediaItems[idx + 1]);
+            }
+          }}
+          onPrev={() => {
+            const idx = filteredMediaItems.findIndex(it => it.Id === modalPlayingItem?.Id);
+            if (idx > 0) {
+              setModalPlayingItem(filteredMediaItems[idx - 1]);
+            }
+          }}
+          onUpdateItem={handleUpdateItem}
+        />
 
         {/* Login Modal */}
         <LoginModal

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 
 /**
- * Fisher-Yates Shuffle Algorithm (In-place or copy)
+ * Fisher-Yates Shuffle Algorithm
  */
 function shuffleArray(array) {
   const arr = [...array];
@@ -15,12 +15,10 @@ function shuffleArray(array) {
 /**
  * Session-Level Never-Repeat Queue Hook (blissful-faraday pattern)
  */
-export function useSessionQueue(items = [], filterMode = 'pure_random', activeTileCount = 2) {
-  // Currently displayed items in each tile: Array of item objects or nulls
+export function useSessionQueue(items = [], filterMode = 'pure_random', activeTileCount = 2, initialItem = null) {
   const [displayedItems, setDisplayedItems] = useState([]);
   const displayedItemsRef = useRef([]);
 
-  // Session-level FIFO queue
   const remainingQueueRef = useRef([]);
   const consumedIdsSetRef = useRef(new Set());
   const prevFilterKeyRef = useRef('');
@@ -33,12 +31,10 @@ export function useSessionQueue(items = [], filterMode = 'pure_random', activeTi
 
     switch (filterMode) {
       case 'favorite_random':
-        // Filter strictly by favorite
         pool = items.filter(item => item.UserData?.IsFavorite);
         return shuffleArray(pool);
 
       case 'least_played_random':
-        // Sort primarily by PlayCount ascending, then randomize within the same playcount groups
         const playCountMap = new Map();
         items.forEach(item => {
           const count = item.UserData?.PlayCount || 0;
@@ -52,26 +48,24 @@ export function useSessionQueue(items = [], filterMode = 'pure_random', activeTi
         return pool;
 
       case 'latest_random':
-        // Slice top 100 recent items and shuffle
         const sortedByDate = [...items].sort((a, b) => new Date(b.DateCreated) - new Date(a.DateCreated));
         return shuffleArray(sortedByDate.slice(0, Math.max(50, activeTileCount * 10)));
 
       case 'pure_random':
       default:
-        // Pure random shuffle of entire library
         return shuffleArray(items);
     }
   }, [items, filterMode, activeTileCount]);
 
-  // Keep displayedItemsRef in sync with state
   useEffect(() => {
     displayedItemsRef.current = displayedItems;
   }, [displayedItems]);
 
-  // 2. Initialize or re-initialize queue when filter / tile count / items change
-  const filterKey = `${filterMode}:${items.length}:${activeTileCount}`;
+  // 2. Initialize or re-initialize queue when filter / tile count / items / initialItem change
+  const initialItemId = initialItem?.Id || '';
+  const filterKey = `${filterMode}:${items.length}:${activeTileCount}:${initialItemId}`;
   
-  const initQueueAndTiles = useCallback((force = false) => {
+  const initQueueAndTiles = useCallback(() => {
     if (!filteredPool || filteredPool.length === 0) {
       setDisplayedItems([]);
       displayedItemsRef.current = [];
@@ -80,8 +74,20 @@ export function useSessionQueue(items = [], filterMode = 'pure_random', activeTi
       return;
     }
 
-    // Initial assignment to active tiles
-    const initialTiles = filteredPool.slice(0, activeTileCount);
+    let initialTiles = [];
+
+    if (initialItem && initialItem.Id) {
+      initialTiles.push(initialItem);
+      // Fill the rest with items from filteredPool
+      for (const it of filteredPool) {
+        if (initialTiles.length >= activeTileCount) break;
+        if (it.Id !== initialItem.Id) {
+          initialTiles.push(it);
+        }
+      }
+    } else {
+      initialTiles = filteredPool.slice(0, activeTileCount);
+    }
     
     // Fill any missing tiles if pool is smaller than activeTileCount
     while (initialTiles.length < activeTileCount && filteredPool.length > 0) {
@@ -92,12 +98,12 @@ export function useSessionQueue(items = [], filterMode = 'pure_random', activeTi
     displayedItemsRef.current = initialTiles;
 
     // Remaining items go into the session queue
-    const remaining = filteredPool.slice(activeTileCount);
+    const initialIds = new Set(initialTiles.map(it => it?.Id).filter(Boolean));
+    const remaining = filteredPool.filter(it => !initialIds.has(it.Id));
     remainingQueueRef.current = remaining;
 
-    // Mark initial items as consumed
-    consumedIdsSetRef.current = new Set(initialTiles.map(it => it?.Id).filter(Boolean));
-  }, [filteredPool, activeTileCount]);
+    consumedIdsSetRef.current = initialIds;
+  }, [filteredPool, activeTileCount, initialItem]);
 
   useEffect(() => {
     if (filterKey !== prevFilterKeyRef.current) {
@@ -112,12 +118,10 @@ export function useSessionQueue(items = [], filterMode = 'pure_random', activeTi
 
     let nextItem = null;
 
-    // Check if queue has remaining items
     while (remainingQueueRef.current.length > 0) {
       const candidate = remainingQueueRef.current.shift();
       if (!candidate) continue;
 
-      // Ensure candidate is not currently showing on any other active tile
       const otherTiles = displayedItemsRef.current.filter((_, idx) => idx !== tileId);
       const isAlreadyShowing = otherTiles.some(t => t?.Id === candidate.Id);
 
@@ -128,7 +132,7 @@ export function useSessionQueue(items = [], filterMode = 'pure_random', activeTi
       }
     }
 
-    // If queue is exhausted, refill it by re-shuffling the pool (excluding currently displayed items)
+    // If queue is exhausted, refill it by re-shuffling the pool
     if (!nextItem) {
       const currentDisplayedIds = new Set(displayedItemsRef.current.map(t => t?.Id).filter(Boolean));
       const freshPool = shuffleArray(filteredPool.filter(it => !currentDisplayedIds.has(it.Id)));
@@ -138,36 +142,33 @@ export function useSessionQueue(items = [], filterMode = 'pure_random', activeTi
         remainingQueueRef.current = freshPool;
         consumedIdsSetRef.current.clear();
         if (nextItem) consumedIdsSetRef.current.add(nextItem.Id);
-      } else {
-        // Fallback: pick any item from the pool different from current tile
-        const currentItem = displayedItemsRef.current[tileId];
-        const alternative = filteredPool.find(it => it.Id !== currentItem?.Id) || filteredPool[0];
-        nextItem = alternative;
+      } else if (filteredPool.length > 0) {
+        nextItem = filteredPool[0];
       }
     }
 
     if (nextItem) {
-      // Synchronously update ref to prevent race conditions on rapid middle-clicks
-      const updatedTiles = [...displayedItemsRef.current];
-      updatedTiles[tileId] = nextItem;
-      displayedItemsRef.current = updatedTiles;
-      setDisplayedItems(updatedTiles);
+      setDisplayedItems(prev => {
+        const next = [...prev];
+        next[tileId] = nextItem;
+        displayedItemsRef.current = next;
+        return next;
+      });
     }
 
     return nextItem;
   }, [filteredPool]);
 
-  // Reshuffle helper
+  // 4. Force Reshuffle All active tiles
   const reshuffleAll = useCallback(() => {
-    initQueueAndTiles(true);
+    consumedIdsSetRef.current.clear();
+    initQueueAndTiles();
   }, [initQueueAndTiles]);
 
-  // Manual update of a tile's item metadata (e.g. after toggling favorite or play status)
+  // 5. Update item metadata or favorite status in place
   const updateItemInTiles = useCallback((updatedItem) => {
     if (!updatedItem?.Id) return;
-    setDisplayedItems(prev => prev.map(item => item?.Id === updatedItem.Id ? { ...item, ...updatedItem } : item));
-    // Also update in queue if present
-    remainingQueueRef.current = remainingQueueRef.current.map(item => item?.Id === updatedItem.Id ? { ...item, ...updatedItem } : item);
+    setDisplayedItems(prev => prev.map(it => it?.Id === updatedItem.Id ? { ...it, ...updatedItem } : it));
   }, []);
 
   return {

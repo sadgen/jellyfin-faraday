@@ -210,7 +210,7 @@ export class JellyfinClient {
     const query = new URLSearchParams({
       IncludeItemTypes: 'Movie,Video,Episode',
       Recursive: 'true',
-      Fields: 'PrimaryImageAspectRatio,UserData,CommunityRating,DateCreated,RunTimeTicks,ProductionYear,OfficialRating,ParentId,Overview,Genres,Tags',
+      Fields: 'PrimaryImageAspectRatio,UserData,CommunityRating,DateCreated,RunTimeTicks,ProductionYear,OfficialRating,ParentId,Overview,Genres,Tags,MediaSources',
       EnableImages: 'true',
       ...params
     });
@@ -262,7 +262,6 @@ export class JellyfinClient {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.message || `保存元数据失败 (HTTP ${res.status})`);
     }
-    // Update local cache
     updateItemInCache({ Id: itemId, ...itemData });
     return true;
   }
@@ -342,7 +341,7 @@ export class JellyfinClient {
   }
 
   /**
-   * Full Sync Media Library & Views (Only runs when no cache or forced by user)
+   * Full Sync Media Library & Views
    */
   async syncMediaLibrary({ onProgress, onComplete } = {}) {
     if (!this.auth.isConfigured) return [];
@@ -427,7 +426,6 @@ export class JellyfinClient {
       });
       const finalItems = Array.from(uniqueMap.values());
 
-      // Save complete package to local persistent cache
       await saveFullCache(finalItems, views);
 
       if (onComplete) {
@@ -450,14 +448,18 @@ export class JellyfinClient {
   }
 
   /**
-   * Get HLS master playlist URL
+   * Get robust HLS master playlist URL (forces H.264/AAC for 100% browser compatibility)
    */
   getHlsUrl(itemId) {
     if (!this.auth.serverUrl || !itemId) return '';
+    const playSessionId = 'jf_' + Math.random().toString(36).substring(2, 10);
     const query = new URLSearchParams({
+      MediaSourceId: itemId,
       api_key: this.auth.token,
-      VideoCodec: 'h264,hevc,av1,vp9',
-      AudioCodec: 'aac,mp3,opus,flac',
+      PlaySessionId: playSessionId,
+      VideoCodec: 'h264',
+      AudioCodec: 'aac,mp3',
+      maxStreamingBitrate: '8000000',
       TranscodingMaxAudioChannels: '2',
       RequireAvc: 'false',
       SegmentContainer: 'ts',

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { 
   Grid, Shuffle, Volume2, VolumeX, Settings, 
   Sparkles, Star, TrendingDown, Clock, RefreshCw,
-  Gauge, HelpCircle
+  Gauge, LayoutGrid, Folder
 } from 'lucide-react';
 
 const FILTER_MODES = [
@@ -28,13 +28,28 @@ export default function ControlHUD({
   totalCount,
   onOpenSettings,
   onRefreshLibrary,
-  isRefreshing
+  isRefreshing,
+  onOpenLibraryView,
+  activeScopeName = '全部媒体库'
 }) {
   const [showSpeedMenu, setShowSpeedMenu] = useState(false);
 
   return (
-    <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 max-w-[95vw] px-4 py-2 rounded-2xl glass-pill shadow-2xl border border-white/10 text-xs text-gray-200">
+    <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 max-w-[95vw] px-3.5 py-2 rounded-2xl glass-pill shadow-2xl border border-white/10 text-xs text-gray-200">
       
+      {/* 0. Return to Library Browse View */}
+      <button
+        onClick={onOpenLibraryView}
+        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-cyan-300 border border-cyan-500/30 shadow transition font-medium flex-shrink-0"
+        title="返回媒体库浏览 / 调整筛选范围"
+      >
+        <LayoutGrid size={14} />
+        <span className="hidden sm:inline">媒体库</span>
+        <span className="text-[10px] text-cyan-400/80 max-w-[80px] truncate hidden md:inline">({activeScopeName})</span>
+      </button>
+
+      <div className="h-4 w-[1px] bg-white/10 mx-0.5" />
+
       {/* 1. Tile Count Selector: 1, 2, 4 */}
       <div className="flex items-center bg-black/40 rounded-xl p-1 border border-white/5 gap-0.5">
         {[1, 2, 4].map(count => (
@@ -53,7 +68,7 @@ export default function ControlHUD({
         ))}
       </div>
 
-      <div className="h-4 w-[1px] bg-white/10 mx-1" />
+      <div className="h-4 w-[1px] bg-white/10 mx-0.5" />
 
       {/* 2. Filter Mode Capsule Buttons */}
       <div className="flex items-center bg-black/40 rounded-xl p-1 border border-white/5 gap-0.5">
@@ -64,7 +79,7 @@ export default function ControlHUD({
             <button
               key={mode.id}
               onClick={() => onFilterModeChange(mode.id)}
-              className={`flex items-center gap-1.5 px-3 py-1 rounded-lg font-medium transition-all ${
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg font-medium transition-all ${
                 isActive
                   ? 'bg-slate-700/80 text-cyan-300 border border-cyan-500/30 shadow'
                   : 'text-gray-400 hover:text-white hover:bg-white/5'
@@ -72,13 +87,13 @@ export default function ControlHUD({
               title={mode.desc}
             >
               <Icon size={13} className={isActive ? 'text-cyan-400' : ''} />
-              <span>{mode.label}</span>
+              <span className="hidden lg:inline">{mode.label}</span>
             </button>
           );
         })}
       </div>
 
-      <div className="h-4 w-[1px] bg-white/10 mx-1" />
+      <div className="h-4 w-[1px] bg-white/10 mx-0.5" />
 
       {/* 3. Global Reshuffle Button */}
       <button
@@ -87,7 +102,7 @@ export default function ControlHUD({
         title="全部重新洗牌 (Reshuffle)"
       >
         <Shuffle size={14} className="text-cyan-400" />
-        <span className="hidden sm:inline">换一批</span>
+        <span className="hidden xl:inline">换一批</span>
       </button>
 
       {/* 4. Global Mute Button */}
@@ -137,12 +152,12 @@ export default function ControlHUD({
         )}
       </div>
 
-      <div className="h-4 w-[1px] bg-white/10 mx-1" />
+      <div className="h-4 w-[1px] bg-white/10 mx-0.5" />
 
       {/* 6. Queue Stats Counter */}
       <div 
         className="hidden md:flex items-center gap-1 font-mono text-[11px] text-gray-400 px-2 py-1 bg-black/30 rounded-lg border border-white/5"
-        title={`当前库内共 ${totalCount} 部，会话待播队列剩余 ${remainingCount} 部`}
+        title={`当前筛选范围内共 ${totalCount} 部，会话待播队列剩余 ${remainingCount} 部`}
       >
         <span className="text-cyan-300 font-semibold">{totalCount - remainingCount}</span>
         <span>/</span>

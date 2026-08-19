@@ -1,23 +1,36 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { jellyfin } from './api/jellyfinClient';
 import DesktopLayout from './components/DesktopLayout';
+import LibraryView from './components/LibraryView';
 import LoginModal from './components/LoginModal';
 import SettingsModal from './components/SettingsModal';
+import MetadataEditorModal from './components/MetadataEditorModal';
+import IdentifyModal from './components/IdentifyModal';
 import ErrorBoundary from './components/ErrorBoundary';
-import { Film, Loader2, Sparkles, AlertCircle } from 'lucide-react';
+import { Film, Loader2, AlertCircle } from 'lucide-react';
 
 const STORAGE_KEY_TILES = 'jf_faraday_tile_count';
 const STORAGE_KEY_FILTER = 'jf_faraday_filter_mode';
 
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(jellyfin.auth.isConfigured);
-  const [mediaItems, setMediaItems] = useState([]);
+  const [viewMode, setViewMode] = useState('library'); // 'library' | 'kanban'
+  
+  // Media items & libraries
+  const [allMediaItems, setAllMediaItems] = useState([]);
+  const [userViews, setUserViews] = useState([]);
+  const [selectedViewId, setSelectedViewId] = useState('all');
+  const [searchKeyword, setSearchKeyword] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all'); // 'all' | 'favorites' | 'unplayed' | 'played'
+  const [sortMethod, setSortMethod] = useState('date_desc');
+
+  // Loading & sync state
   const [isLoadingInitial, setIsLoadingInitial] = useState(false);
   const [isBackgroundSyncing, setIsBackgroundSyncing] = useState(false);
   const [loadProgress, setLoadProgress] = useState({ current: 0, total: 0 });
   const [errorText, setErrorText] = useState('');
 
-  // Preferences
+  // Kanban Preferences
   const [activeTileCount, setActiveTileCount] = useState(() => {
     const saved = localStorage.getItem(STORAGE_KEY_TILES);
     const count = parseInt(saved, 10);
@@ -36,6 +49,10 @@ export default function App() {
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
+  // Management modals
+  const [editingItem, setEditingItem] = useState(null);
+  const [identifyingItem, setIdentifyingItem] = useState(null);
+
   // Save tile count preference
   const handleTileCountChange = (count) => {
     setActiveTileCount(count);
@@ -48,7 +65,7 @@ export default function App() {
     localStorage.setItem(STORAGE_KEY_FILTER, mode);
   };
 
-  // Progressive Sync Media Library (Instant First Frame + Non-blocking Background Sync)
+  // Sync Media Library and user views
   const startMediaSync = useCallback(async (isUserManualRefresh = false) => {
     if (!jellyfin.auth.isConfigured) return;
 
@@ -60,10 +77,12 @@ export default function App() {
     setErrorText('');
 
     try {
+      // Load user views (Categories/Libraries)
+      jellyfin.getUserViews().then(views => setUserViews(views)).catch(() => {});
+
       await jellyfin.syncMediaLibrary({
         onFirstBatch: (batchItems, total, isFromCache) => {
-          // Immediately unblock the UI and start playing!
-          setMediaItems(batchItems);
+          setAllMediaItems(batchItems);
           setIsLoadingInitial(false);
           if (!isFromCache) {
             setIsBackgroundSyncing(true);
@@ -75,7 +94,7 @@ export default function App() {
           setLoadProgress({ current, total });
         },
         onComplete: (fullItems, total) => {
-          setMediaItems(fullItems);
+          setAllMediaItems(fullItems);
           setIsLoadingInitial(false);
           setIsBackgroundSyncing(false);
           setIsRefreshing(false);
@@ -98,6 +117,94 @@ export default function App() {
     }
   }, [startMediaSync]);
 
+  // Compute Filtered Media Items based on current library, search, status, and sorting
+  const filteredMediaItems = useMemo(() => {
+    if (!allMediaItems || allMediaItems.length === 0) return [];
+
+    let pool = [...allMediaItems];
+
+    // 1. Filter by Library / View folder (if selectedViewId !== 'all')
+    if (selectedViewId !== 'all') {
+      pool = pool.filter(item => item.ParentId === selectedViewId);
+    }
+
+    // 2. Filter by search keyword
+    if (searchKeyword.trim()) {
+      const q = searchKeyword.toLowerCase().trim();
+      pool = pool.filter(item => {
+        const name = (item.Name || '').toLowerCase();
+        const year = (item.ProductionYear || '').toString();
+        const rating = (item.OfficialRating || '').toLowerCase();
+        return name.includes(q) || year.includes(q) || rating.includes(q);
+      });
+    }
+
+    // 3. Filter by status
+    if (statusFilter === 'favorites') {
+      pool = pool.filter(item => item.UserData?.IsFavorite);
+    } else if (statusFilter === 'unplayed') {
+      pool = pool.filter(item => !item.UserData?.Played);
+    } else if (statusFilter === 'played') {
+      pool = pool.filter(item => item.UserData?.Played);
+    }
+
+    // 4. Sort
+    switch (sortMethod) {
+      case 'name_asc':
+        pool.sort((a, b) => (a.Name || '').localeCompare(b.Name || ''));
+        break;
+      case 'rating_desc':
+        pool.sort((a, b) => (b.CommunityRating || 0) - (a.CommunityRating || 0));
+        break;
+      case 'playcount_asc':
+        pool.sort((a, b) => (a.UserData?.PlayCount || 0) - (b.UserData?.PlayCount || 0));
+        break;
+      case 'playcount_desc':
+        pool.sort((a, b) => (b.UserData?.PlayCount || 0) - (a.UserData?.PlayCount || 0));
+        break;
+      case 'date_desc':
+      default:
+        pool.sort((a, b) => new Date(b.DateCreated) - new Date(a.DateCreated));
+        break;
+    }
+
+    return pool;
+  }, [allMediaItems, selectedViewId, searchKeyword, statusFilter, sortMethod]);
+
+  // Compute active scope name for display in HUD
+  const activeScopeName = useMemo(() => {
+    let name = '全部媒体库';
+    if (selectedViewId !== 'all') {
+      const view = userViews.find(v => v.Id === selectedViewId);
+      if (view) name = view.Name;
+    }
+    if (searchKeyword) {
+      name += ` • 搜索: "${searchKeyword}"`;
+    }
+    if (statusFilter === 'favorites') {
+      name += ' • 最爱';
+    } else if (statusFilter === 'unplayed') {
+      name += ' • 未看';
+    }
+    return name;
+  }, [selectedViewId, userViews, searchKeyword, statusFilter]);
+
+  // Update item in local state when modified or favorited
+  const handleUpdateItem = useCallback((updatedItem) => {
+    if (!updatedItem?.Id) return;
+    setAllMediaItems(prev => prev.map(item => item.Id === updatedItem.Id ? { ...item, ...updatedItem } : item));
+  }, []);
+
+  // Delete item from local state
+  const handleDeleteItem = useCallback((deletedId) => {
+    setAllMediaItems(prev => prev.filter(item => item.Id !== deletedId));
+  }, []);
+
+  // Play single item in Kanban mode
+  const handlePlaySingleItem = useCallback((item) => {
+    setViewMode('kanban');
+  }, []);
+
   // Login handler
   const handleLoginSuccess = () => {
     setIsAuthenticated(true);
@@ -108,38 +215,17 @@ export default function App() {
   // Logout handler
   const handleLogout = () => {
     setIsAuthenticated(false);
-    setMediaItems([]);
+    setAllMediaItems([]);
     setIsLoginModalOpen(true);
   };
-
-  // Manual Refresh library
-  const handleRefreshLibrary = () => {
-    startMediaSync(true);
-  };
-
-  // Global Keyboard Shortcuts
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      // Don't trigger when typing in inputs
-      if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
-
-      if (e.key === '1') handleTileCountChange(1);
-      if (e.key === '2') handleTileCountChange(2);
-      if (e.key === '4') handleTileCountChange(4);
-      if (e.key === 'm' || e.key === 'M') setIsGlobalMuted(prev => !prev);
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
 
   return (
     <ErrorBoundary>
       <div className="relative w-screen h-screen bg-[#080b11] text-gray-100 overflow-hidden select-none">
         
-        {/* Full-screen Loading Overlay (Only shows on 1st load if NO cache exists for < 300ms) */}
-        {isLoadingInitial && mediaItems.length === 0 && (
-          <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-black/90 backdrop-blur-md gap-4 animate-in fade-in duration-150">
+        {/* Full-screen Loading Overlay (Initial connect only) */}
+        {isLoadingInitial && allMediaItems.length === 0 && (
+          <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-black/90 backdrop-blur-md gap-4">
             <div className="relative flex items-center justify-center">
               <div className="w-14 h-14 rounded-full border-4 border-cyan-500/20 border-t-cyan-400 animate-spin" />
               <Film className="absolute text-cyan-400" size={24} />
@@ -149,7 +235,7 @@ export default function App() {
               <div className="text-xs font-mono text-cyan-300/80">
                 {loadProgress.total > 0
                   ? `已同步 ${loadProgress.current} / ${loadProgress.total} 部影片`
-                  : '正在连接服务器建立首帧队列...'}
+                  : '正在连接服务器...'}
               </div>
             </div>
           </div>
@@ -169,21 +255,46 @@ export default function App() {
           </div>
         )}
 
-        {/* Main Desktop Kanban Layout */}
-        <DesktopLayout
-          items={mediaItems}
-          activeTileCount={activeTileCount}
-          onTileCountChange={handleTileCountChange}
-          filterMode={filterMode}
-          onFilterModeChange={handleFilterModeChange}
-          isGlobalMuted={isGlobalMuted}
-          onToggleGlobalMute={() => setIsGlobalMuted(!isGlobalMuted)}
-          playbackSpeed={playbackSpeed}
-          onPlaybackSpeedChange={setPlaybackSpeed}
-          onOpenSettings={() => setIsSettingsModalOpen(true)}
-          onRefreshLibrary={handleRefreshLibrary}
-          isRefreshing={isRefreshing || isBackgroundSyncing}
-        />
+        {/* Main View Mode Switch */}
+        {viewMode === 'library' ? (
+          <LibraryView
+            items={filteredMediaItems}
+            userViews={userViews}
+            selectedViewId={selectedViewId}
+            onSelectView={setSelectedViewId}
+            searchKeyword={searchKeyword}
+            onSearchChange={setSearchKeyword}
+            statusFilter={statusFilter}
+            onStatusFilterChange={setStatusFilter}
+            sortMethod={sortMethod}
+            onSortMethodChange={setSortMethod}
+            onEnterKanban={() => setViewMode('kanban')}
+            onPlaySingleItem={handlePlaySingleItem}
+            onUpdateItem={handleUpdateItem}
+            onDeleteItem={handleDeleteItem}
+            onOpenMetadataEditor={(item) => setEditingItem(item)}
+            onOpenIdentify={(item) => setIdentifyingItem(item)}
+            onRefreshLibrary={() => startMediaSync(true)}
+            isRefreshing={isRefreshing || isBackgroundSyncing}
+          />
+        ) : (
+          <DesktopLayout
+            items={filteredMediaItems}
+            activeTileCount={activeTileCount}
+            onTileCountChange={handleTileCountChange}
+            filterMode={filterMode}
+            onFilterModeChange={handleFilterModeChange}
+            isGlobalMuted={isGlobalMuted}
+            onToggleGlobalMute={() => setIsGlobalMuted(!isGlobalMuted)}
+            playbackSpeed={playbackSpeed}
+            onPlaybackSpeedChange={setPlaybackSpeed}
+            onOpenSettings={() => setIsSettingsModalOpen(true)}
+            onRefreshLibrary={() => startMediaSync(true)}
+            isRefreshing={isRefreshing || isBackgroundSyncing}
+            onOpenLibraryView={() => setViewMode('library')}
+            activeScopeName={activeScopeName}
+          />
+        )}
 
         {/* Login Modal */}
         <LoginModal
@@ -197,9 +308,25 @@ export default function App() {
           isOpen={isSettingsModalOpen}
           onClose={() => setIsSettingsModalOpen(false)}
           onLogout={handleLogout}
-          onRefreshLibrary={handleRefreshLibrary}
+          onRefreshLibrary={() => startMediaSync(true)}
           isRefreshing={isRefreshing || isBackgroundSyncing}
-          totalItemsCount={mediaItems.length}
+          totalItemsCount={allMediaItems.length}
+        />
+
+        {/* Metadata Editor Modal */}
+        <MetadataEditorModal
+          isOpen={!!editingItem}
+          item={editingItem}
+          onClose={() => setEditingItem(null)}
+          onSaved={handleUpdateItem}
+        />
+
+        {/* Identify / Scraper Modal */}
+        <IdentifyModal
+          isOpen={!!identifyingItem}
+          item={identifyingItem}
+          onClose={() => setIdentifyingItem(null)}
+          onIdentified={handleUpdateItem}
         />
       </div>
     </ErrorBoundary>

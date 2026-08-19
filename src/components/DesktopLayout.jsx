@@ -2,7 +2,7 @@ import React, { useMemo } from 'react';
 import VideoTile from './VideoTile';
 import ControlHUD from './ControlHUD';
 import { useSessionQueue } from '../hooks/useSessionQueue';
-import { Film } from 'lucide-react';
+import { Film, LayoutGrid } from 'lucide-react';
 
 export default function DesktopLayout({
   items,
@@ -16,7 +16,9 @@ export default function DesktopLayout({
   onPlaybackSpeedChange,
   onOpenSettings,
   onRefreshLibrary,
-  isRefreshing
+  isRefreshing,
+  onOpenLibraryView,
+  activeScopeName
 }) {
   const {
     displayedItems,
@@ -33,11 +35,9 @@ export default function DesktopLayout({
       case 1:
         return 'grid-cols-1 grid-rows-1';
       case 2:
-        // 2 columns side by side on desktop, stacked on narrow screens
         return 'grid-cols-1 md:grid-cols-2 grid-rows-2 md:grid-rows-1';
       case 4:
       default:
-        // 2x2 grid
         return 'grid-cols-2 grid-rows-2';
     }
   }, [activeTileCount]);
@@ -48,8 +48,14 @@ export default function DesktopLayout({
       {(!items || items.length === 0) && (
         <div className="flex-1 flex flex-col items-center justify-center text-gray-400 gap-3">
           <Film size={48} className="text-gray-600 animate-pulse" />
-          <div className="text-base font-medium">当前筛选模式下暂无可用媒体</div>
-          <div className="text-xs text-gray-500">尝试切换为「纯粹随机」或点击设置同步媒体库</div>
+          <div className="text-base font-medium">当前筛选范围「{activeScopeName}」内暂无可用媒体</div>
+          <button
+            onClick={onOpenLibraryView}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-jf-accent hover:bg-jf-accentHover text-white text-xs font-medium transition shadow-lg shadow-cyan-500/20 mt-2"
+          >
+            <LayoutGrid size={14} />
+            <span>返回媒体库重新筛选</span>
+          </button>
         </div>
       )}
 
@@ -90,6 +96,8 @@ export default function DesktopLayout({
         onOpenSettings={onOpenSettings}
         onRefreshLibrary={onRefreshLibrary}
         isRefreshing={isRefreshing}
+        onOpenLibraryView={onOpenLibraryView}
+        activeScopeName={activeScopeName}
       />
     </div>
   );

@@ -1,6 +1,6 @@
 /**
  * Jellyfin REST API Client (Ultra Lightweight & Optimized)
- * Lightweight, zero-dependency, handles authentication, media streaming, and fast metadata sync.
+ * Lightweight, zero-dependency, handles authentication, media streaming, fast metadata sync, and library management.
  */
 
 import { getLibraryFromCache, saveLibraryToCache, clearLibraryCache } from '../utils/mediaCache';
@@ -131,7 +131,6 @@ export class JellyfinClient {
     const cleanUrl = this.sanitizeServerUrl(serverUrl);
     const authHeader = `MediaBrowser Client="${this.clientName}", Device="${this.deviceName}", DeviceId="${this.deviceId}", Version="${this.clientVersion}", Token="${apiKey}"`;
 
-    // Fetch user or system info
     const res = await fetch(`${cleanUrl}/Users`, {
       headers: {
         'Accept': 'application/json',
@@ -179,16 +178,33 @@ export class JellyfinClient {
   }
 
   /**
+   * Fetch user top-level library folders / views
+   */
+  async getUserViews() {
+    if (!this.auth.isConfigured) return [];
+    try {
+      const res = await fetch(`${this.auth.serverUrl}/Users/${this.auth.userId}/Views`, {
+        headers: this.getAuthHeaders()
+      });
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data.Items || [];
+    } catch (err) {
+      console.warn('Failed to fetch user views:', err);
+      return [];
+    }
+  }
+
+  /**
    * Lightweight Fetch of items (Ultra Fast: Strips heavy MediaSources/Path/Overview)
    */
   async getItems(params = {}) {
     if (!this.auth.isConfigured) return { Items: [], TotalRecordCount: 0 };
 
-    // ONLY request essential fields needed for the kanban player!
     const query = new URLSearchParams({
       IncludeItemTypes: 'Movie,Video,Episode',
       Recursive: 'true',
-      Fields: 'PrimaryImageAspectRatio,UserData,CommunityRating,DateCreated,RunTimeTicks,ProductionYear,OfficialRating',
+      Fields: 'PrimaryImageAspectRatio,UserData,CommunityRating,DateCreated,RunTimeTicks,ProductionYear,OfficialRating,ParentId',
       EnableImages: 'true',
       ...params
     });
@@ -202,6 +218,102 @@ export class JellyfinClient {
     }
 
     return res.json();
+  }
+
+  /**
+   * Fetch full item details for editing
+   */
+  async getItemDetails(itemId) {
+    if (!this.auth.isConfigured || !itemId) return null;
+    const res = await fetch(`${this.auth.serverUrl}/Users/${this.auth.userId}/Items/${itemId}`, {
+      headers: this.getAuthHeaders()
+    });
+    if (!res.ok) throw new Error(`获取媒体详情失败 (HTTP ${res.status})`);
+    return res.json();
+  }
+
+  /**
+   * Update item metadata (Name, Overview, Year, Rating, Tags, Genres)
+   */
+  async updateItemMetadata(itemId, itemData) {
+    if (!this.auth.isConfigured || !itemId) return false;
+    const res = await fetch(`${this.auth.serverUrl}/Items/${itemId}`, {
+      method: 'POST',
+      headers: this.getAuthHeaders(),
+      body: JSON.stringify(itemData)
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.message || `保存元数据失败 (HTTP ${res.status})`);
+    }
+    return true;
+  }
+
+  /**
+   * Remote metadata search / scraping for Identify modal
+   */
+  async searchRemoteMetadata(itemId, searchParams) {
+    if (!this.auth.isConfigured || !itemId) return [];
+    const res = await fetch(`${this.auth.serverUrl}/Items/RemoteSearch/Movie`, {
+      method: 'POST',
+      headers: this.getAuthHeaders(),
+      body: JSON.stringify({
+        SearchInfo: {
+          Name: searchParams.name || '',
+          Year: searchParams.year ? parseInt(searchParams.year, 10) : undefined,
+          ProviderIds: searchParams.providerIds || {}
+        },
+        ItemId: itemId
+      })
+    });
+    if (!res.ok) {
+      // Fallback for series/video
+      const seriesRes = await fetch(`${this.auth.serverUrl}/Items/RemoteSearch/Series`, {
+        method: 'POST',
+        headers: this.getAuthHeaders(),
+        body: JSON.stringify({
+          SearchInfo: {
+            Name: searchParams.name || '',
+            Year: searchParams.year ? parseInt(searchParams.year, 10) : undefined
+          },
+          ItemId: itemId
+        })
+      });
+      if (!seriesRes.ok) return [];
+      return seriesRes.json();
+    }
+    return res.json();
+  }
+
+  /**
+   * Apply remote search scraped metadata
+   */
+  async applyRemoteMetadata(itemId, searchResult, replaceAllImages = true) {
+    if (!this.auth.isConfigured || !itemId) return false;
+    const query = new URLSearchParams({
+      ReplaceAllImages: replaceAllImages ? 'true' : 'false'
+    });
+    const res = await fetch(`${this.auth.serverUrl}/Items/RemoteSearch/Apply/${itemId}?${query.toString()}`, {
+      method: 'POST',
+      headers: this.getAuthHeaders(),
+      body: JSON.stringify(searchResult)
+    });
+    return res.ok;
+  }
+
+  /**
+   * Delete media item from library / disk
+   */
+  async deleteItem(itemId) {
+    if (!this.auth.isConfigured || !itemId) return false;
+    const res = await fetch(`${this.auth.serverUrl}/Items/${itemId}`, {
+      method: 'DELETE',
+      headers: this.getAuthHeaders()
+    });
+    if (!res.ok) {
+      throw new Error(`删除失败，可能没有管理员/写权限 (HTTP ${res.status})`);
+    }
+    return true;
   }
 
   /**

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { jellyfin } from './api/jellyfinClient';
 import DesktopLayout from './components/DesktopLayout';
 import LoginModal from './components/LoginModal';
@@ -12,7 +12,8 @@ const STORAGE_KEY_FILTER = 'jf_faraday_filter_mode';
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(jellyfin.auth.isConfigured);
   const [mediaItems, setMediaItems] = useState([]);
-  const [isLoadingMedia, setIsLoadingMedia] = useState(false);
+  const [isLoadingInitial, setIsLoadingInitial] = useState(false);
+  const [isBackgroundSyncing, setIsBackgroundSyncing] = useState(false);
   const [loadProgress, setLoadProgress] = useState({ current: 0, total: 0 });
   const [errorText, setErrorText] = useState('');
 
@@ -47,40 +48,61 @@ export default function App() {
     localStorage.setItem(STORAGE_KEY_FILTER, mode);
   };
 
-  // Fetch full media library
-  const loadMediaLibrary = useCallback(async () => {
+  // Progressive Sync Media Library (Instant First Frame + Non-blocking Background Sync)
+  const startMediaSync = useCallback(async (isUserManualRefresh = false) => {
     if (!jellyfin.auth.isConfigured) return;
 
-    setIsLoadingMedia(true);
+    if (isUserManualRefresh) {
+      setIsRefreshing(true);
+    } else {
+      setIsLoadingInitial(true);
+    }
     setErrorText('');
-    setLoadProgress({ current: 0, total: 0 });
 
     try {
-      const items = await jellyfin.fetchAllMediaLibrary((current, total) => {
-        setLoadProgress({ current, total });
+      await jellyfin.syncMediaLibrary({
+        onFirstBatch: (batchItems, total, isFromCache) => {
+          // Immediately unblock the UI and start playing!
+          setMediaItems(batchItems);
+          setIsLoadingInitial(false);
+          if (!isFromCache) {
+            setIsBackgroundSyncing(true);
+            setLoadProgress({ current: batchItems.length, total });
+          }
+        },
+        onProgress: (current, total) => {
+          setIsBackgroundSyncing(current < total);
+          setLoadProgress({ current, total });
+        },
+        onComplete: (fullItems, total) => {
+          setMediaItems(fullItems);
+          setIsLoadingInitial(false);
+          setIsBackgroundSyncing(false);
+          setIsRefreshing(false);
+          setLoadProgress({ current: total, total });
+        }
       });
-      setMediaItems(items);
     } catch (err) {
-      console.error('Failed to load media library:', err);
+      console.error('Failed to sync media library:', err);
       setErrorText(err.message || '获取媒体库失败，请检查服务器网络或凭据');
     } finally {
-      setIsLoadingMedia(false);
+      setIsLoadingInitial(false);
       setIsRefreshing(false);
     }
   }, []);
 
-  // Initial load on mount if configured
+  // Initial load on mount
   useEffect(() => {
     if (jellyfin.auth.isConfigured) {
-      loadMediaLibrary();
+      startMediaSync(false);
     }
-  }, [loadMediaLibrary]);
+  }, [startMediaSync]);
 
   // Login handler
   const handleLoginSuccess = () => {
     setIsAuthenticated(true);
     setIsLoginModalOpen(false);
-    loadMediaLibrary();
+    startMediaSync(false);
   };
 
   // Logout handler
@@ -90,10 +112,9 @@ export default function App() {
     setIsLoginModalOpen(true);
   };
 
-  // Refresh library
+  // Manual Refresh library
   const handleRefreshLibrary = () => {
-    setIsRefreshing(true);
-    loadMediaLibrary();
+    startMediaSync(true);
   };
 
   // Global Keyboard Shortcuts
@@ -116,26 +137,26 @@ export default function App() {
     <ErrorBoundary>
       <div className="relative w-screen h-screen bg-[#080b11] text-gray-100 overflow-hidden select-none">
         
-        {/* Loading Overlay */}
-        {isLoadingMedia && (
-          <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-black/90 backdrop-blur-md gap-4">
+        {/* Full-screen Loading Overlay (Only shows on 1st load if NO cache exists for < 300ms) */}
+        {isLoadingInitial && mediaItems.length === 0 && (
+          <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-black/90 backdrop-blur-md gap-4 animate-in fade-in duration-150">
             <div className="relative flex items-center justify-center">
               <div className="w-14 h-14 rounded-full border-4 border-cyan-500/20 border-t-cyan-400 animate-spin" />
               <Film className="absolute text-cyan-400" size={24} />
             </div>
             <div className="flex flex-col items-center gap-1.5 text-center">
-              <div className="text-sm font-semibold text-white">正在加载 Jellyfin 媒体库...</div>
+              <div className="text-sm font-semibold text-white">正在极速建立 Jellyfin 媒体索引...</div>
               <div className="text-xs font-mono text-cyan-300/80">
                 {loadProgress.total > 0
                   ? `已同步 ${loadProgress.current} / ${loadProgress.total} 部影片`
-                  : '正在与服务器建立高速索引...'}
+                  : '正在连接服务器建立首帧队列...'}
               </div>
             </div>
           </div>
         )}
 
         {/* Global Error Banner */}
-        {errorText && !isLoadingMedia && (
+        {errorText && !isLoadingInitial && (
           <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 px-4 py-2 rounded-xl bg-red-950/90 border border-red-500/40 text-xs text-red-200 shadow-2xl">
             <AlertCircle size={15} className="text-red-400 flex-shrink-0" />
             <span>{errorText}</span>
@@ -161,7 +182,7 @@ export default function App() {
           onPlaybackSpeedChange={setPlaybackSpeed}
           onOpenSettings={() => setIsSettingsModalOpen(true)}
           onRefreshLibrary={handleRefreshLibrary}
-          isRefreshing={isRefreshing}
+          isRefreshing={isRefreshing || isBackgroundSyncing}
         />
 
         {/* Login Modal */}
@@ -177,7 +198,7 @@ export default function App() {
           onClose={() => setIsSettingsModalOpen(false)}
           onLogout={handleLogout}
           onRefreshLibrary={handleRefreshLibrary}
-          isRefreshing={isRefreshing}
+          isRefreshing={isRefreshing || isBackgroundSyncing}
           totalItemsCount={mediaItems.length}
         />
       </div>

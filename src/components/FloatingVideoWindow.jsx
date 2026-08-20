@@ -32,7 +32,13 @@ export default function FloatingVideoWindow({
   const [isDragging, setIsDragging] = useState(false);
   const dragStartRef = useRef({ mouseX: 0, mouseY: 0, posX: 0, posY: 0 });
 
-  // Update layout on window resize
+  // Update layout when slotIndex changes (window promotion / shifting) or on resize
+  useEffect(() => {
+    if (!isDragging) {
+      setLayout(calculateSlotStyle(slotIndex));
+    }
+  }, [slotIndex, isDragging]);
+
   useEffect(() => {
     const handleResize = () => {
       if (!isDragging) {
@@ -364,7 +370,7 @@ export default function FloatingVideoWindow({
     }
   };
 
-  // Middle Click to Skip
+  // Middle Click to Skip (Trigger Shift & Next Window Promotion)
   const handleAuxClick = (e) => {
     if (e.button === 1) {
       e.preventDefault();
@@ -391,11 +397,14 @@ export default function FloatingVideoWindow({
         left: `${layout.left}px`,
         top: `${layout.top}px`,
         width: `${layout.width}px`,
-        zIndex: 50 + slotIndex
+        zIndex: 50 + slotIndex,
+        transition: isDragging 
+          ? 'none' 
+          : 'left 0.3s cubic-bezier(0.2, 0, 0, 1), top 0.3s cubic-bezier(0.2, 0, 0, 1), width 0.3s cubic-bezier(0.2, 0, 0, 1), height 0.3s cubic-bezier(0.2, 0, 0, 1), box-shadow 0.2s'
       }}
-      className={`fixed rounded-2xl overflow-visible shadow-2xl border bg-[#0d1117] flex flex-col group select-none transition-shadow ${
+      className={`fixed rounded-2xl overflow-visible shadow-2xl border bg-[#0d1117] flex flex-col group select-none ${
         slotIndex === 0 
-          ? 'border-cyan-400/60 shadow-cyan-500/25' 
+          ? 'border-cyan-400/70 shadow-cyan-500/25' 
           : 'border-white/15 shadow-black/80'
       } ${
         isDragging ? 'shadow-cyan-500/50 opacity-95 scale-[1.01]' : 'hover:border-cyan-400'
@@ -510,20 +519,20 @@ export default function FloatingVideoWindow({
             <Maximize size={13} />
           </button>
 
-          {/* Skip next */}
+          {/* Skip next (closes this window & promotes next windows forward) */}
           <button
             onClick={() => onSkip && onSkip(slotIndex)}
             className="p-1 rounded hover:bg-white/10 text-gray-400 hover:text-cyan-300 transition"
-            title="换一个 (中键)"
+            title="换一个 (中键 / 下一个顶上来)"
           >
             <SkipForward size={13} />
           </button>
 
-          {/* Close */}
+          {/* Close window (closes this window & promotes next windows forward) */}
           <button
             onClick={() => onClose && onClose(slotIndex)}
             className="p-1 rounded hover:bg-red-500/20 text-gray-400 hover:text-red-400 transition"
-            title="关闭窗口"
+            title="关闭窗口 (下一个顶上来)"
           >
             <X size={14} />
           </button>
@@ -558,7 +567,7 @@ export default function FloatingVideoWindow({
           onTimeUpdate={handleTimeUpdate}
         />
 
-        {/* INLINE VR WEBGL CANVAS (In-window VR projection) */}
+        {/* INLINE VR WEBGL CANVAS */}
         <InlineVrCanvas
           videoRef={videoRef}
           isActive={isVrActive}

@@ -254,19 +254,21 @@ export default function App() {
   }, [viewMode, loadKanbanStream]);
 
   // ==================== FLOATING 3-WINDOW PIP SYSTEM ====================
+  // Open item in a floating slot (FIFO replacement with slot shifting if all 3 full)
   const handleOpenFloatingWindow = useCallback((item) => {
     if (!item?.Id) return;
     setFloatingWindows(prev => {
-      const occupiedSlots = prev.map(w => w.slotIndex);
-      let targetSlot = [0, 1, 2].find(s => !occupiedSlots.includes(s));
+      // If already playing in one of the windows, bring it to front
+      const existing = prev.find(w => w.item.Id === item.Id);
+      if (existing) {
+        return prev.map(w => w.id === existing.id ? { ...w, timestamp: Date.now() } : w);
+      }
 
-      if (targetSlot === undefined) {
-        const sortedByTime = [...prev].sort((a, b) => a.timestamp - b.timestamp);
-        const oldest = sortedByTime[0];
-        targetSlot = oldest.slotIndex;
-        const filtered = prev.filter(w => w.id !== oldest.id);
+      if (prev.length < 3) {
+        const occupiedSlots = prev.map(w => w.slotIndex);
+        const targetSlot = [0, 1, 2].find(s => !occupiedSlots.includes(s)) ?? prev.length;
         return [
-          ...filtered,
+          ...prev,
           {
             id: `win-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
             slotIndex: targetSlot,
@@ -276,11 +278,22 @@ export default function App() {
         ];
       }
 
+      // If all 3 slots full: remove oldest window, shift following windows forward (下一个顶上来), and add new item to tail slot 2
+      const sortedByTime = [...prev].sort((a, b) => a.timestamp - b.timestamp);
+      const oldest = sortedByTime[0];
+      const remaining = prev.filter(w => w.id !== oldest.id);
+      const shifted = remaining.map(w => {
+        if (w.slotIndex > oldest.slotIndex) {
+          return { ...w, slotIndex: w.slotIndex - 1 };
+        }
+        return w;
+      });
+
       return [
-        ...prev,
+        ...shifted,
         {
           id: `win-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-          slotIndex: targetSlot,
+          slotIndex: 2,
           item,
           timestamp: Date.now()
         }
@@ -288,6 +301,7 @@ export default function App() {
     });
   }, []);
 
+  // Open 3 random videos simultaneously (Tampermonkey 随机3窗)
   const handleOpenRandom3Windows = useCallback(() => {
     const pool = mediaItems.length > 0 ? mediaItems : kanbanPool;
     if (pool.length === 0) return;
@@ -308,26 +322,53 @@ export default function App() {
     );
   }, [mediaItems, kanbanPool]);
 
-  const handleCloseFloatingWindow = useCallback((slotIndex) => {
-    setFloatingWindows(prev => prev.filter(w => w.slotIndex !== slotIndex));
+  // Close floating window (removes window, subsequent windows shift forward / 下一个顶上来)
+  const handleCloseFloatingWindow = useCallback((closedSlotIndex) => {
+    setFloatingWindows(prev => {
+      const remaining = prev.filter(w => w.slotIndex !== closedSlotIndex);
+      return remaining.map(w => {
+        if (w.slotIndex > closedSlotIndex) {
+          return { ...w, slotIndex: w.slotIndex - 1 };
+        }
+        return w;
+      });
+    });
   }, []);
 
-  const handleSkipFloatingWindow = useCallback((slotIndex) => {
-    const pool = mediaItems.length > 0 ? mediaItems : kanbanPool;
-    if (pool.length === 0) return;
-    const randomItem = pool[Math.floor(Math.random() * pool.length)];
-    if (!randomItem) return;
+  // Skip video in floating window (destroys current window, shifts next windows forward / 下一个顶上来, and spawns new random item at tail slot)
+  const handleSkipFloatingWindow = useCallback((skippedSlotIndex) => {
+    setFloatingWindows(prev => {
+      // 1. Remove current window and shift following windows forward
+      const remaining = prev.filter(w => w.slotIndex !== skippedSlotIndex);
+      const shifted = remaining.map(w => {
+        if (w.slotIndex > skippedSlotIndex) {
+          return { ...w, slotIndex: w.slotIndex - 1 };
+        }
+        return w;
+      });
 
-    setFloatingWindows(prev => prev.map(w => {
-      if (w.slotIndex === slotIndex) {
-        return {
-          ...w,
+      // 2. Pick a new random unplayed video that is not already playing
+      const pool = mediaItems.length > 0 ? mediaItems : kanbanPool;
+      if (pool.length === 0) return shifted;
+
+      const activeIds = new Set(shifted.map(w => w.item.Id));
+      const unplayed = pool.filter(it => !it.UserData?.Played && !activeIds.has(it.Id));
+      const candidatePool = unplayed.length > 0 ? unplayed : pool.filter(it => !activeIds.has(it.Id));
+      const randomItem = candidatePool[Math.floor(Math.random() * candidatePool.length)] || pool[0];
+
+      if (!randomItem) return shifted;
+
+      const tailSlot = shifted.length; // e.g. slot 2 if 2 active, slot 1 if 1 active
+      return [
+        ...shifted,
+        {
+          id: `win-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          slotIndex: tailSlot,
           item: randomItem,
           timestamp: Date.now()
-        };
-      }
-      return w;
-    }));
+        }
+      ];
+    });
   }, [mediaItems, kanbanPool]);
 
   const handleBringFloatingToFront = useCallback((winId) => {

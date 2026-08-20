@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { jellyfin } from '../api/jellyfinClient';
-import { getTrickplayStyle, getTrickplayInfo } from '../utils/trickplay';
+import { getTrickplayStyle } from '../utils/trickplay';
 import { detectDuplicateMedia } from '../utils/duplicateChecker';
 import { useExternalPlayer } from '../hooks/useExternalPlayer';
 import MobileActionSheet from './MobileActionSheet';
@@ -9,8 +9,7 @@ import {
   Edit3, Sparkles, Trash2, Folder, Film, 
   ArrowUpDown, X, RefreshCw, Layers, LayoutGrid,
   Grid, List, MoreVertical, ExternalLink, Calendar,
-  Users, Tag, Check, CheckCircle2, ChevronRight,
-  Clock, Hash, SlidersHorizontal, Sliders
+  Users, Tag, Check, ChevronRight, Tv
 } from 'lucide-react';
 
 const ALPHABET = ['#', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'];
@@ -54,6 +53,7 @@ function MediaCard({
   isDuplicate,
   viewLayout = 'poster',
   onPlay,
+  onPlayModal,
   onToggleFavorite,
   onTogglePlayed,
   onOpenMetadataEditor,
@@ -99,7 +99,6 @@ function MediaCard({
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
-  // Mousemove Trickplay timeline handler (cursor X controls video timeline frame)
   const handleCoverMouseMove = useCallback((e) => {
     const rect = e.currentTarget.getBoundingClientRect();
     if (!rect.width) return;
@@ -154,10 +153,9 @@ function MediaCard({
           </div>
         )}
 
-        {/* Clean Trickplay Frame (Strict 16:9 Aspect Ratio, NO DARK MASKS, NO CENTER BUTTON) */}
+        {/* Clean Trickplay Frame */}
         {tpStyle && (
           <div className="absolute inset-0 bg-black flex items-center justify-center overflow-hidden pointer-events-none">
-            {/* 16:9 Aspect Ratio Frame Container */}
             <div 
               className="w-full aspect-video relative shadow-2xl"
               style={tpStyle}
@@ -223,9 +221,8 @@ function MediaCard({
           )}
         </div>
 
-        {/* Hover Corner Action Buttons (No Full-Screen Dark Mask) */}
+        {/* Hover Action Buttons */}
         <div className="absolute inset-x-2 bottom-2 z-30 flex items-center justify-between opacity-80 md:opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-          {/* Favorite Toggle */}
           <button
             onClick={(e) => { e.stopPropagation(); onToggleFavorite(item); }}
             className={`p-1.5 rounded-lg backdrop-blur-md border transition ${
@@ -238,7 +235,6 @@ function MediaCard({
             <Star size={14} className={isFavorite ? 'fill-amber-400' : ''} />
           </button>
 
-          {/* More Menu (...) */}
           <div className="relative">
             <button
               onClick={(e) => {
@@ -255,7 +251,7 @@ function MediaCard({
               <MoreVertical size={14} />
             </button>
 
-            {/* Desktop Context Menu Dropdown */}
+            {/* Desktop Context Menu */}
             {showContextMenu && (
               <div 
                 className="hidden md:block absolute right-0 bottom-8 w-44 glass-panel rounded-xl shadow-2xl py-1 z-50 text-xs text-gray-200 divide-y divide-white/5 animate-in fade-in zoom-in-95 duration-150"
@@ -266,8 +262,16 @@ function MediaCard({
                     onClick={() => { onPlay(item); setShowContextMenu(false); }}
                     className="w-full px-3 py-1.5 text-left hover:bg-white/10 flex items-center gap-2 text-cyan-300 font-medium"
                   >
+                    <Tv size={13} />
+                    <span>悬浮窗播放 (3窗)</span>
+                  </button>
+
+                  <button 
+                    onClick={() => { if (onPlayModal) onPlayModal(item); setShowContextMenu(false); }}
+                    className="w-full px-3 py-1.5 text-left hover:bg-white/10 flex items-center gap-2 text-gray-300"
+                  >
                     <Play size={13} />
-                    <span>影院播放</span>
+                    <span>影院全屏模式</span>
                   </button>
 
                   <button 
@@ -481,7 +485,9 @@ export default function LibraryView({
   selectedLetter,
   onSelectLetter,
   onEnterKanban,
+  onOpenRandom3Windows,
   onPlaySingleItem,
+  onPlayModal,
   onUpdateItem,
   onDeleteItem,
   onOpenMetadataEditor,
@@ -584,7 +590,7 @@ export default function LibraryView({
       {/* Top Navigation Bar */}
       <div className="border-b border-white/5 bg-slate-950/90 backdrop-blur-md px-3 sm:px-5 py-2.5 sm:py-3 flex flex-col gap-2.5 z-30 pt-[max(0.5rem,env(safe-area-inset-top))]">
         
-        {/* Row 1: Primary Library Tabs & Kanban Launcher */}
+        {/* Row 1: Primary Library Tabs, Random 3 Windows & Kanban Launcher */}
         <div className="flex items-center justify-between gap-2.5">
           <div className="flex items-center gap-1.5 overflow-x-auto py-0.5 flex-1 min-w-0">
             {userViews.map(view => (
@@ -604,7 +610,7 @@ export default function LibraryView({
 
             <button
               onClick={() => onSelectView('all')}
-              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-medium transition flex-shrink-0 ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition flex-shrink-0 ${
                 selectedViewId === 'all'
                   ? 'bg-jf-accent text-white shadow-lg shadow-cyan-500/25'
                   : 'bg-black/40 hover:bg-white/10 text-gray-400 border border-white/5'
@@ -616,16 +622,28 @@ export default function LibraryView({
             </button>
           </div>
 
-          {/* Kanban Launcher */}
-          <button
-            onClick={onEnterKanban}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white text-xs font-bold shadow-lg shadow-cyan-500/25 transition transform hover:scale-[1.02] flex-shrink-0"
-            title="开启随机多视口看板"
-          >
-            <Shuffle size={13} />
-            <span className="hidden sm:inline">随机看板</span>
-            <span className="font-mono text-[11px]">({totalRecordCount > 0 ? totalRecordCount : displayItems.length})</span>
-          </button>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {/* Tampermonkey 随机3窗 Launcher */}
+            <button
+              onClick={onOpenRandom3Windows}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 text-xs font-bold shadow-lg transition transform hover:scale-[1.02]"
+              title="复刻油猴脚本：在当前页面随机开启3个独立悬浮播放窗"
+            >
+              <Tv size={13} className="text-amber-400" />
+              <span>随机3窗</span>
+            </button>
+
+            {/* Kanban Mode Launcher */}
+            <button
+              onClick={onEnterKanban}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white text-xs font-bold shadow-lg shadow-cyan-500/25 transition transform hover:scale-[1.02]"
+              title="开启全屏随机多视口看板"
+            >
+              <Shuffle size={13} />
+              <span className="hidden sm:inline">随机看板</span>
+              <span className="font-mono text-[11px]">({totalRecordCount > 0 ? totalRecordCount : displayItems.length})</span>
+            </button>
+          </div>
         </div>
 
         {/* Row 2: Secondary Sub-Tabs */}
@@ -897,6 +915,7 @@ export default function LibraryView({
                     isDuplicate={duplicateItemIds.has(item.Id)}
                     viewLayout={viewLayout}
                     onPlay={onPlaySingleItem}
+                    onPlayModal={onPlayModal}
                     onToggleFavorite={handleToggleFavorite}
                     onTogglePlayed={handleTogglePlayed}
                     onOpenMetadataEditor={onOpenMetadataEditor}

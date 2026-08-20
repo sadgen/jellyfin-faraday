@@ -6,8 +6,10 @@ import {
   updateItemInCache, 
   deleteItemFromCache 
 } from './utils/mediaCache';
+import { sortMediaItems } from './utils/mediaSorter';
 import DesktopLayout from './components/DesktopLayout';
 import LibraryView from './components/LibraryView';
+import FloatingWindowsContainer from './components/FloatingWindowsContainer';
 import LoginModal from './components/LoginModal';
 import SettingsModal from './components/SettingsModal';
 import MetadataEditorModal from './components/MetadataEditorModal';
@@ -15,11 +17,12 @@ import IdentifyModal from './components/IdentifyModal';
 import VideoPlayerModal from './components/VideoPlayerModal';
 import MobileNavBar from './components/MobileNavBar';
 import ErrorBoundary from './components/ErrorBoundary';
-import { Film, AlertCircle, Loader2 } from 'lucide-react';
+import { Film, AlertCircle } from 'lucide-react';
 
 const STORAGE_KEY_TILES = 'jf_faraday_tile_count';
 const STORAGE_KEY_FILTER = 'jf_faraday_filter_mode';
 const STORAGE_KEY_VIEW = 'jf_last_selected_view';
+const STORAGE_KEY_SORT = 'jf_faraday_sort_method';
 
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(jellyfin.auth.isConfigured);
@@ -36,7 +39,7 @@ export default function App() {
     }
   });
   
-  // Synchronously initialize to saved library or first cached library (Avoids any initial "All" query)
+  // Synchronously initialize to saved library or first cached library
   const [selectedViewId, setSelectedViewId] = useState(() => {
     const saved = localStorage.getItem(STORAGE_KEY_VIEW);
     if (saved) return saved;
@@ -47,9 +50,12 @@ export default function App() {
     return '';
   });
 
+  const [sortMethod, setSortMethod] = useState(() => {
+    return localStorage.getItem(STORAGE_KEY_SORT) || 'date_desc';
+  });
+
   const [searchKeyword, setSearchKeyword] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
-  const [sortMethod, setSortMethod] = useState('date_desc');
   const [selectedGenre, setSelectedGenre] = useState('');
   const [selectedYear, setSelectedYear] = useState('');
   const [selectedLetter, setSelectedLetter] = useState('');
@@ -60,6 +66,10 @@ export default function App() {
 
   // Kanban Items Stream
   const [kanbanPool, setKanbanPool] = useState([]);
+
+  // Floating 3-Window PIP Preview System (Tampermonkey Multi-Slot Replica)
+  const [floatingWindows, setFloatingWindows] = useState([]);
+  const MAX_FLOATING_WINDOWS = 3;
 
   // Preferences
   const [activeTileCount, setActiveTileCount] = useState(() => {
@@ -90,6 +100,13 @@ export default function App() {
     localStorage.setItem(STORAGE_KEY_VIEW, viewId);
   };
 
+  const handleSortMethodChange = (sort) => {
+    setSortMethod(sort);
+    localStorage.setItem(STORAGE_KEY_SORT, sort);
+    // Instant sort current items in memory
+    setMediaItems(prev => sortMediaItems(prev, sort));
+  };
+
   const handleTileCountChange = (count) => {
     setActiveTileCount(count);
     localStorage.setItem(STORAGE_KEY_TILES, count.toString());
@@ -104,11 +121,13 @@ export default function App() {
   useEffect(() => {
     if (!jellyfin.auth.isConfigured) return;
 
-    // Load from local IndexedDB cache immediately
+    // Load from local IndexedDB cache immediately with IDENTICAL sort order
     loadFullCache().then(cache => {
       if (cache.items && cache.items.length > 0) {
-        setMediaItems(cache.items);
-        setTotalRecordCount(cache.count || cache.items.length);
+        // Pre-sort cache identically to sortMethod to prevent order jumping on refresh!
+        const sortedCached = sortMediaItems(cache.items, sortMethod);
+        setMediaItems(sortedCached);
+        setTotalRecordCount(cache.count || sortedCached.length);
       }
       if (cache.views && cache.views.length > 0) {
         setUserViews(cache.views);
@@ -133,12 +152,12 @@ export default function App() {
     }).catch(err => {
       console.warn('Failed to fetch user views:', err);
     });
-  }, [isAuthenticated, selectedViewId]);
+  }, [isAuthenticated, selectedViewId, sortMethod]);
 
   // 2. Query Media Items & Save to Local Cache (Fast Stream: 150 items first < 15ms)
   const fetchAllMedia = useCallback(async (viewId, search, status, sort, genre, year, letter, isBackground = false) => {
     if (!jellyfin.auth.isConfigured) return;
-    if (!viewId) return; // Prevent premature all-libraries query!
+    if (!viewId) return;
 
     if (!isBackground) setIsLoading(true);
     setErrorText('');
@@ -240,6 +259,115 @@ export default function App() {
     }
   }, [viewMode, loadKanbanStream]);
 
+  // ==================== FLOATING 3-WINDOW PIP SYSTEM ====================
+  // Calculate slot position (docked at bottom or cascaded)
+  const getSlotPosition = (slotIndex) => {
+    const marginX = 20;
+    const windowWidth = 330;
+    const bottomY = Math.max(10, window.innerHeight - 275);
+    const leftX = marginX + slotIndex * windowWidth;
+    // If overflowing screen width, cascade slightly
+    if (leftX + 320 > window.innerWidth) {
+      return { x: window.innerWidth - 340 - slotIndex * 30, y: bottomY - slotIndex * 40 };
+    }
+    return { x: leftX, y: bottomY };
+  };
+
+  // Open item in a floating slot (FIFO replacement if all 3 full: "相互替代")
+  const handleOpenFloatingWindow = useCallback((item) => {
+    if (!item?.Id) return;
+    setFloatingWindows(prev => {
+      const occupiedSlots = prev.map(w => w.slotIndex);
+      // Find empty slot (0, 1, 2)
+      let targetSlot = [0, 1, 2].find(s => !occupiedSlots.includes(s));
+
+      if (targetSlot === undefined) {
+        // All 3 slots full: replace oldest window (FIFO)
+        const sortedByTime = [...prev].sort((a, b) => a.timestamp - b.timestamp);
+        const oldest = sortedByTime[0];
+        targetSlot = oldest.slotIndex;
+        const filtered = prev.filter(w => w.id !== oldest.id);
+        return [
+          ...filtered,
+          {
+            id: `win-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            slotIndex: targetSlot,
+            item,
+            timestamp: Date.now(),
+            position: getSlotPosition(targetSlot)
+          }
+        ];
+      }
+
+      return [
+        ...prev,
+        {
+          id: `win-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          slotIndex: targetSlot,
+          item,
+          timestamp: Date.now(),
+          position: getSlotPosition(targetSlot)
+        }
+      ];
+    });
+  }, []);
+
+  // Open 3 random videos in 3 slots simultaneously (Tampermonkey 随机3窗)
+  const handleOpenRandom3Windows = useCallback(() => {
+    const pool = mediaItems.length > 0 ? mediaItems : kanbanPool;
+    if (pool.length === 0) return;
+
+    // Prefer unplayed items
+    const unplayed = pool.filter(it => !it.UserData?.Played);
+    const candidatePool = unplayed.length >= 3 ? unplayed : pool;
+
+    const shuffled = [...candidatePool].sort(() => 0.5 - Math.random());
+    const selected3 = shuffled.slice(0, 3);
+
+    setFloatingWindows(
+      selected3.map((it, idx) => ({
+        id: `win-${Date.now()}-${idx}`,
+        slotIndex: idx,
+        item: it,
+        timestamp: Date.now() + idx,
+        position: getSlotPosition(idx)
+      }))
+    );
+  }, [mediaItems, kanbanPool]);
+
+  // Close floating window
+  const handleCloseFloatingWindow = useCallback((slotIndex) => {
+    setFloatingWindows(prev => prev.filter(w => w.slotIndex !== slotIndex));
+  }, []);
+
+  // Skip video in floating window to another random item
+  const handleSkipFloatingWindow = useCallback((slotIndex) => {
+    const pool = mediaItems.length > 0 ? mediaItems : kanbanPool;
+    if (pool.length === 0) return;
+    const randomItem = pool[Math.floor(Math.random() * pool.length)];
+    if (!randomItem) return;
+
+    setFloatingWindows(prev => prev.map(w => {
+      if (w.slotIndex === slotIndex) {
+        return {
+          ...w,
+          item: randomItem,
+          timestamp: Date.now()
+        };
+      }
+      return w;
+    }));
+  }, [mediaItems, kanbanPool]);
+
+  // Bring clicked window to front
+  const handleBringFloatingToFront = useCallback((winId) => {
+    setFloatingWindows(prev => {
+      const target = prev.find(w => w.id === winId);
+      if (!target) return prev;
+      return [...prev.filter(w => w.id !== winId), { ...target, timestamp: Date.now() }];
+    });
+  }, []);
+
   // Active scope name
   const activeScopeName = useMemo(() => {
     let name = '全部媒体库';
@@ -269,6 +397,7 @@ export default function App() {
     if (!updatedItem?.Id) return;
     setMediaItems(prev => prev.map(item => item.Id === updatedItem.Id ? { ...item, ...updatedItem } : item));
     setKanbanPool(prev => prev.map(item => item.Id === updatedItem.Id ? { ...item, ...updatedItem } : item));
+    setFloatingWindows(prev => prev.map(w => w.item.Id === updatedItem.Id ? { ...w, item: { ...w.item, ...updatedItem } } : w));
     updateItemInCache(updatedItem);
   }, []);
 
@@ -276,14 +405,20 @@ export default function App() {
   const handleDeleteItem = useCallback((deletedId) => {
     setMediaItems(prev => prev.filter(item => item.Id !== deletedId));
     setKanbanPool(prev => prev.filter(item => item.Id !== deletedId));
+    setFloatingWindows(prev => prev.filter(w => w.item.Id !== deletedId));
     setTotalRecordCount(prev => Math.max(0, prev - 1));
     deleteItemFromCache(deletedId);
   }, []);
 
   // Play single item clicked from Media Library
   const handlePlaySingleItem = useCallback((item) => {
-    setModalPlayingItem(item);
-  }, []);
+    // Open in floating window (Tampermonkey slot behavior) on desktop, or modal on mobile
+    if (typeof window !== 'undefined' && window.innerWidth < 768) {
+      setModalPlayingItem(item);
+    } else {
+      handleOpenFloatingWindow(item);
+    }
+  }, [handleOpenFloatingWindow]);
 
   // Login handler
   const handleLoginSuccess = () => {
@@ -297,6 +432,7 @@ export default function App() {
     setIsAuthenticated(false);
     setMediaItems([]);
     setUserViews([]);
+    setFloatingWindows([]);
     setIsLoginModalOpen(true);
   };
 
@@ -332,7 +468,7 @@ export default function App() {
               statusFilter={statusFilter}
               onStatusFilterChange={setStatusFilter}
               sortMethod={sortMethod}
-              onSortMethodChange={setSortMethod}
+              onSortMethodChange={handleSortMethodChange}
               selectedGenre={selectedGenre}
               onSelectGenre={setSelectedGenre}
               selectedYear={selectedYear}
@@ -343,7 +479,9 @@ export default function App() {
                 setInitialKanbanItem(null);
                 setViewMode('kanban');
               }}
+              onOpenRandom3Windows={handleOpenRandom3Windows}
               onPlaySingleItem={handlePlaySingleItem}
+              onPlayModal={(item) => setModalPlayingItem(item)}
               onUpdateItem={handleUpdateItem}
               onDeleteItem={handleDeleteItem}
               onOpenMetadataEditor={(item) => setEditingItem(item)}
@@ -371,6 +509,17 @@ export default function App() {
             />
           )}
         </div>
+
+        {/* Floating 3-Window PIP Preview System (Tampermonkey Multi-Slot Replica) */}
+        {viewMode === 'library' && (
+          <FloatingWindowsContainer
+            windows={floatingWindows}
+            onCloseWindow={handleCloseFloatingWindow}
+            onSkipWindow={handleSkipFloatingWindow}
+            onExpandWindow={(item) => setModalPlayingItem(item)}
+            onBringToFront={handleBringFloatingToFront}
+          />
+        )}
 
         {/* Mobile Bottom Navigation Bar (ONLY in Library View, Never Blocks Video Playback) */}
         {viewMode === 'library' && (

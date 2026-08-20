@@ -44,7 +44,7 @@ export default function DesktopLayout({
   }, [activeTileCount]);
 
   return (
-    <div className="relative w-screen h-screen bg-[#080b11] p-3 pb-24 overflow-hidden flex flex-col">
+    <div className="relative w-screen h-screen bg-[#080b11] p-1.5 sm:p-2.5 overflow-hidden flex flex-col">
       {/* Empty State */}
       {(!items || items.length === 0) && (
         <div className="flex-1 flex flex-col items-center justify-center text-gray-400 gap-3">
@@ -60,9 +60,9 @@ export default function DesktopLayout({
         </div>
       )}
 
-      {/* Video Tiles Grid Viewport */}
+      {/* Video Tiles Grid Viewport (100% full height without bottom obstruction) */}
       {items && items.length > 0 && (
-        <div className={`flex-1 w-full h-full grid gap-3 ${gridClasses}`}>
+        <div className={`flex-1 w-full h-full grid gap-2 sm:gap-2.5 ${gridClasses}`}>
           {Array.from({ length: activeTileCount }).map((_, index) => {
             const item = displayedItems[index] || null;
             return (
@@ -80,7 +80,7 @@ export default function DesktopLayout({
         </div>
       )}
 
-      {/* Floating Control HUD */}
+      {/* Floating Non-Obstructive Control HUD */}
       <ControlHUD
         totalCount={totalCount}
         remainingCount={remainingCount}

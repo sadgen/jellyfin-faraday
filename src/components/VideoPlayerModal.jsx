@@ -240,18 +240,18 @@ export default function VideoPlayerModal({
 
   return (
     <div 
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 md:bg-black/90 backdrop-blur-md md:p-4 animate-in fade-in duration-200"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 md:bg-black/90 backdrop-blur-md md:p-4 animate-in fade-in duration-200 overflow-hidden"
       onClick={onClose}
     >
       <div 
         ref={containerRef}
-        className="relative w-full h-full md:h-auto md:max-w-5xl bg-[#0d1117] md:rounded-2xl overflow-hidden shadow-2xl border border-white/10 flex flex-col md:max-h-[92vh]"
+        className="relative w-full h-full md:h-auto md:max-w-5xl bg-[#0d1117] md:rounded-2xl overflow-hidden shadow-2xl border border-white/10 flex flex-col justify-between md:justify-start md:max-h-[92vh]"
         style={{ filter: `brightness(${brightness})` }}
         onClick={(e) => e.stopPropagation()}
         {...touchHandlers}
       >
         {/* Header Bar */}
-        <div className="p-3.5 border-b border-white/5 flex items-center justify-between bg-black/60 text-xs z-30 pt-[max(0.75rem,env(safe-area-inset-top))]">
+        <div className="p-3.5 border-b border-white/5 flex items-center justify-between bg-black/60 text-xs z-30 pt-[max(0.75rem,env(safe-area-inset-top))] flex-shrink-0">
           <div className="flex items-center gap-2.5 min-w-0 pr-2">
             <Film size={18} className="text-cyan-400 flex-shrink-0" />
             <span className="font-bold text-white text-sm truncate">{item?.Name}</span>
@@ -316,7 +316,7 @@ export default function VideoPlayerModal({
         </div>
 
         {/* Video Canvas Container */}
-        <div className="relative flex-1 md:flex-none w-full md:aspect-video bg-black flex items-center justify-center overflow-hidden touch-none">
+        <div className="relative flex-1 min-h-0 w-full md:aspect-video bg-black flex items-center justify-center overflow-hidden touch-none">
           {/* Poster Backdrop */}
           {posterUrl && (
             <img 
@@ -379,7 +379,7 @@ export default function VideoPlayerModal({
         </div>
 
         {/* Player Controls & Scrubber */}
-        <div className="p-4 bg-slate-900/95 border-t border-white/5 flex flex-col gap-3 pb-[max(1rem,env(safe-area-inset-bottom))] z-30">
+        <div className="p-4 bg-slate-900/95 border-t border-white/5 flex flex-col gap-3 pb-[max(1.25rem,env(safe-area-inset-bottom))] z-30 flex-shrink-0">
           {/* Scrubber Container */}
           <div className="relative w-full">
             <TrickplayScrubberThumbnail

@@ -7,6 +7,7 @@ import SettingsModal from './components/SettingsModal';
 import MetadataEditorModal from './components/MetadataEditorModal';
 import IdentifyModal from './components/IdentifyModal';
 import VideoPlayerModal from './components/VideoPlayerModal';
+import MobileNavBar from './components/MobileNavBar';
 import ErrorBoundary from './components/ErrorBoundary';
 import { Film, AlertCircle, Loader2 } from 'lucide-react';
 
@@ -36,11 +37,12 @@ export default function App() {
   // Kanban Items Stream
   const [kanbanPool, setKanbanPool] = useState([]);
 
-  // Preferences
+  // Preferences (Default 1 tile on mobile if small screen)
   const [activeTileCount, setActiveTileCount] = useState(() => {
     const saved = localStorage.getItem(STORAGE_KEY_TILES);
     const count = parseInt(saved, 10);
-    return [1, 2, 4].includes(count) ? count : 2;
+    if ([1, 2, 4].includes(count)) return count;
+    return typeof window !== 'undefined' && window.innerWidth < 768 ? 1 : 2;
   });
 
   const [filterMode, setFilterMode] = useState(() => {
@@ -80,7 +82,7 @@ export default function App() {
     });
   }, [isAuthenticated]);
 
-  // Query All Media Items for the Active Filter (< 100ms lightweight fetch)
+  // Query All Media Items for the Active Filter
   const fetchAllMedia = useCallback(async (viewId, search, status, sort, genre, year, letter) => {
     if (!jellyfin.auth.isConfigured) return;
     setIsLoading(true);
@@ -96,7 +98,7 @@ export default function App() {
         year,
         nameStartsWithOrGreater: letter,
         startIndex: 0,
-        limit: 0 // Fetch all matching items at once!
+        limit: 0
       });
 
       setMediaItems(data.Items || []);
@@ -207,7 +209,7 @@ export default function App() {
 
   return (
     <ErrorBoundary>
-      <div className="relative w-screen h-screen bg-[#080b11] text-gray-100 overflow-hidden select-none">
+      <div className="relative w-screen h-screen bg-[#080b11] text-gray-100 overflow-hidden select-none flex flex-col">
         
         {/* Global Error Banner */}
         {errorText && (
@@ -223,57 +225,72 @@ export default function App() {
           </div>
         )}
 
-        {/* Main View Mode Switch */}
-        {viewMode === 'library' ? (
-          <LibraryView
-            items={mediaItems}
-            totalRecordCount={totalRecordCount}
-            userViews={userViews}
-            selectedViewId={selectedViewId}
-            onSelectView={setSelectedViewId}
-            searchKeyword={searchKeyword}
-            onSearchChange={setSearchKeyword}
-            statusFilter={statusFilter}
-            onStatusFilterChange={setStatusFilter}
-            sortMethod={sortMethod}
-            onSortMethodChange={setSortMethod}
-            selectedGenre={selectedGenre}
-            onSelectGenre={setSelectedGenre}
-            selectedYear={selectedYear}
-            onSelectYear={setSelectedYear}
-            selectedLetter={selectedLetter}
-            onSelectLetter={setSelectedLetter}
-            onEnterKanban={() => {
-              setInitialKanbanItem(null);
-              setViewMode('kanban');
-            }}
-            onPlaySingleItem={handlePlaySingleItem}
-            onUpdateItem={handleUpdateItem}
-            onDeleteItem={handleDeleteItem}
-            onOpenMetadataEditor={(item) => setEditingItem(item)}
-            onOpenIdentify={(item) => setIdentifyingItem(item)}
-            onRefreshLibrary={() => fetchAllMedia(selectedViewId, searchKeyword, statusFilter, sortMethod, selectedGenre, selectedYear, selectedLetter)}
-            isRefreshing={isLoading}
-          />
-        ) : (
-          <DesktopLayout
-            items={kanbanPool.length > 0 ? kanbanPool : mediaItems}
-            activeTileCount={activeTileCount}
-            onTileCountChange={handleTileCountChange}
-            filterMode={filterMode}
-            onFilterModeChange={handleFilterModeChange}
-            isGlobalMuted={isGlobalMuted}
-            onToggleGlobalMute={() => setIsGlobalMuted(!isGlobalMuted)}
-            playbackSpeed={playbackSpeed}
-            onPlaybackSpeedChange={setPlaybackSpeed}
-            onOpenSettings={() => setIsSettingsModalOpen(true)}
-            onRefreshLibrary={loadKanbanStream}
-            isRefreshing={isLoading}
-            onOpenLibraryView={() => setViewMode('library')}
-            activeScopeName={activeScopeName}
-            initialPlayingItem={initialKanbanItem}
-          />
-        )}
+        {/* Main View Area */}
+        <div className="flex-1 w-full h-full overflow-hidden">
+          {viewMode === 'library' ? (
+            <LibraryView
+              items={mediaItems}
+              totalRecordCount={totalRecordCount}
+              userViews={userViews}
+              selectedViewId={selectedViewId}
+              onSelectView={setSelectedViewId}
+              searchKeyword={searchKeyword}
+              onSearchChange={setSearchKeyword}
+              statusFilter={statusFilter}
+              onStatusFilterChange={setStatusFilter}
+              sortMethod={sortMethod}
+              onSortMethodChange={setSortMethod}
+              selectedGenre={selectedGenre}
+              onSelectGenre={setSelectedGenre}
+              selectedYear={selectedYear}
+              onSelectYear={setSelectedYear}
+              selectedLetter={selectedLetter}
+              onSelectLetter={setSelectedLetter}
+              onEnterKanban={() => {
+                setInitialKanbanItem(null);
+                setViewMode('kanban');
+              }}
+              onPlaySingleItem={handlePlaySingleItem}
+              onUpdateItem={handleUpdateItem}
+              onDeleteItem={handleDeleteItem}
+              onOpenMetadataEditor={(item) => setEditingItem(item)}
+              onOpenIdentify={(item) => setIdentifyingItem(item)}
+              onRefreshLibrary={() => fetchAllMedia(selectedViewId, searchKeyword, statusFilter, sortMethod, selectedGenre, selectedYear, selectedLetter)}
+              isRefreshing={isLoading}
+            />
+          ) : (
+            <DesktopLayout
+              items={kanbanPool.length > 0 ? kanbanPool : mediaItems}
+              activeTileCount={activeTileCount}
+              onTileCountChange={handleTileCountChange}
+              filterMode={filterMode}
+              onFilterModeChange={handleFilterModeChange}
+              isGlobalMuted={isGlobalMuted}
+              onToggleGlobalMute={() => setIsGlobalMuted(!isGlobalMuted)}
+              playbackSpeed={playbackSpeed}
+              onPlaybackSpeedChange={setPlaybackSpeed}
+              onOpenSettings={() => setIsSettingsModalOpen(true)}
+              onRefreshLibrary={loadKanbanStream}
+              isRefreshing={isLoading}
+              onOpenLibraryView={() => setViewMode('library')}
+              activeScopeName={activeScopeName}
+              initialPlayingItem={initialKanbanItem}
+            />
+          )}
+        </div>
+
+        {/* Mobile Bottom Navigation Bar */}
+        <MobileNavBar
+          viewMode={viewMode}
+          onSwitchView={(mode) => setViewMode(mode)}
+          onOpenSearch={() => {
+            setViewMode('library');
+            const searchInput = document.querySelector('input[type="text"]');
+            if (searchInput) searchInput.focus();
+          }}
+          onOpenSettings={() => setIsSettingsModalOpen(true)}
+          totalCount={totalRecordCount}
+        />
 
         {/* Full-Screen Theater Video Player Modal */}
         <VideoPlayerModal

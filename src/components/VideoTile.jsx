@@ -2,11 +2,12 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import Hls from 'hls.js';
 import { jellyfin } from '../api/jellyfinClient';
 import { useExternalPlayer } from '../hooks/useExternalPlayer';
+import { useTouchGestures } from '../hooks/useTouchGestures';
 import TrickplayScrubberThumbnail from './TrickplayScrubberThumbnail';
 import { 
   Play, Pause, SkipForward, Volume2, VolumeX, Maximize, 
   Star, Eye, EyeOff, ExternalLink, Zap, Image as ImageIcon,
-  X, Info, Tag, Calendar, Film
+  X, Info, Tag, Calendar, Film, Sun, FastForward
 } from 'lucide-react';
 
 export default function VideoTile({
@@ -36,6 +37,7 @@ export default function VideoTile({
   const [progress, setProgress] = useState(0);
   const [currentTimeText, setCurrentTimeText] = useState('00:00');
   const [durationText, setDurationText] = useState('00:00');
+  const [rawDuration, setRawDuration] = useState(0);
 
   // Trickplay Hover State
   const [hoverScrubberTime, setHoverScrubberTime] = useState(null);
@@ -43,6 +45,24 @@ export default function VideoTile({
   const [scrubberWidth, setScrubberWidth] = useState(300);
 
   const { launchPlayer } = useExternalPlayer();
+
+  // Mobile Touch Gestures
+  const { gestureState, brightness, touchHandlers } = useTouchGestures({
+    videoRef,
+    containerRef,
+    duration: rawDuration,
+    currentTime: videoRef.current?.currentTime || 0,
+    onSeek: (target) => {
+      if (videoRef.current) videoRef.current.currentTime = target;
+    },
+    onTogglePlay: () => {
+      togglePlay();
+    },
+    normalSpeed: playbackSpeed,
+    onSpeedChange: (speed) => {
+      if (videoRef.current) videoRef.current.playbackRate = speed;
+    }
+  });
 
   // Sync mute with global setting
   useEffect(() => {
@@ -88,7 +108,6 @@ export default function VideoTile({
       videoEl.playbackRate = playbackSpeed;
       videoEl.muted = isTileMuted;
       videoEl.play().catch(err => {
-        console.warn(`[Tile ${tileId}] Direct play autoplay blocked or failed:`, err);
         videoEl.muted = true;
         setIsTileMuted(true);
         videoEl.play().catch(() => {});
@@ -115,7 +134,6 @@ export default function VideoTile({
         });
         hls.on(Hls.Events.ERROR, (_, data) => {
           if (data.fatal) {
-            console.error(`[Tile ${tileId}] HLS fatal error:`, data);
             setHasError(true);
             setErrorMessage('视频解码或转码失败');
           }
@@ -129,7 +147,6 @@ export default function VideoTile({
     };
 
     const handleDirectError = () => {
-      console.warn(`[Tile ${tileId}] Direct stream error, falling back to HLS`);
       setupHlsPlay();
     };
 
@@ -157,6 +174,7 @@ export default function VideoTile({
   const handleTimeUpdate = () => {
     const video = videoRef.current;
     if (!video || !video.duration) return;
+    setRawDuration(video.duration);
     const p = (video.currentTime / video.duration) * 100;
     setProgress(p);
     setCurrentTimeText(formatTime(video.currentTime));
@@ -187,8 +205,7 @@ export default function VideoTile({
     setHoverScrubberTime(null);
   };
 
-  const togglePlay = (e) => {
-    e.stopPropagation();
+  const togglePlay = () => {
     const video = videoRef.current;
     if (!video) return;
     if (video.paused) {
@@ -201,7 +218,7 @@ export default function VideoTile({
   };
 
   const toggleMute = (e) => {
-    e.stopPropagation();
+    if (e) e.stopPropagation();
     const video = videoRef.current;
     if (!video) return;
     const nextMuted = !video.muted;
@@ -210,7 +227,7 @@ export default function VideoTile({
   };
 
   const toggleFullscreen = (e) => {
-    e.stopPropagation();
+    if (e) e.stopPropagation();
     const container = containerRef.current;
     if (!container) return;
     if (!document.fullscreenElement) {
@@ -220,9 +237,9 @@ export default function VideoTile({
     }
   };
 
-  // MOUSE MIDDLE-CLICK (AuxClick button === 1): Close current video and skip to next!
+  // MOUSE MIDDLE-CLICK (AuxClick button === 1)
   const handleAuxClick = (e) => {
-    if (e.button === 1) { // Middle mouse button
+    if (e.button === 1) {
       e.preventDefault();
       e.stopPropagation();
       if (onSkip) onSkip(tileId);
@@ -231,7 +248,7 @@ export default function VideoTile({
 
   // Toggle Favorite
   const handleToggleFavorite = async (e) => {
-    e.stopPropagation();
+    if (e) e.stopPropagation();
     if (!item?.Id) return;
     const isFav = !!item.UserData?.IsFavorite;
     const nextFav = !isFav;
@@ -252,7 +269,7 @@ export default function VideoTile({
 
   // Toggle Played Status
   const handleTogglePlayed = async (e) => {
-    e.stopPropagation();
+    if (e) e.stopPropagation();
     if (!item?.Id) return;
     const isPlayed = !!item.UserData?.Played;
     const nextPlayed = !isPlayed;
@@ -285,8 +302,10 @@ export default function VideoTile({
         setIsHovered(false);
         setShowPlayerMenu(false);
       }}
-      className="relative w-full h-full bg-black overflow-hidden group select-none border border-slate-800/80 rounded-lg shadow-2xl flex flex-col justify-center items-center"
-      title="鼠标中键点击直接换片，左键点击播放/暂停"
+      className="relative w-full h-full bg-black overflow-hidden group select-none border border-slate-800/80 rounded-xl shadow-2xl flex flex-col justify-center items-center touch-none"
+      style={{ filter: `brightness(${brightness})` }}
+      title="鼠标中键切片，双击暂停/播放，左右滑动快进"
+      {...touchHandlers}
     >
       {/* Fallback & Paused Poster Cover Artwork */}
       {posterUrl && (
@@ -319,10 +338,23 @@ export default function VideoTile({
         onTimeUpdate={handleTimeUpdate}
       />
 
-      {/* Pinned Poster Floating PIP View (if toggled) */}
+      {/* Mobile Touch Gesture HUD Overlay */}
+      {gestureState.type && (
+        <div className="absolute inset-0 z-30 flex items-center justify-center pointer-events-none animate-in fade-in zoom-in-95 duration-100">
+          <div className="flex flex-col items-center gap-2 bg-black/80 backdrop-blur-md px-4 py-3 rounded-2xl border border-white/10 shadow-2xl text-white">
+            {gestureState.type === 'seek' && <FastForward size={24} className="text-cyan-400 animate-pulse" />}
+            {gestureState.type === 'brightness' && <Sun size={24} className="text-amber-400" />}
+            {gestureState.type === 'volume' && <Volume2 size={24} className="text-cyan-400" />}
+            {gestureState.type === 'speed_boost' && <Zap size={24} className="text-amber-400 animate-bounce" />}
+            <span className="font-mono font-bold text-xs">{gestureState.text}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Pinned Poster Floating PIP View */}
       {showPinnedPoster && posterUrl && (
         <div 
-          className="absolute top-12 right-2.5 z-30 w-28 aspect-[2/3] rounded-xl overflow-hidden shadow-2xl border border-cyan-500/40 bg-black/80 backdrop-blur-md animate-in zoom-in-95 duration-200"
+          className="absolute top-12 right-2.5 z-30 w-24 sm:w-28 aspect-[2/3] rounded-xl overflow-hidden shadow-2xl border border-cyan-500/40 bg-black/80 backdrop-blur-md animate-in zoom-in-95 duration-200"
           onClick={(e) => e.stopPropagation()}
         >
           <img src={posterUrl} alt="Cover" className="w-full h-full object-cover" />
@@ -371,9 +403,8 @@ export default function VideoTile({
         </div>
       )}
 
-      {/* Top Left Badges: Play Count & Type */}
+      {/* Top Left Badges */}
       <div className="absolute top-2.5 left-2.5 z-20 flex items-center gap-1.5 pointer-events-none">
-        {/* Play Count Badge */}
         <div 
           className="flex items-center gap-1 px-2 py-0.5 rounded bg-black/60 backdrop-blur-md border border-white/10 text-[11px] font-mono font-medium text-cyan-300 shadow-sm"
           title={`已播放 ${playCount} 次`}
@@ -382,7 +413,6 @@ export default function VideoTile({
           <span>{playCount}</span>
         </div>
 
-        {/* Community Rating */}
         {item?.CommunityRating && (
           <div className="flex items-center gap-1 px-2 py-0.5 rounded bg-black/60 backdrop-blur-md border border-white/10 text-[11px] font-mono font-medium text-amber-300 shadow-sm">
             <Star size={11} className="fill-amber-400 text-amber-400" />
@@ -391,10 +421,8 @@ export default function VideoTile({
         )}
       </div>
 
-      {/* Top Right Quick Actions (Middle-Click Hint & Favorite & Poster Toggle) */}
-      <div className={`absolute top-2.5 right-2.5 z-20 flex items-center gap-1.5 transition-opacity duration-200 ${isHovered ? 'opacity-100' : 'opacity-0 md:opacity-0 group-hover:opacity-100'}`}>
-        
-        {/* Toggle Poster PIP View */}
+      {/* Top Right Quick Actions */}
+      <div className={`absolute top-2.5 right-2.5 z-20 flex items-center gap-1.5 transition-opacity duration-200 ${isHovered ? 'opacity-100' : 'opacity-80 md:opacity-0 group-hover:opacity-100'}`}>
         <button
           onClick={(e) => {
             e.stopPropagation();
@@ -410,7 +438,6 @@ export default function VideoTile({
           <ImageIcon size={14} />
         </button>
 
-        {/* Favorite Button */}
         <button
           onClick={handleToggleFavorite}
           className={`p-1.5 rounded-md backdrop-blur-md border transition-all ${
@@ -423,7 +450,6 @@ export default function VideoTile({
           <Star size={14} className={isFavorite ? 'fill-amber-400' : ''} />
         </button>
 
-        {/* Mark Watched Button */}
         <button
           onClick={handleTogglePlayed}
           className="p-1.5 rounded-md bg-black/60 hover:bg-black/80 backdrop-blur-md border border-white/10 text-gray-300 hover:text-cyan-400 transition"
@@ -432,7 +458,6 @@ export default function VideoTile({
           {item?.UserData?.Played ? <EyeOff size={14} /> : <Eye size={14} />}
         </button>
 
-        {/* External Player Menu Button */}
         <div className="relative">
           <button
             onClick={(e) => {
@@ -481,7 +506,6 @@ export default function VideoTile({
           )}
         </div>
 
-        {/* Skip / Next Video Button */}
         <button
           onClick={(e) => {
             e.stopPropagation();
@@ -494,16 +518,14 @@ export default function VideoTile({
         </button>
       </div>
 
-      {/* Bottom Floating Scrubber & Info Bar with Crisp Poster Preview & Trickplay */}
+      {/* Bottom Floating Scrubber & Info Bar */}
       <div 
         className={`absolute bottom-0 inset-x-0 z-20 bg-gradient-to-t from-black/95 via-black/80 to-transparent p-3 pt-6 transition-all duration-300 ${
-          isHovered ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2 pointer-events-none'
+          isHovered ? 'opacity-100 translate-y-0' : 'opacity-90 md:opacity-0 md:translate-y-2'
         }`}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Progress Bar Container with Trickplay Scrubber Floating Preview */}
         <div className="relative w-full mb-2.5">
-          {/* Trickplay Hover Floating Preview Thumbnail */}
           <TrickplayScrubberThumbnail
             item={item}
             hoverTime={hoverScrubberTime}
@@ -511,10 +533,9 @@ export default function VideoTile({
             containerWidth={scrubberWidth}
           />
 
-          {/* Clickable Progress Bar */}
           <div 
             ref={scrubberRef}
-            className="w-full h-1.5 bg-white/20 hover:h-2.5 rounded-full cursor-pointer transition-all relative overflow-hidden"
+            className="w-full h-2 bg-white/20 hover:h-3 rounded-full cursor-pointer transition-all relative overflow-hidden"
             onClick={handleSeek}
             onMouseMove={handleScrubberMouseMove}
             onMouseLeave={handleScrubberMouseLeave}
@@ -527,15 +548,12 @@ export default function VideoTile({
         </div>
 
         <div className="flex items-center justify-between text-xs text-gray-300 gap-2">
-          
-          {/* Left: Poster Thumbnail + Title & Metadata */}
           <div className="flex items-center gap-2.5 min-w-0 pr-2">
-            {/* Clickable Crisp Poster Thumbnail */}
             {posterUrl && (
               <div 
                 onClick={() => setShowPosterModal(true)}
                 className="relative w-9 h-13 rounded-md overflow-hidden bg-black/60 border border-white/20 hover:border-cyan-400 shadow-md cursor-pointer flex-shrink-0 group/poster hover:scale-105 transition"
-                title="点击查看高清海报与完整元数据"
+                title="点击查看高清海报"
               >
                 <img src={posterUrl} alt="Cover" className="w-full h-full object-cover" />
                 <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/poster:opacity-100 flex items-center justify-center text-white transition">
@@ -547,7 +565,7 @@ export default function VideoTile({
             <div className="flex flex-col min-w-0">
               <div 
                 onClick={() => setShowPosterModal(true)}
-                className="font-semibold text-white truncate max-w-[220px] text-sm drop-shadow hover:text-cyan-300 cursor-pointer transition" 
+                className="font-semibold text-white truncate max-w-[180px] sm:max-w-[220px] text-sm drop-shadow hover:text-cyan-300 cursor-pointer transition" 
                 title={item?.Name}
               >
                 {item?.Name || '未知影片'}
@@ -555,12 +573,10 @@ export default function VideoTile({
               <div className="text-[11px] text-gray-400 flex items-center gap-2 mt-0.5">
                 <span>{currentTimeText} / {durationText}</span>
                 {item?.ProductionYear && <span>• {item.ProductionYear}</span>}
-                {item?.OfficialRating && <span className="px-1 bg-white/10 rounded text-[9px]">{item.OfficialRating}</span>}
               </div>
             </div>
           </div>
 
-          {/* Right: Mini Player Controls */}
           <div className="flex items-center gap-1.5 flex-shrink-0">
             <button
               onClick={togglePlay}
@@ -581,7 +597,7 @@ export default function VideoTile({
             <button
               onClick={toggleFullscreen}
               className="p-1.5 hover:bg-white/15 rounded text-white transition"
-              title="单窗口全屏"
+              title="全屏"
             >
               <Maximize size={14} />
             </button>
@@ -589,15 +605,15 @@ export default function VideoTile({
         </div>
       </div>
 
-      {/* Middle Click Hint (Watermark when hovered) */}
+      {/* Middle Click / Gesture Hint Watermark */}
       {isHovered && (
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-10 pointer-events-none bg-black/40 backdrop-blur-xs px-3 py-1.5 rounded-full border border-white/5 text-[11px] text-gray-300/60 font-mono flex items-center gap-1.5">
+        <div className="hidden md:flex absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-10 pointer-events-none bg-black/40 backdrop-blur-xs px-3 py-1.5 rounded-full border border-white/5 text-[11px] text-gray-300/60 font-mono items-center gap-1.5">
           <Zap size={12} className="text-cyan-400" />
-          <span>中键点击换片</span>
+          <span>中键换片 • 双击暂停</span>
         </div>
       )}
 
-      {/* Full High-Resolution Poster Lightbox Modal */}
+      {/* Poster Lightbox */}
       {showPosterModal && posterUrl && (
         <div 
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4 animate-in fade-in duration-200"
@@ -607,7 +623,6 @@ export default function VideoTile({
             className="relative max-w-md w-full glass-panel rounded-2xl overflow-hidden shadow-2xl border border-white/10 flex flex-col max-h-[90vh]"
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Header */}
             <div className="p-3.5 border-b border-white/5 flex items-center justify-between bg-black/40">
               <div className="flex items-center gap-2 min-w-0 pr-2">
                 <Film size={16} className="text-cyan-400 flex-shrink-0" />
@@ -621,7 +636,6 @@ export default function VideoTile({
               </button>
             </div>
 
-            {/* Poster Image */}
             <div className="relative w-full max-h-[55vh] bg-black/80 flex items-center justify-center overflow-hidden">
               <img
                 src={posterUrl}
@@ -630,7 +644,6 @@ export default function VideoTile({
               />
             </div>
 
-            {/* Metadata Footer */}
             <div className="p-4 flex flex-col gap-2 bg-slate-900/90 text-xs text-gray-300 overflow-y-auto">
               <div className="flex items-center justify-between">
                 <span className="font-mono text-cyan-300">{item?.ProductionYear || '未知年份'}</span>

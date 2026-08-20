@@ -3,13 +3,14 @@ import { jellyfin } from '../api/jellyfinClient';
 import { getTrickplayStyle, getTrickplayInfo } from '../utils/trickplay';
 import { detectDuplicateMedia } from '../utils/duplicateChecker';
 import { useExternalPlayer } from '../hooks/useExternalPlayer';
+import MobileActionSheet from './MobileActionSheet';
 import { 
   Play, Shuffle, Star, Eye, EyeOff, Search, 
   Edit3, Sparkles, Trash2, Folder, Film, 
   ArrowUpDown, X, RefreshCw, Layers, LayoutGrid,
   Grid, List, MoreVertical, ExternalLink, Calendar,
   Users, Tag, Check, CheckCircle2, ChevronRight,
-  Clock, Hash, SlidersHorizontal
+  Clock, Hash, SlidersHorizontal, Sliders
 } from 'lucide-react';
 
 const ALPHABET = ['#', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'];
@@ -25,8 +26,8 @@ const SUB_TABS = [
 
 const BASE_STATUS_FILTERS = [
   { id: 'all', label: '全部' },
-  { id: 'unplayed', label: '👀 未播放' },
-  { id: 'played', label: '✅ 已播放' },
+  { id: 'unplayed', label: '👀 未播' },
+  { id: 'played', label: '✅ 已播' },
   { id: 'favorites', label: '⭐ 最爱' }
 ];
 
@@ -51,14 +52,15 @@ const SORT_OPTIONS = [
 function MediaCard({
   item,
   isDuplicate,
-  viewLayout = 'poster', // 'poster' | 'backdrop'
+  viewLayout = 'poster',
   onPlay,
   onToggleFavorite,
   onTogglePlayed,
   onOpenMetadataEditor,
   onOpenIdentify,
   onRefreshMetadata,
-  onDelete
+  onDelete,
+  onOpenActionSheet
 }) {
   const [isHovered, setIsHovered] = useState(false);
   const [showContextMenu, setShowContextMenu] = useState(false);
@@ -76,7 +78,6 @@ function MediaCard({
   const isPlayed = !!item.UserData?.Played;
   const playCount = item.UserData?.PlayCount || 0;
 
-  // Format runtime
   const durationText = useMemo(() => {
     if (!item.RunTimeTicks) return '';
     const totalMinutes = Math.floor(item.RunTimeTicks / (10000000 * 60));
@@ -86,7 +87,7 @@ function MediaCard({
     return `${mins}分钟`;
   }, [item.RunTimeTicks]);
 
-  // Trickplay Animation on Hover
+  // Trickplay Animation on Hover (Desktop)
   useEffect(() => {
     if (isHovered && !showContextMenu) {
       hoverTimerRef.current = setTimeout(() => {
@@ -139,7 +140,6 @@ function MediaCard({
         }`}
         onClick={() => onPlay(item)}
       >
-        {/* Main Artwork */}
         {posterUrl ? (
           <img
             src={posterUrl}
@@ -163,13 +163,13 @@ function MediaCard({
           />
         )}
 
-        {/* Top-Right: Played Checkmark / Unplayed Indicator */}
+        {/* Top-Right: Played Checkmark */}
         <div className="absolute top-2 right-2 flex items-center gap-1 z-10">
           {isPlayed ? (
             <div 
               onClick={(e) => { e.stopPropagation(); onTogglePlayed(item); }}
               className="w-5 h-5 rounded-full bg-emerald-500/90 text-white flex items-center justify-center shadow-md backdrop-blur-md cursor-pointer hover:scale-110 transition"
-              title="已播放 (点击标记未播)"
+              title="已播放"
             >
               <Check size={12} className="stroke-[3]" />
             </div>
@@ -177,7 +177,7 @@ function MediaCard({
             <div 
               onClick={(e) => { e.stopPropagation(); onTogglePlayed(item); }}
               className="w-2.5 h-2.5 rounded-full bg-cyan-400 shadow-md shadow-cyan-400/50 cursor-pointer"
-              title="未播放 (点击标记已播)"
+              title="未播放"
             />
           )}
         </div>
@@ -213,15 +213,15 @@ function MediaCard({
           </div>
         </div>
 
-        {/* Hover Top-Right & Bottom-Right Action Buttons */}
-        <div className="absolute inset-x-2 bottom-2 z-30 flex items-center justify-between opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+        {/* Hover Action Buttons */}
+        <div className="absolute inset-x-2 bottom-2 z-30 flex items-center justify-between opacity-80 md:opacity-0 group-hover:opacity-100 transition-opacity duration-200">
           {/* Favorite Toggle */}
           <button
             onClick={(e) => { e.stopPropagation(); onToggleFavorite(item); }}
             className={`p-1.5 rounded-lg backdrop-blur-md border transition ${
               isFavorite 
                 ? 'bg-amber-500/30 border-amber-500/50 text-amber-400' 
-                : 'bg-black/70 border-white/10 text-gray-300 hover:text-amber-400 hover:bg-black/90'
+                : 'bg-black/70 border-white/10 text-gray-300 hover:text-amber-400'
             }`}
             title={isFavorite ? '取消收藏' : '加入最爱'}
           >
@@ -233,7 +233,11 @@ function MediaCard({
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                setShowContextMenu(!showContextMenu);
+                if (window.innerWidth < 768 && onOpenActionSheet) {
+                  onOpenActionSheet(item);
+                } else {
+                  setShowContextMenu(!showContextMenu);
+                }
               }}
               className="p-1.5 rounded-lg bg-black/70 hover:bg-black/90 border border-white/10 text-gray-300 hover:text-white backdrop-blur-md transition"
               title="更多操作"
@@ -241,10 +245,10 @@ function MediaCard({
               <MoreVertical size={14} />
             </button>
 
-            {/* Context Menu Dropdown */}
+            {/* Desktop Context Menu Dropdown */}
             {showContextMenu && (
               <div 
-                className="absolute right-0 bottom-8 w-44 glass-panel rounded-xl shadow-2xl py-1 z-50 text-xs text-gray-200 divide-y divide-white/5 animate-in fade-in zoom-in-95 duration-150"
+                className="hidden md:block absolute right-0 bottom-8 w-44 glass-panel rounded-xl shadow-2xl py-1 z-50 text-xs text-gray-200 divide-y divide-white/5 animate-in fade-in zoom-in-95 duration-150"
                 onClick={(e) => e.stopPropagation()}
               >
                 <div className="py-1">
@@ -332,7 +336,7 @@ function MediaCard({
         <div className="text-[11px] text-gray-400 flex items-center justify-between">
           <div className="flex items-center gap-1.5">
             <span>{item.ProductionYear || '未知年份'}</span>
-            {durationText && <span>• {durationText}</span>}
+            {durationText && <span className="hidden sm:inline">• {durationText}</span>}
           </div>
           {item.OfficialRating && (
             <span className="px-1 py-0.2 bg-white/10 rounded text-[9px] font-mono text-gray-300">
@@ -346,7 +350,7 @@ function MediaCard({
 }
 
 /**
- * Detailed List Row View (Jellyfin Web List Mode)
+ * Detailed List Row View
  */
 function MediaListRow({
   item,
@@ -355,9 +359,7 @@ function MediaListRow({
   onToggleFavorite,
   onTogglePlayed,
   onOpenMetadataEditor,
-  onOpenIdentify,
-  onRefreshMetadata,
-  onDelete
+  onOpenActionSheet
 }) {
   const posterUrl = jellyfin.getImageUrl(item.Id, item.ImageTags?.Primary, 'Primary', 150);
   const isFavorite = !!item.UserData?.IsFavorite;
@@ -376,12 +378,10 @@ function MediaListRow({
   return (
     <div 
       onClick={() => onPlay(item)}
-      className="group flex items-center justify-between p-2.5 px-4 bg-slate-900/40 hover:bg-slate-800/80 border border-white/5 hover:border-cyan-500/40 rounded-xl transition cursor-pointer text-xs"
+      className="group flex items-center justify-between p-2.5 px-3 sm:px-4 bg-slate-900/40 hover:bg-slate-800/80 border border-white/5 hover:border-cyan-500/40 rounded-xl transition cursor-pointer text-xs"
     >
-      {/* Left: Poster + Title + Year */}
-      <div className="flex items-center gap-3.5 min-w-0 flex-1 pr-4">
-        {/* Mini Poster */}
-        <div className="relative w-9 h-13 rounded-lg overflow-hidden bg-black/60 border border-white/10 flex-shrink-0">
+      <div className="flex items-center gap-3 min-w-0 flex-1 pr-2">
+        <div className="relative w-8 h-12 sm:w-9 sm:h-13 rounded-lg overflow-hidden bg-black/60 border border-white/10 flex-shrink-0">
           {posterUrl ? (
             <img src={posterUrl} alt={item.Name} className="w-full h-full object-cover" />
           ) : (
@@ -390,7 +390,7 @@ function MediaListRow({
         </div>
 
         <div className="flex flex-col min-w-0">
-          <div className="font-semibold text-white truncate text-sm group-hover:text-cyan-300 transition" title={item.Name}>
+          <div className="font-semibold text-white truncate text-xs sm:text-sm group-hover:text-cyan-300 transition" title={item.Name}>
             {item.Name}
           </div>
           <div className="text-[11px] text-gray-400 flex items-center gap-2 mt-0.5">
@@ -402,7 +402,6 @@ function MediaListRow({
         </div>
       </div>
 
-      {/* Middle: Rating, Playcount, Genres */}
       <div className="hidden md:flex items-center gap-6 text-gray-400">
         {item.CommunityRating && (
           <div className="flex items-center gap-1 font-mono text-amber-300">
@@ -417,8 +416,7 @@ function MediaListRow({
         </div>
       </div>
 
-      {/* Right: Actions */}
-      <div className="flex items-center gap-2 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
+      <div className="flex items-center gap-1.5 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
         <button
           onClick={() => onToggleFavorite(item)}
           className={`p-1.5 rounded-lg border transition ${
@@ -430,29 +428,24 @@ function MediaListRow({
         </button>
 
         <button
-          onClick={() => onTogglePlayed(item)}
-          className={`p-1.5 rounded-lg border transition ${
-            isPlayed ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400' : 'bg-black/40 border-white/5 text-gray-400 hover:text-emerald-400'
-          }`}
-          title={isPlayed ? '标记未播' : '标记已播'}
-        >
-          <Check size={14} />
-        </button>
-
-        <button
-          onClick={() => onOpenMetadataEditor(item)}
+          onClick={() => {
+            if (window.innerWidth < 768 && onOpenActionSheet) {
+              onOpenActionSheet(item);
+            } else {
+              onOpenMetadataEditor(item);
+            }
+          }}
           className="p-1.5 rounded-lg bg-black/40 hover:bg-white/10 border border-white/5 text-gray-400 hover:text-white transition"
-          title="编辑元数据"
         >
-          <Edit3 size={14} />
+          <MoreVertical size={14} />
         </button>
 
         <button
           onClick={() => onPlay(item)}
-          className="p-1.5 px-3 rounded-lg bg-jf-accent hover:bg-cyan-400 text-white font-medium flex items-center gap-1 transition"
+          className="p-1.5 px-2.5 sm:px-3 rounded-lg bg-jf-accent hover:bg-cyan-400 text-white font-medium flex items-center gap-1 transition"
         >
           <Play size={12} className="fill-white" />
-          <span>播放</span>
+          <span className="hidden sm:inline">播放</span>
         </button>
       </div>
     </div>
@@ -486,14 +479,14 @@ export default function LibraryView({
   onRefreshLibrary,
   isRefreshing
 }) {
-  const [activeSubTab, setActiveSubTab] = useState('items'); // 'items' | 'genres' | 'persons' | 'years' | 'collections' | 'duplicates'
-  const [viewLayout, setViewLayout] = useState('poster'); // 'poster' | 'backdrop' | 'list'
+  const [activeSubTab, setActiveSubTab] = useState('items');
+  const [viewLayout, setViewLayout] = useState('poster');
+  const [actionSheetItem, setActionSheetItem] = useState(null);
   
   // Secondary metadata state
   const [genresList, setGenresList] = useState([]);
   const [personsList, setPersonsList] = useState([]);
   const [collectionsList, setCollectionsList] = useState([]);
-  const [isLoadingSubData, setIsLoadingSubData] = useState(false);
 
   // Duplicate detection across current items
   const { duplicateItemIds, duplicateCount } = useMemo(() => {
@@ -505,20 +498,11 @@ export default function LibraryView({
     if (!jellyfin.auth.isConfigured) return;
 
     if (activeSubTab === 'genres') {
-      setIsLoadingSubData(true);
-      jellyfin.getGenres(selectedViewId).then(list => {
-        setGenresList(list || []);
-      }).finally(() => setIsLoadingSubData(false));
+      jellyfin.getGenres(selectedViewId).then(list => setGenresList(list || []));
     } else if (activeSubTab === 'persons') {
-      setIsLoadingSubData(true);
-      jellyfin.getPersons(selectedViewId).then(list => {
-        setPersonsList(list || []);
-      }).finally(() => setIsLoadingSubData(false));
+      jellyfin.getPersons(selectedViewId).then(list => setPersonsList(list || []));
     } else if (activeSubTab === 'collections') {
-      setIsLoadingSubData(true);
-      jellyfin.getCollections(selectedViewId).then(list => {
-        setCollectionsList(list || []);
-      }).finally(() => setIsLoadingSubData(false));
+      jellyfin.getCollections(selectedViewId).then(list => setCollectionsList(list || []));
     }
   }, [activeSubTab, selectedViewId]);
 
@@ -587,56 +571,56 @@ export default function LibraryView({
   return (
     <div className="w-full h-full flex flex-col bg-[#080b11] text-gray-100 overflow-hidden select-none">
       
-      {/* Layer 1: Top Navigation Bar (Jellyfin Web Style) */}
-      <div className="border-b border-white/5 bg-slate-950/80 backdrop-blur-md px-5 py-3 flex flex-col gap-3 z-30">
+      {/* Top Navigation Bar */}
+      <div className="border-b border-white/5 bg-slate-950/90 backdrop-blur-md px-3 sm:px-5 py-2.5 sm:py-3 flex flex-col gap-2.5 z-30 pt-[max(0.5rem,env(safe-area-inset-top))]">
         
         {/* Row 1: Primary Library Views & Main Kanban Launcher */}
-        <div className="flex items-center justify-between gap-4 flex-wrap">
+        <div className="flex items-center justify-between gap-2.5">
           {/* Top Library Tabs */}
-          <div className="flex items-center gap-2 overflow-x-auto py-0.5">
+          <div className="flex items-center gap-1.5 overflow-x-auto py-0.5 flex-1 min-w-0">
             <button
               onClick={() => onSelectView('all')}
-              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition flex-shrink-0 ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition flex-shrink-0 ${
                 selectedViewId === 'all'
                   ? 'bg-jf-accent text-white shadow-lg shadow-cyan-500/25'
                   : 'bg-black/40 hover:bg-white/10 text-gray-300 border border-white/5'
               }`}
             >
-              <Film size={14} />
-              <span>全部媒体库</span>
+              <Film size={13} />
+              <span>全部</span>
             </button>
 
             {userViews.map(view => (
               <button
                 key={view.Id}
                 onClick={() => onSelectView(view.Id)}
-                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition flex-shrink-0 ${
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition flex-shrink-0 ${
                   selectedViewId === view.Id
                     ? 'bg-jf-accent text-white shadow-lg shadow-cyan-500/25'
                     : 'bg-black/40 hover:bg-white/10 text-gray-300 border border-white/5'
                 }`}
               >
-                <Folder size={14} />
+                <Folder size={13} />
                 <span>{view.Name}</span>
               </button>
             ))}
           </div>
 
-          {/* Right Main Kanban Action */}
+          {/* Kanban Launcher */}
           <button
             onClick={onEnterKanban}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white text-xs font-bold shadow-lg shadow-cyan-500/25 transition transform hover:scale-[1.02] flex-shrink-0"
-            title="以多视口随机看板播放当前筛选出的媒体"
+            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white text-xs font-bold shadow-lg shadow-cyan-500/25 transition transform hover:scale-[1.02] flex-shrink-0"
+            title="开启随机多视口看板"
           >
-            <Shuffle size={15} />
-            <span>开启随机看板 ({displayItems.length} 部)</span>
+            <Shuffle size={13} />
+            <span className="hidden sm:inline">随机看板</span>
+            <span className="font-mono text-[11px]">({displayItems.length})</span>
           </button>
         </div>
 
         {/* Row 2: Secondary Sub-Tabs (影片 / 类型 / 演职员 / 年份 / 合集 / 查重) */}
-        <div className="flex items-center justify-between gap-4 flex-wrap border-t border-white/5 pt-2 text-xs">
-          {/* Sub tabs list */}
-          <div className="flex items-center gap-1 overflow-x-auto">
+        <div className="flex items-center justify-between gap-2 border-t border-white/5 pt-2 text-xs">
+          <div className="flex items-center gap-1 overflow-x-auto flex-1 min-w-0">
             {SUB_TABS.map(tab => {
               const Icon = tab.icon;
               const isDup = tab.id === 'duplicates';
@@ -644,16 +628,16 @@ export default function LibraryView({
                 <button
                   key={tab.id}
                   onClick={() => setActiveSubTab(tab.id)}
-                  className={`flex items-center gap-1.5 px-3 py-1 rounded-lg font-medium transition flex-shrink-0 ${
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-lg font-medium transition flex-shrink-0 text-xs ${
                     activeSubTab === tab.id
                       ? isDup ? 'bg-red-600/90 text-white shadow' : 'bg-slate-800 text-cyan-300 shadow'
                       : isDup && duplicateCount > 0 ? 'text-red-400 hover:bg-red-950/40' : 'text-gray-400 hover:text-white'
                   }`}
                 >
-                  <Icon size={13} />
+                  <Icon size={12} />
                   <span>{tab.label}</span>
                   {isDup && duplicateCount > 0 && (
-                    <span className="ml-0.5 px-1 py-0.2 rounded-full bg-red-500 text-[10px] text-white">
+                    <span className="px-1 py-0.2 rounded-full bg-red-500 text-[9px] text-white">
                       {duplicateCount}
                     </span>
                   )}
@@ -662,16 +646,16 @@ export default function LibraryView({
             })}
           </div>
 
-          {/* View Layout Switcher (Poster / Backdrop / List) */}
-          <div className="flex items-center bg-black/50 p-0.5 rounded-xl border border-white/10 gap-0.5">
+          {/* View Layout Switcher */}
+          <div className="flex items-center bg-black/50 p-0.5 rounded-xl border border-white/10 gap-0.5 flex-shrink-0">
             <button
               onClick={() => setViewLayout('poster')}
               className={`p-1.5 rounded-lg transition ${
                 viewLayout === 'poster' ? 'bg-slate-700 text-cyan-300 shadow' : 'text-gray-400 hover:text-white'
               }`}
-              title="海报纵向网格 (2:3)"
+              title="海报网格 (2:3)"
             >
-              <LayoutGrid size={14} />
+              <LayoutGrid size={13} />
             </button>
 
             <button
@@ -679,9 +663,9 @@ export default function LibraryView({
               className={`p-1.5 rounded-lg transition ${
                 viewLayout === 'backdrop' ? 'bg-slate-700 text-cyan-300 shadow' : 'text-gray-400 hover:text-white'
               }`}
-              title="剧照横向网格 (16:9)"
+              title="剧照网格 (16:9)"
             >
-              <Grid size={14} />
+              <Grid size={13} />
             </button>
 
             <button
@@ -689,42 +673,40 @@ export default function LibraryView({
               className={`p-1.5 rounded-lg transition ${
                 viewLayout === 'list' ? 'bg-slate-700 text-cyan-300 shadow' : 'text-gray-400 hover:text-white'
               }`}
-              title="详细列表视图"
+              title="列表视图"
             >
-              <List size={14} />
+              <List size={13} />
             </button>
           </div>
         </div>
 
         {/* Row 3: Search, Filters & Sorting Bar */}
-        <div className="flex items-center justify-between gap-3 flex-wrap text-xs pt-1">
-          {/* Search Input */}
-          <div className="relative min-w-[200px] max-w-xs flex-1">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+        <div className="flex items-center justify-between gap-2 text-xs pt-0.5 flex-wrap">
+          <div className="relative min-w-[140px] flex-1">
+            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
             <input
               type="text"
               value={searchKeyword}
               onChange={(e) => onSearchChange(e.target.value)}
-              placeholder="搜索片名、演员、年份..."
-              className="w-full pl-9 pr-8 py-1.5 rounded-xl bg-black/50 border border-white/10 text-white placeholder-gray-500 focus:outline-none focus:border-cyan-400 transition"
+              placeholder="搜索片名、演员..."
+              className="w-full pl-8 pr-7 py-1 rounded-xl bg-black/50 border border-white/10 text-white text-xs placeholder-gray-500 focus:outline-none focus:border-cyan-400 transition"
             />
             {searchKeyword && (
               <button
                 onClick={() => onSearchChange('')}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white"
               >
-                <X size={13} />
+                <X size={12} />
               </button>
             )}
           </div>
 
-          {/* Status Filters */}
-          <div className="flex items-center bg-black/40 p-1 rounded-xl border border-white/5 gap-0.5">
+          <div className="flex items-center bg-black/40 p-0.5 rounded-xl border border-white/5 gap-0.5 overflow-x-auto">
             {BASE_STATUS_FILTERS.map(f => (
               <button
                 key={f.id}
                 onClick={() => onStatusFilterChange(f.id)}
-                className={`px-2.5 py-1 rounded-lg transition ${
+                className={`px-2 py-1 rounded-lg transition flex-shrink-0 text-xs ${
                   statusFilter === f.id
                     ? 'bg-slate-700 text-cyan-300 font-medium shadow'
                     : 'text-gray-400 hover:text-white'
@@ -735,9 +717,8 @@ export default function LibraryView({
             ))}
           </div>
 
-          {/* Sort Selector */}
-          <div className="flex items-center gap-1.5 bg-black/40 px-2.5 py-1 rounded-xl border border-white/5 text-gray-300">
-            <ArrowUpDown size={13} className="text-cyan-400" />
+          <div className="flex items-center gap-1 bg-black/40 px-2 py-1 rounded-xl border border-white/5 text-gray-300 text-xs">
+            <ArrowUpDown size={12} className="text-cyan-400" />
             <select
               value={sortMethod}
               onChange={(e) => onSortMethodChange(e.target.value)}
@@ -751,32 +732,31 @@ export default function LibraryView({
             </select>
           </div>
 
-          {/* Refresh Button */}
           <button
             onClick={onRefreshLibrary}
             disabled={isRefreshing}
-            className="p-2 rounded-xl bg-black/40 hover:bg-white/10 border border-white/5 text-gray-400 hover:text-white transition disabled:opacity-50"
+            className="p-1.5 rounded-xl bg-black/40 hover:bg-white/10 border border-white/5 text-gray-400 hover:text-white transition disabled:opacity-50"
             title="刷新数据"
           >
-            <RefreshCw size={14} className={isRefreshing ? 'animate-spin text-cyan-400' : ''} />
+            <RefreshCw size={13} className={isRefreshing ? 'animate-spin text-cyan-400' : ''} />
           </button>
         </div>
 
-        {/* Row 4: A-Z Alphabetic Scrubber (Jellyfin Web Style) */}
-        <div className="flex items-center justify-between gap-1 overflow-x-auto py-1 border-t border-white/5 text-[11px] font-mono text-gray-400">
+        {/* Row 4: A-Z Alphabet Scrubber */}
+        <div className="flex items-center justify-between gap-1 overflow-x-auto py-0.5 border-t border-white/5 text-[10px] font-mono text-gray-400">
           <button
             onClick={() => onSelectLetter('')}
-            className={`px-1.5 py-0.5 rounded hover:text-white transition ${
+            className={`px-1 py-0.2 rounded hover:text-white transition flex-shrink-0 ${
               !selectedLetter ? 'bg-cyan-500/20 text-cyan-300 font-bold' : ''
             }`}
           >
-            全部
+            ALL
           </button>
           {ALPHABET.map(letter => (
             <button
               key={letter}
               onClick={() => onSelectLetter(selectedLetter === letter ? '' : letter)}
-              className={`px-1.5 py-0.5 rounded hover:text-white hover:bg-white/10 transition ${
+              className={`px-1 py-0.2 rounded hover:text-white hover:bg-white/10 transition flex-shrink-0 ${
                 selectedLetter === letter ? 'bg-jf-accent text-white font-bold' : ''
               }`}
             >
@@ -786,12 +766,11 @@ export default function LibraryView({
         </div>
       </div>
 
-      {/* Layer 2: Main Content Area */}
-      <div className="flex-1 overflow-y-auto p-5 pb-20">
-        
-        {/* SUB-VIEW 1: Genres Tab View */}
+      {/* Main Content Viewport */}
+      <div className="flex-1 overflow-y-auto p-3 sm:p-5 pb-24 md:pb-20">
+        {/* SUB-VIEW 1: Genres */}
         {activeSubTab === 'genres' && (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2.5 sm:gap-3">
             {genresList.map(genre => (
               <div
                 key={genre.Id}
@@ -799,21 +778,21 @@ export default function LibraryView({
                   onSelectGenre(genre.Name);
                   setActiveSubTab('items');
                 }}
-                className="p-4 rounded-xl bg-slate-900/60 hover:bg-slate-800/90 border border-white/5 hover:border-cyan-500/40 flex items-center justify-between cursor-pointer transition shadow-lg"
+                className="p-3.5 sm:p-4 rounded-xl bg-slate-900/60 hover:bg-slate-800/90 border border-white/5 hover:border-cyan-500/40 flex items-center justify-between cursor-pointer transition shadow-lg"
               >
                 <div className="flex items-center gap-2.5">
-                  <Tag size={16} className="text-cyan-400" />
-                  <span className="font-semibold text-white text-sm">{genre.Name}</span>
+                  <Tag size={15} className="text-cyan-400" />
+                  <span className="font-semibold text-white text-xs sm:text-sm">{genre.Name}</span>
                 </div>
-                <ChevronRight size={15} className="text-gray-500" />
+                <ChevronRight size={14} className="text-gray-500" />
               </div>
             ))}
           </div>
         )}
 
-        {/* SUB-VIEW 2: Persons / Actors View */}
+        {/* SUB-VIEW 2: Persons */}
         {activeSubTab === 'persons' && (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-7 gap-3.5">
+          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-2.5 sm:gap-3.5">
             {personsList.map(person => {
               const imgUrl = jellyfin.getImageUrl(person.Id, person.ImageTags?.Primary, 'Primary', 200);
               return (
@@ -823,28 +802,27 @@ export default function LibraryView({
                     onSearchChange(person.Name);
                     setActiveSubTab('items');
                   }}
-                  className="group flex flex-col items-center bg-slate-900/40 p-3 rounded-2xl border border-white/5 hover:border-cyan-500/40 transition cursor-pointer"
+                  className="group flex flex-col items-center bg-slate-900/40 p-2.5 rounded-2xl border border-white/5 hover:border-cyan-500/40 transition cursor-pointer"
                 >
-                  <div className="w-20 h-20 rounded-full overflow-hidden bg-black/60 border border-white/10 mb-2 group-hover:scale-105 transition">
+                  <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full overflow-hidden bg-black/60 border border-white/10 mb-1.5 group-hover:scale-105 transition">
                     {imgUrl ? (
                       <img src={imgUrl} alt={person.Name} className="w-full h-full object-cover" />
                     ) : (
-                      <div className="w-full h-full flex items-center justify-center text-gray-500"><Users size={24} /></div>
+                      <div className="w-full h-full flex items-center justify-center text-gray-500"><Users size={20} /></div>
                     )}
                   </div>
-                  <span className="text-xs font-semibold text-white truncate max-w-full text-center group-hover:text-cyan-300">
+                  <span className="text-[11px] sm:text-xs font-semibold text-white truncate max-w-full text-center group-hover:text-cyan-300">
                     {person.Name}
                   </span>
-                  {person.Role && <span className="text-[10px] text-gray-400 truncate">{person.Role}</span>}
                 </div>
               );
             })}
           </div>
         )}
 
-        {/* SUB-VIEW 3: Collections (BoxSet) View */}
+        {/* SUB-VIEW 3: Collections */}
         {activeSubTab === 'collections' && (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3.5">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
             {collectionsList.map(col => {
               const imgUrl = jellyfin.getImageUrl(col.Id, col.ImageTags?.Primary, 'Primary', 300);
               return (
@@ -860,10 +838,10 @@ export default function LibraryView({
                     {imgUrl ? (
                       <img src={imgUrl} alt={col.Name} className="w-full h-full object-cover group-hover:scale-105 transition" />
                     ) : (
-                      <div className="w-full h-full flex items-center justify-center text-gray-600"><Layers size={32} /></div>
+                      <div className="w-full h-full flex items-center justify-center text-gray-600"><Layers size={28} /></div>
                     )}
                   </div>
-                  <div className="p-2.5">
+                  <div className="p-2">
                     <div className="text-xs font-bold text-white truncate group-hover:text-cyan-300">{col.Name}</div>
                     <div className="text-[10px] text-gray-400">合集系列</div>
                   </div>
@@ -873,7 +851,7 @@ export default function LibraryView({
           </div>
         )}
 
-        {/* SUB-VIEW 4: Items Grid / List View (All Media Cards) */}
+        {/* SUB-VIEW 4: Items Grid / List View */}
         {['items', 'duplicates'].includes(activeSubTab) && (
           <>
             {displayItems.length === 0 && !isRefreshing ? (
@@ -882,7 +860,6 @@ export default function LibraryView({
                 <div className="text-sm">没有找到符合当前筛选条件的媒体</div>
               </div>
             ) : viewLayout === 'list' ? (
-              /* List Table View */
               <div className="flex flex-col gap-2">
                 {displayItems.map(item => (
                   <MediaListRow
@@ -893,15 +870,12 @@ export default function LibraryView({
                     onToggleFavorite={handleToggleFavorite}
                     onTogglePlayed={handleTogglePlayed}
                     onOpenMetadataEditor={onOpenMetadataEditor}
-                    onOpenIdentify={onOpenIdentify}
-                    onRefreshMetadata={handleRefreshMetadata}
-                    onDelete={handleDelete}
+                    onOpenActionSheet={(it) => setActionSheetItem(it)}
                   />
                 ))}
               </div>
             ) : (
-              /* Poster / Backdrop Grid */
-              <div className={`grid gap-3.5 ${
+              <div className={`grid gap-2.5 sm:gap-3.5 ${
                 viewLayout === 'backdrop'
                   ? 'grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5'
                   : 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8'
@@ -919,6 +893,7 @@ export default function LibraryView({
                     onOpenIdentify={onOpenIdentify}
                     onRefreshMetadata={handleRefreshMetadata}
                     onDelete={handleDelete}
+                    onOpenActionSheet={(it) => setActionSheetItem(it)}
                   />
                 ))}
               </div>
@@ -926,6 +901,20 @@ export default function LibraryView({
           </>
         )}
       </div>
+
+      {/* Mobile Action Sheet Drawer */}
+      <MobileActionSheet
+        isOpen={!!actionSheetItem}
+        item={actionSheetItem}
+        onClose={() => setActionSheetItem(null)}
+        onPlay={onPlaySingleItem}
+        onToggleFavorite={handleToggleFavorite}
+        onTogglePlayed={handleTogglePlayed}
+        onOpenMetadataEditor={onOpenMetadataEditor}
+        onOpenIdentify={onOpenIdentify}
+        onRefreshMetadata={handleRefreshMetadata}
+        onDelete={handleDelete}
+      />
     </div>
   );
 }

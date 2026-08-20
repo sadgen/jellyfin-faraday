@@ -1,12 +1,13 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import Hls from 'hls.js';
 import { jellyfin } from '../api/jellyfinClient';
 import { useExternalPlayer } from '../hooks/useExternalPlayer';
+import { useTouchGestures } from '../hooks/useTouchGestures';
 import TrickplayScrubberThumbnail from './TrickplayScrubberThumbnail';
 import { 
   Play, Pause, Volume2, VolumeX, Maximize, 
   Star, Eye, EyeOff, ExternalLink, X, Film, 
-  SkipForward, SkipBack, Settings
+  SkipForward, SkipBack, Sun, Zap, FastForward
 } from 'lucide-react';
 
 export default function VideoPlayerModal({
@@ -19,6 +20,7 @@ export default function VideoPlayerModal({
 }) {
   const videoRef = useRef(null);
   const hlsRef = useRef(null);
+  const containerRef = useRef(null);
   const scrubberRef = useRef(null);
 
   const [isPlaying, setIsPlaying] = useState(true);
@@ -33,6 +35,7 @@ export default function VideoPlayerModal({
   const [progress, setProgress] = useState(0);
   const [currentTimeText, setCurrentTimeText] = useState('00:00');
   const [durationText, setDurationText] = useState('00:00');
+  const [rawDuration, setRawDuration] = useState(0);
 
   // Trickplay Hover State
   const [hoverScrubberTime, setHoverScrubberTime] = useState(null);
@@ -40,6 +43,26 @@ export default function VideoPlayerModal({
   const [scrubberWidth, setScrubberWidth] = useState(600);
 
   const { launchPlayer } = useExternalPlayer();
+
+  // Mobile Touch Gestures
+  const { gestureState, brightness, touchHandlers } = useTouchGestures({
+    videoRef,
+    containerRef,
+    duration: rawDuration,
+    currentTime: videoRef.current?.currentTime || 0,
+    onSeek: (target) => {
+      if (videoRef.current) {
+        videoRef.current.currentTime = target;
+      }
+    },
+    onTogglePlay: () => {
+      togglePlay();
+    },
+    normalSpeed: playbackSpeed,
+    onSpeedChange: (speed) => {
+      setPlaybackSpeed(speed);
+    }
+  });
 
   useEffect(() => {
     if (!isOpen || !item?.Id) {
@@ -157,6 +180,7 @@ export default function VideoPlayerModal({
   const handleTimeUpdate = () => {
     const video = videoRef.current;
     if (!video || !video.duration) return;
+    setRawDuration(video.duration);
     const p = (video.currentTime / video.duration) * 100;
     setProgress(p);
     setCurrentTimeText(formatTime(video.currentTime));
@@ -203,34 +227,36 @@ export default function VideoPlayerModal({
   };
 
   const toggleFullscreen = () => {
-    const video = videoRef.current;
-    if (!video) return;
+    const container = containerRef.current;
+    if (!container) return;
     if (!document.fullscreenElement) {
-      video.requestFullscreen().catch(() => {});
+      container.requestFullscreen().catch(() => {});
     } else {
       document.exitFullscreen().catch(() => {});
     }
   };
 
   const posterUrl = item?.Id ? jellyfin.getImageUrl(item.Id, item.ImageTags?.Primary, 'Primary', 1000) : null;
-  const isFavorite = !!item?.UserData?.IsFavorite;
 
   return (
     <div 
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md p-4 animate-in fade-in duration-200"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 md:bg-black/90 backdrop-blur-md md:p-4 animate-in fade-in duration-200"
       onClick={onClose}
     >
       <div 
-        className="relative w-full max-w-5xl bg-[#0d1117] rounded-2xl overflow-hidden shadow-2xl border border-white/10 flex flex-col max-h-[92vh]"
+        ref={containerRef}
+        className="relative w-full h-full md:h-auto md:max-w-5xl bg-[#0d1117] md:rounded-2xl overflow-hidden shadow-2xl border border-white/10 flex flex-col md:max-h-[92vh]"
+        style={{ filter: `brightness(${brightness})` }}
         onClick={(e) => e.stopPropagation()}
+        {...touchHandlers}
       >
         {/* Header Bar */}
-        <div className="p-3.5 border-b border-white/5 flex items-center justify-between bg-black/40 text-xs">
+        <div className="p-3.5 border-b border-white/5 flex items-center justify-between bg-black/60 text-xs z-30 pt-[max(0.75rem,env(safe-area-inset-top))]">
           <div className="flex items-center gap-2.5 min-w-0 pr-2">
             <Film size={18} className="text-cyan-400 flex-shrink-0" />
             <span className="font-bold text-white text-sm truncate">{item?.Name}</span>
             {item?.ProductionYear && (
-              <span className="text-gray-400 font-mono">({item.ProductionYear})</span>
+              <span className="text-gray-400 font-mono hidden sm:inline">({item.ProductionYear})</span>
             )}
           </div>
 
@@ -243,7 +269,7 @@ export default function VideoPlayerModal({
                 title="调用外部播放器"
               >
                 <ExternalLink size={13} />
-                <span>外部播放器</span>
+                <span className="hidden sm:inline">外部播放器</span>
               </button>
 
               {showPlayerMenu && (
@@ -284,13 +310,13 @@ export default function VideoPlayerModal({
               onClick={onClose}
               className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition"
             >
-              <X size={18} />
+              <X size={20} />
             </button>
           </div>
         </div>
 
         {/* Video Canvas Container */}
-        <div className="relative w-full aspect-video bg-black flex items-center justify-center overflow-hidden">
+        <div className="relative flex-1 md:flex-none w-full md:aspect-video bg-black flex items-center justify-center overflow-hidden touch-none">
           {/* Poster Backdrop */}
           {posterUrl && (
             <img 
@@ -316,6 +342,20 @@ export default function VideoPlayerModal({
             onTimeUpdate={handleTimeUpdate}
           />
 
+          {/* Touch Gesture HUD Overlay */}
+          {gestureState.type && (
+            <div className="absolute inset-0 z-30 flex items-center justify-center pointer-events-none animate-in fade-in zoom-in-95 duration-100">
+              <div className="flex flex-col items-center gap-2 bg-black/80 backdrop-blur-md px-5 py-3.5 rounded-2xl border border-white/10 shadow-2xl text-white">
+                {gestureState.type === 'seek' && <FastForward size={28} className="text-cyan-400 animate-pulse" />}
+                {gestureState.type === 'brightness' && <Sun size={28} className="text-amber-400" />}
+                {gestureState.type === 'volume' && <Volume2 size={28} className="text-cyan-400" />}
+                {gestureState.type === 'speed_boost' && <Zap size={28} className="text-amber-400 animate-bounce" />}
+                
+                <span className="font-mono font-bold text-sm">{gestureState.text}</span>
+              </div>
+            </div>
+          )}
+
           {/* Loading Spinner */}
           {isLoading && !hasError && (
             <div className="absolute z-20 flex flex-col items-center justify-center pointer-events-none gap-2">
@@ -339,10 +379,9 @@ export default function VideoPlayerModal({
         </div>
 
         {/* Player Controls & Scrubber */}
-        <div className="p-4 bg-slate-900/90 border-t border-white/5 flex flex-col gap-3">
+        <div className="p-4 bg-slate-900/95 border-t border-white/5 flex flex-col gap-3 pb-[max(1rem,env(safe-area-inset-bottom))] z-30">
           {/* Scrubber Container */}
           <div className="relative w-full">
-            {/* Trickplay Thumbnail Bubble */}
             <TrickplayScrubberThumbnail
               item={item}
               hoverTime={hoverScrubberTime}
@@ -350,10 +389,9 @@ export default function VideoPlayerModal({
               containerWidth={scrubberWidth}
             />
 
-            {/* Clickable Seekbar */}
             <div
               ref={scrubberRef}
-              className="w-full h-2 bg-white/20 hover:h-3 rounded-full cursor-pointer transition-all relative overflow-hidden"
+              className="w-full h-2.5 bg-white/20 rounded-full cursor-pointer transition-all relative overflow-hidden"
               onClick={handleSeek}
               onMouseMove={handleScrubberMouseMove}
               onMouseLeave={() => setHoverScrubberTime(null)}
@@ -367,11 +405,11 @@ export default function VideoPlayerModal({
 
           {/* Controls Row */}
           <div className="flex items-center justify-between text-xs text-gray-300">
-            {/* Left: Play/Pause, Time */}
-            <div className="flex items-center gap-3">
+            {/* Left: Play/Pause, Navigation, Time */}
+            <div className="flex items-center gap-2 sm:gap-3">
               <button
                 onClick={togglePlay}
-                className="p-2 rounded-xl bg-jf-accent hover:bg-cyan-400 text-white transition shadow-lg"
+                className="p-2.5 rounded-xl bg-jf-accent hover:bg-cyan-400 text-white transition shadow-lg"
               >
                 {isPlaying ? <Pause size={16} /> : <Play size={16} className="ml-0.5" />}
               </button>
@@ -380,7 +418,7 @@ export default function VideoPlayerModal({
                 <button
                   onClick={onPrev}
                   className="p-2 rounded-xl bg-black/40 hover:bg-white/10 text-gray-300 transition"
-                  title="上一个视频"
+                  title="上一个"
                 >
                   <SkipBack size={15} />
                 </button>
@@ -390,7 +428,7 @@ export default function VideoPlayerModal({
                 <button
                   onClick={onNext}
                   className="p-2 rounded-xl bg-black/40 hover:bg-white/10 text-gray-300 transition"
-                  title="下一个视频"
+                  title="下一个"
                 >
                   <SkipForward size={15} />
                 </button>
@@ -410,9 +448,8 @@ export default function VideoPlayerModal({
 
             {/* Right: Speed, Fullscreen */}
             <div className="flex items-center gap-2">
-              {/* Playback Speed Selector */}
               <div className="flex items-center bg-black/40 px-2 py-1 rounded-xl border border-white/5 gap-1">
-                <span className="text-gray-400 text-[11px]">倍速:</span>
+                <span className="text-gray-400 text-[11px] hidden sm:inline">倍速:</span>
                 <select
                   value={playbackSpeed}
                   onChange={(e) => {
@@ -427,6 +464,7 @@ export default function VideoPlayerModal({
                   <option value="1.25" className="bg-slate-900">1.25x</option>
                   <option value="1.5" className="bg-slate-900">1.5x</option>
                   <option value="2.0" className="bg-slate-900">2.0x</option>
+                  <option value="2.5" className="bg-slate-900">2.5x</option>
                   <option value="3.0" className="bg-slate-900">3.0x</option>
                 </select>
               </div>

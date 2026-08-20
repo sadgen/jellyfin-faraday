@@ -5,9 +5,11 @@ import { getTrickplayStyle } from '../utils/trickplay';
 import { calculateSlotStyle } from '../utils/windowLayout';
 import { useExternalPlayer } from '../hooks/useExternalPlayer';
 import TrickplayScrubberThumbnail from './TrickplayScrubberThumbnail';
+import InlineVrCanvas from './InlineVrCanvas';
 import { 
   Play, Pause, SkipForward, Volume2, VolumeX, Maximize, 
-  X, ExternalLink, Move, Film, Star, Eye
+  X, ExternalLink, Film, Star, Eye, EyeOff, Image as ImageIcon,
+  Glasses
 } from 'lucide-react';
 
 export default function FloatingVideoWindow({
@@ -15,7 +17,8 @@ export default function FloatingVideoWindow({
   onClose,
   onSkip,
   onExpand,
-  onBringToFront
+  onBringToFront,
+  onUpdateItem
 }) {
   const { id, slotIndex, item } = windowData;
 
@@ -43,8 +46,17 @@ export default function FloatingVideoWindow({
   // Playback state
   const [isPlaying, setIsPlaying] = useState(true);
   const [isMuted, setIsMuted] = useState(true);
+  const [playbackSpeed, setPlaybackSpeed] = useState(1.0);
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
+  const [showPlayerMenu, setShowPlayerMenu] = useState(false);
+  const [showPosterModal, setShowPosterModal] = useState(false);
+
+  // Pinned Poster PIP: ENABLED BY DEFAULT and enlarged 1.5x
+  const [showPinnedPoster, setShowPinnedPoster] = useState(true);
+
+  // INLINE VR Projection State
+  const [isVrActive, setIsVrActive] = useState(false);
 
   // Progress & Duration
   const [progress, setProgress] = useState(0);
@@ -93,6 +105,7 @@ export default function FloatingVideoWindow({
 
     const setupDirectPlay = () => {
       videoEl.src = directStreamUrl;
+      videoEl.playbackRate = playbackSpeed;
       videoEl.muted = isMuted;
       videoEl.play().catch(() => {
         videoEl.muted = true;
@@ -112,6 +125,7 @@ export default function FloatingVideoWindow({
         hls.loadSource(hlsUrl);
         hls.attachMedia(videoEl);
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          videoEl.playbackRate = playbackSpeed;
           videoEl.play().catch(() => {
             videoEl.muted = true;
             setIsMuted(true);
@@ -170,7 +184,7 @@ export default function FloatingVideoWindow({
 
   // Dragging the floating window
   const handleMouseDownHeader = (e) => {
-    if (e.target.closest('button')) return;
+    if (e.target.closest('button') || e.target.closest('select')) return;
     e.preventDefault();
     if (onBringToFront) onBringToFront(id);
 
@@ -200,7 +214,7 @@ export default function FloatingVideoWindow({
     window.addEventListener('mouseup', handleMouseUp);
   };
 
-  // Mouse Wheel Fast-Forward (Down) / Rewind (Up) with Direct Scrubber Trickplay
+  // Mouse Wheel Seek
   const handleWheel = useCallback((e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -317,6 +331,39 @@ export default function FloatingVideoWindow({
     setIsMuted(nextMuted);
   };
 
+  // Toggle Favorite
+  const handleToggleFavorite = async (e) => {
+    if (e) e.stopPropagation();
+    if (!item?.Id) return;
+    const isFav = !!item.UserData?.IsFavorite;
+    const nextFav = !isFav;
+    if (onUpdateItem) {
+      onUpdateItem({ ...item, UserData: { ...item.UserData, IsFavorite: nextFav } });
+    }
+    try {
+      await jellyfin.toggleFavorite(item.Id, nextFav);
+    } catch (err) {
+      console.error('Failed to toggle favorite:', err);
+    }
+  };
+
+  // Toggle Played Status
+  const handleTogglePlayed = async (e) => {
+    if (e) e.stopPropagation();
+    if (!item?.Id) return;
+    const isPlayed = !!item.UserData?.Played;
+    const nextPlayed = !isPlayed;
+    const playCount = nextPlayed ? (item.UserData?.PlayCount || 0) + 1 : Math.max(0, (item.UserData?.PlayCount || 1) - 1);
+    if (onUpdateItem) {
+      onUpdateItem({ ...item, UserData: { ...item.UserData, Played: nextPlayed, PlayCount: playCount } });
+    }
+    try {
+      await jellyfin.markPlayed(item.Id, nextPlayed);
+    } catch (err) {
+      console.error('Failed to toggle played:', err);
+    }
+  };
+
   // Middle Click to Skip
   const handleAuxClick = (e) => {
     if (e.button === 1) {
@@ -326,7 +373,13 @@ export default function FloatingVideoWindow({
     }
   };
 
-  const backdropUrl = item?.Id ? (jellyfin.getImageUrl(item.Id, item.ImageTags?.Backdrop || item.ImageTags?.Primary, 'Backdrop', 600, 80) || jellyfin.getImageUrl(item.Id, item.ImageTags?.Primary, 'Primary', 400, 80)) : null;
+  const coverUrl = useMemo(() => {
+    if (!item?.Id) return null;
+    return jellyfin.getImageUrl(item.Id, item.ImageTags?.Primary, 'Primary', 500, 80);
+  }, [item?.Id, item?.ImageTags]);
+
+  const isFavorite = !!item?.UserData?.IsFavorite;
+  const playCount = item?.UserData?.PlayCount || 0;
 
   return (
     <div
@@ -357,7 +410,7 @@ export default function FloatingVideoWindow({
       >
         <div className="flex items-center gap-1.5 min-w-0 pr-2">
           <span className={`w-2 h-2 rounded-full ${slotIndex === 0 ? 'bg-cyan-400 animate-pulse' : 'bg-amber-400'}`} />
-          <span className="font-bold text-white text-xs truncate max-w-[200px]" title={item?.Name}>
+          <span className="font-bold text-white text-xs truncate max-w-[180px] sm:max-w-[240px]" title={item?.Name}>
             {item?.Name || '视频预览'}
           </span>
           <span className="px-1.5 py-0.2 rounded bg-white/10 text-[10px] font-mono text-cyan-300 font-bold">
@@ -366,14 +419,87 @@ export default function FloatingVideoWindow({
         </div>
 
         <div className="flex items-center gap-1">
-          {/* External player button */}
+          {/* Poster PIP Toggle */}
           <button
-            onClick={() => launchPlayer('mpv', item)}
-            className="p-1 rounded hover:bg-white/10 text-gray-400 hover:text-cyan-300 transition"
-            title="MPV 打开"
+            onClick={() => setShowPinnedPoster(!showPinnedPoster)}
+            className={`p-1 rounded transition ${
+              showPinnedPoster ? 'text-cyan-300 bg-cyan-500/20' : 'text-gray-400 hover:text-cyan-300'
+            }`}
+            title="海报画中画 (默认开启 1.5倍)"
           >
-            <ExternalLink size={13} />
+            <ImageIcon size={13} />
           </button>
+
+          {/* Inline VR Toggle */}
+          <button
+            onClick={() => setIsVrActive(!isVrActive)}
+            className={`p-1 rounded transition ${
+              isVrActive ? 'text-amber-300 bg-amber-500/30 animate-pulse' : 'text-gray-400 hover:text-amber-400'
+            }`}
+            title="🥽 开启/退出 当前窗口 VR 全景"
+          >
+            <Glasses size={13} />
+          </button>
+
+          {/* Favorite */}
+          <button
+            onClick={handleToggleFavorite}
+            className={`p-1 rounded transition ${
+              isFavorite ? 'text-amber-400' : 'text-gray-400 hover:text-amber-400'
+            }`}
+            title={isFavorite ? '取消收藏' : '加入最爱'}
+          >
+            <Star size={13} className={isFavorite ? 'fill-amber-400' : ''} />
+          </button>
+
+          {/* Played */}
+          <button
+            onClick={handleTogglePlayed}
+            className="p-1 rounded text-gray-400 hover:text-cyan-300 transition"
+            title={item?.UserData?.Played ? '标记为未播' : '标记为已播'}
+          >
+            {item?.UserData?.Played ? <EyeOff size={13} /> : <Eye size={13} />}
+          </button>
+
+          {/* External Player Menu */}
+          <div className="relative">
+            <button
+              onClick={() => setShowPlayerMenu(!showPlayerMenu)}
+              className="p-1 rounded hover:bg-white/10 text-gray-400 hover:text-cyan-300 transition"
+              title="MPV / 外部播放器"
+            >
+              <ExternalLink size={13} />
+            </button>
+
+            {showPlayerMenu && (
+              <div 
+                className="absolute right-0 top-7 w-32 glass-panel rounded-xl shadow-2xl py-1 z-50 text-xs text-gray-200 divide-y divide-white/5 animate-in fade-in zoom-in-95 duration-100"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <button 
+                  onClick={() => { launchPlayer('mpv', item); setShowPlayerMenu(false); }}
+                  className="w-full px-3 py-1.5 text-left hover:bg-white/10 flex items-center justify-between text-cyan-300 font-medium"
+                >
+                  <span>MPV 播放器</span>
+                  <span className="text-[10px]">mpv://</span>
+                </button>
+                <button 
+                  onClick={() => { launchPlayer('potplayer', item); setShowPlayerMenu(false); }}
+                  className="w-full px-3 py-1.5 text-left hover:bg-white/10 flex items-center justify-between text-amber-300"
+                >
+                  <span>PotPlayer</span>
+                  <span className="text-[10px]">pot://</span>
+                </button>
+                <button 
+                  onClick={() => { launchPlayer('vlc', item); setShowPlayerMenu(false); }}
+                  className="w-full px-3 py-1.5 text-left hover:bg-white/10 flex items-center justify-between text-orange-300"
+                >
+                  <span>VLC 播放器</span>
+                  <span className="text-[10px]">vlc://</span>
+                </button>
+              </div>
+            )}
+          </div>
 
           {/* Expand to full theater */}
           <button
@@ -406,10 +532,9 @@ export default function FloatingVideoWindow({
 
       {/* Video Viewport (16:9) */}
       <div className="relative w-full aspect-video bg-black flex items-center justify-center overflow-hidden">
-        {/* Backdrop Thumbnail */}
-        {backdropUrl && (
+        {coverUrl && (
           <img
-            src={backdropUrl}
+            src={coverUrl}
             alt=""
             className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-300 pointer-events-none ${
               isLoading ? 'opacity-60 blur-xs' : 'opacity-0'
@@ -420,6 +545,7 @@ export default function FloatingVideoWindow({
         <video
           ref={videoRef}
           playsInline
+          crossOrigin="anonymous"
           className="w-full h-full object-contain cursor-pointer z-10"
           onClick={togglePlay}
           onWaiting={() => setIsLoading(true)}
@@ -431,6 +557,44 @@ export default function FloatingVideoWindow({
           onEnded={() => onSkip && onSkip(slotIndex)}
           onTimeUpdate={handleTimeUpdate}
         />
+
+        {/* INLINE VR WEBGL CANVAS (In-window VR projection) */}
+        <InlineVrCanvas
+          videoRef={videoRef}
+          isActive={isVrActive}
+          onClose={() => setIsVrActive(false)}
+        />
+
+        {/* 
+          Pinned Poster Floating PIP View:
+          - ENABLED BY DEFAULT
+          - ENLARGED BY 1.5x (w-32 sm:w-36 aspect-[2/3])
+        */}
+        {showPinnedPoster && coverUrl && (
+          <div 
+            className="absolute top-2 right-2 z-30 w-32 sm:w-36 aspect-[2/3] rounded-xl overflow-hidden shadow-2xl border-2 border-cyan-400/60 bg-black/90 backdrop-blur-md animate-in zoom-in-95 duration-150 group/pip cursor-pointer"
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowPosterModal(true);
+            }}
+            title="点击查看高清大图"
+          >
+            <img src={coverUrl} alt="Poster" className="w-full h-full object-cover transition-transform group-hover/pip:scale-105" />
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowPinnedPoster(false);
+              }}
+              className="absolute top-1 right-1 p-1 rounded-full bg-black/80 text-white hover:bg-red-500 transition"
+              title="隐藏海报"
+            >
+              <X size={12} />
+            </button>
+            <div className="absolute bottom-0 inset-x-0 bg-black/75 px-1.5 py-0.5 text-[9px] text-center text-cyan-300 font-medium truncate backdrop-blur-xs">
+              {item?.Name}
+            </div>
+          </div>
+        )}
 
         {/* Loading Spinner */}
         {isLoading && !hasError && (
@@ -454,7 +618,7 @@ export default function FloatingVideoWindow({
 
       {/* Scrubber & Controls Footer */}
       <div className="p-2.5 bg-slate-950/95 border-t border-white/5 rounded-b-2xl flex flex-col gap-1.5 text-xs">
-        {/* Scrubber with Real-time Drag & Trickplay */}
+        {/* Scrubber with Real-time Drag & Trickplay (Position BELOW) */}
         <div className="relative w-full">
           <TrickplayScrubberThumbnail
             item={item}
@@ -500,7 +664,24 @@ export default function FloatingVideoWindow({
             </span>
           </div>
 
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-2">
+            {/* Playback Speed */}
+            <select
+              value={playbackSpeed}
+              onChange={(e) => {
+                const sp = parseFloat(e.target.value);
+                setPlaybackSpeed(sp);
+                if (videoRef.current) videoRef.current.playbackRate = sp;
+              }}
+              className="bg-black/60 px-1.5 py-0.5 rounded border border-white/10 text-cyan-300 text-[10px] font-mono focus:outline-none cursor-pointer"
+            >
+              <option value="0.75" className="bg-slate-900">0.75x</option>
+              <option value="1.0" className="bg-slate-900">1.0x</option>
+              <option value="1.25" className="bg-slate-900">1.25x</option>
+              <option value="1.5" className="bg-slate-900">1.5x</option>
+              <option value="2.0" className="bg-slate-900">2.0x</option>
+            </select>
+
             <button
               onClick={() => onSkip && onSkip(slotIndex)}
               className="px-2.5 py-0.5 rounded-lg bg-cyan-950 hover:bg-cyan-900 border border-cyan-500/40 text-cyan-300 text-[11px] font-medium transition flex items-center gap-1"
@@ -511,6 +692,32 @@ export default function FloatingVideoWindow({
           </div>
         </div>
       </div>
+
+      {/* Full Poster Lightbox */}
+      {showPosterModal && coverUrl && (
+        <div 
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4 animate-in fade-in duration-150"
+          onClick={() => setShowPosterModal(false)}
+        >
+          <div 
+            className="relative max-w-md w-full glass-panel rounded-2xl overflow-hidden shadow-2xl border border-white/10 flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-3 border-b border-white/5 flex items-center justify-between bg-black/40">
+              <span className="text-xs font-bold text-white truncate">{item?.Name}</span>
+              <button
+                onClick={() => setShowPosterModal(false)}
+                className="p-1 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="max-h-[60vh] bg-black/90 flex items-center justify-center p-2">
+              <img src={coverUrl} alt="Poster" className="max-h-[55vh] object-contain rounded-lg shadow-xl" />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

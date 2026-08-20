@@ -474,6 +474,7 @@ export default function App() {
             onSkipWindow={handleSkipFloatingWindow}
             onExpandWindow={(item) => setModalPlayingItem(item)}
             onBringToFront={handleBringFloatingToFront}
+            onUpdateItem={handleUpdateItem}
           />
         )}
 

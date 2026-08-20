@@ -6,12 +6,13 @@ export default function FloatingWindowsContainer({
   onCloseWindow,
   onSkipWindow,
   onExpandWindow,
-  onBringToFront
+  onBringToFront,
+  onUpdateItem
 }) {
   if (!windows || windows.length === 0) return null;
 
   return (
-    <div className="fixed inset-0 pointer-events-none z-40 overflow-hidden">
+    <div className="fixed inset-0 pointer-events-none z-40 overflow-visible">
       {windows.map(win => (
         <div key={win.id} className="pointer-events-auto">
           <FloatingVideoWindow
@@ -20,6 +21,7 @@ export default function FloatingWindowsContainer({
             onSkip={onSkipWindow}
             onExpand={onExpandWindow}
             onBringToFront={onBringToFront}
+            onUpdateItem={onUpdateItem}
           />
         </div>
       ))}

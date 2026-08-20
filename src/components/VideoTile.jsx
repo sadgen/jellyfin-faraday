@@ -5,6 +5,7 @@ import { getTrickplayStyle } from '../utils/trickplay';
 import { useExternalPlayer } from '../hooks/useExternalPlayer';
 import { useTouchGestures } from '../hooks/useTouchGestures';
 import TrickplayScrubberThumbnail from './TrickplayScrubberThumbnail';
+import InlineVrCanvas from './InlineVrCanvas';
 import { 
   Play, Pause, SkipForward, Volume2, VolumeX, Maximize, 
   Star, Eye, EyeOff, ExternalLink, Zap, Image as ImageIcon,
@@ -18,8 +19,7 @@ export default function VideoTile({
   isGlobalMuted = true,
   playbackSpeed = 1.0,
   onSkip,
-  onUpdateItem,
-  onOpenVr
+  onUpdateItem
 }) {
   const videoRef = useRef(null);
   const hlsRef = useRef(null);
@@ -34,7 +34,12 @@ export default function VideoTile({
   const [errorMessage, setErrorMessage] = useState('');
   const [showPlayerMenu, setShowPlayerMenu] = useState(false);
   const [showPosterModal, setShowPosterModal] = useState(false);
-  const [showPinnedPoster, setShowPinnedPoster] = useState(false);
+  
+  // Pinned Poster PIP: ENABLED BY DEFAULT and enlarged 1.5x
+  const [showPinnedPoster, setShowPinnedPoster] = useState(true);
+  
+  // INLINE VR Projection State (renders right inside this tile!)
+  const [isVrActive, setIsVrActive] = useState(false);
   
   // Progress & Duration
   const [progress, setProgress] = useState(0);
@@ -57,10 +62,7 @@ export default function VideoTile({
 
   const { launchPlayer } = useExternalPlayer();
 
-  // 4-Window Geometric Layout Calculations:
-  // Top Row (Tile 0 & 1): Scrubber at bottom (bottom-0), Trickplay popover BELOW (position="below", overlaps bottom window)
-  // Bottom Row (Tile 2 & 3): Scrubber at top (top-0), Trickplay popover ABOVE (position="above", overlaps top window)
-  // Bottom Row Buttons: Located at BOTTOM-RIGHT to avoid colliding with top progress bar!
+  // 4-Window Geometric Layout Calculations
   const is4Window = activeTileCount === 4;
   const isTopRowIn4Window = is4Window && (tileId === 0 || tileId === 1);
   const isBottomRowIn4Window = is4Window && (tileId === 2 || tileId === 3);
@@ -388,11 +390,8 @@ export default function VideoTile({
 
   const coverUrl = useMemo(() => {
     if (!item?.Id) return null;
-    if (is4Window && item.ImageTags?.Backdrop) {
-      return jellyfin.getImageUrl(item.Id, item.ImageTags.Backdrop, 'Backdrop', 600, 80);
-    }
     return jellyfin.getImageUrl(item.Id, item.ImageTags?.Primary, 'Primary', 600, 80);
-  }, [item?.Id, item?.ImageTags, is4Window]);
+  }, [item?.Id, item?.ImageTags]);
 
   const isFavorite = !!item?.UserData?.IsFavorite;
   const playCount = item?.UserData?.PlayCount || 0;
@@ -439,6 +438,7 @@ export default function VideoTile({
       <video
         ref={videoRef}
         playsInline
+        crossOrigin="anonymous"
         className="w-full h-full object-contain z-10 cursor-pointer rounded-xl"
         onClick={togglePlay}
         onWaiting={() => setIsLoading(true)}
@@ -449,6 +449,13 @@ export default function VideoTile({
         onPause={() => setIsPlaying(false)}
         onEnded={() => onSkip && onSkip(tileId)}
         onTimeUpdate={handleTimeUpdate}
+      />
+
+      {/* INLINE VR WEBGL PROJECTION CANVAS (Renders inside this tile, no fullscreen popup!) */}
+      <InlineVrCanvas
+        videoRef={videoRef}
+        isActive={isVrActive}
+        onClose={() => setIsVrActive(false)}
       />
 
       {/* Mobile Touch Gesture HUD Overlay */}
@@ -464,19 +471,37 @@ export default function VideoTile({
         </div>
       )}
 
-      {/* Pinned Poster Floating PIP View */}
+      {/* 
+        Pinned Poster Floating PIP View:
+        - ENABLED BY DEFAULT
+        - ENLARGED BY 1.5x (w-36 sm:w-44 aspect-[2/3])
+        - Clean close button & click for lightbox
+      */}
       {showPinnedPoster && coverUrl && (
         <div 
-          className="absolute top-12 right-2.5 z-30 w-24 sm:w-28 aspect-[2/3] rounded-xl overflow-hidden shadow-2xl border border-cyan-500/40 bg-black/80 backdrop-blur-md animate-in zoom-in-95 duration-200"
-          onClick={(e) => e.stopPropagation()}
+          className={`absolute z-30 w-36 sm:w-44 aspect-[2/3] rounded-2xl overflow-hidden shadow-2xl border-2 border-cyan-400/60 bg-black/90 backdrop-blur-md animate-in zoom-in-95 duration-200 group/poster-pip cursor-pointer ${
+            isBottomRowIn4Window ? 'bottom-12 right-3' : 'top-10 right-3'
+          }`}
+          onClick={(e) => {
+            e.stopPropagation();
+            setShowPosterModal(true);
+          }}
+          title="点击查看大图"
         >
-          <img src={coverUrl} alt="Cover" className="w-full h-full object-cover" />
+          <img src={coverUrl} alt="Cover" className="w-full h-full object-cover transition-transform group-hover/poster-pip:scale-105" />
           <button
-            onClick={() => setShowPinnedPoster(false)}
-            className="absolute top-1 right-1 p-1 rounded-full bg-black/70 text-white/80 hover:text-white"
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowPinnedPoster(false);
+            }}
+            className="absolute top-1.5 right-1.5 p-1 rounded-full bg-black/80 text-white/80 hover:text-white hover:bg-red-500/80 transition"
+            title="隐藏海报"
           >
-            <X size={12} />
+            <X size={13} />
           </button>
+          <div className="absolute bottom-0 inset-x-0 bg-black/70 px-2 py-0.5 text-[10px] text-center text-cyan-300 font-medium truncate backdrop-blur-xs">
+            {item?.Name}
+          </div>
         </div>
       )}
 
@@ -516,9 +541,7 @@ export default function VideoTile({
         </div>
       )}
 
-      {/* 
-        Badges: Top-Left for normal/top tiles, BOTTOM-LEFT for 4-window bottom row (to avoid top scrubber conflict) 
-      */}
+      {/* Badges: Top-Left for top tiles, BOTTOM-LEFT for 4-window bottom row */}
       <div className={`absolute left-2.5 z-20 flex items-center gap-1.5 pointer-events-none ${
         isBottomRowIn4Window ? 'bottom-3' : 'top-2.5'
       }`}>
@@ -538,9 +561,7 @@ export default function VideoTile({
         )}
       </div>
 
-      {/* 
-        Quick Actions: Top-Right for normal/top tiles, BOTTOM-RIGHT for 4-window bottom row (to avoid top scrubber conflict) 
-      */}
+      {/* Quick Actions: Top-Right for top tiles, BOTTOM-RIGHT for 4-window bottom row */}
       <div className={`absolute right-2.5 z-20 flex items-center gap-1.5 transition-opacity duration-200 ${
         isBottomRowIn4Window ? 'bottom-3' : 'top-2.5'
       } ${isHovered ? 'opacity-100' : 'opacity-80 md:opacity-0 group-hover:opacity-100'}`}>
@@ -551,22 +572,26 @@ export default function VideoTile({
           }}
           className={`p-1.5 rounded-md backdrop-blur-md border transition-all ${
             showPinnedPoster 
-              ? 'bg-cyan-500/30 border-cyan-400 text-cyan-300' 
+              ? 'bg-cyan-500/30 border-cyan-400 text-cyan-300 shadow-md' 
               : 'bg-black/60 border-white/10 text-gray-300 hover:text-cyan-400 hover:bg-black/80'
           }`}
-          title="浮动展示高清海报"
+          title="浮动展示高清海报 (默认开启 1.5倍)"
         >
           <ImageIcon size={14} />
         </button>
 
-        {/* VR Player Launcher */}
+        {/* Inline VR Toggle Button */}
         <button
           onClick={(e) => {
             e.stopPropagation();
-            if (onOpenVr) onOpenVr(item);
+            setIsVrActive(!isVrActive);
           }}
-          className="p-1.5 rounded-md bg-black/60 hover:bg-amber-950/80 backdrop-blur-md border border-white/10 hover:border-amber-400 text-gray-300 hover:text-amber-400 transition"
-          title="🥽 开启 VR 180° / 360° / 3D 全景播放"
+          className={`p-1.5 rounded-md backdrop-blur-md border transition-all ${
+            isVrActive 
+              ? 'bg-amber-500/40 border-amber-400 text-amber-300 shadow-md animate-pulse' 
+              : 'bg-black/60 border-white/10 text-gray-300 hover:text-amber-400 hover:bg-black/80'
+          }`}
+          title="🥽 开启/退出 当前窗口 VR 180° / 360° 全景"
         >
           <Glasses size={14} />
         </button>
@@ -666,7 +691,6 @@ export default function VideoTile({
       >
         {/* Scrubber Container with Real-Time Mouse Drag */}
         <div className="relative w-full mb-2">
-          {/* Trickplay Popover: Below top window, Above bottom window */}
           <TrickplayScrubberThumbnail
             item={item}
             hoverTime={hoverScrubberTime}
@@ -691,23 +715,13 @@ export default function VideoTile({
           </div>
         </div>
 
-        {/* Bar info row (Only in top row or standard layout; in bottom row we keep it sleek) */}
+        {/* Bar info row */}
         <div className="flex items-center justify-between text-xs text-gray-300 gap-2">
           <div className="flex items-center gap-2 min-w-0 pr-2">
-            {coverUrl && !isBottomRowIn4Window && (
-              <div 
-                onClick={() => setShowPosterModal(true)}
-                className="relative w-7 h-10 rounded-md overflow-hidden bg-black/60 border border-white/20 hover:border-cyan-400 shadow-md cursor-pointer flex-shrink-0 group/poster hover:scale-105 transition"
-                title="点击查看大图"
-              >
-                <img src={coverUrl} alt="Cover" className="w-full h-full object-contain bg-black" />
-              </div>
-            )}
-
             <div className="flex flex-col min-w-0">
               <div 
                 onClick={() => setShowPosterModal(true)}
-                className="font-semibold text-white truncate max-w-[140px] sm:max-w-[180px] text-xs drop-shadow hover:text-cyan-300 cursor-pointer transition" 
+                className="font-semibold text-white truncate max-w-[160px] sm:max-w-[220px] text-xs drop-shadow hover:text-cyan-300 cursor-pointer transition" 
                 title={item?.Name}
               >
                 {item?.Name || '未知影片'}
@@ -798,12 +812,12 @@ export default function VideoTile({
                 <button
                   onClick={() => {
                     setShowPosterModal(false);
-                    if (onOpenVr) onOpenVr(item);
+                    setIsVrActive(true);
                   }}
                   className="px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/40 text-amber-300 text-xs font-medium flex items-center gap-1"
                 >
                   <Glasses size={13} />
-                  <span>开启 VR 全景</span>
+                  <span>开启当前窗口 VR</span>
                 </button>
 
                 <button

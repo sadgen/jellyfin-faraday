@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import Hls from 'hls.js';
 import { jellyfin } from '../api/jellyfinClient';
+import { getTrickplayStyle } from '../utils/trickplay';
 import { useExternalPlayer } from '../hooks/useExternalPlayer';
 import { useTouchGestures } from '../hooks/useTouchGestures';
 import TrickplayScrubberThumbnail from './TrickplayScrubberThumbnail';
@@ -39,10 +40,19 @@ export default function VideoTile({
   const [durationText, setDurationText] = useState('00:00');
   const [rawDuration, setRawDuration] = useState(0);
 
-  // Trickplay Hover State
+  // Trickplay Hover Scrubber State
   const [hoverScrubberTime, setHoverScrubberTime] = useState(null);
   const [hoverScrubberPercent, setHoverScrubberPercent] = useState(0);
   const [scrubberWidth, setScrubberWidth] = useState(300);
+
+  // Mouse Wheel Seek & Trickplay State
+  const [wheelSeekingState, setWheelSeekingState] = useState({
+    active: false,
+    time: 0,
+    delta: 0
+  });
+  const wheelTimerRef = useRef(null);
+  const wheelSeekingTimeRef = useRef(null);
 
   const { launchPlayer } = useExternalPlayer();
 
@@ -91,6 +101,7 @@ export default function VideoTile({
     setErrorMessage('');
     setProgress(0);
     setHoverScrubberTime(null);
+    setWheelSeekingState({ active: false, time: 0, delta: 0 });
 
     const videoEl = videoRef.current;
     if (!videoEl) return;
@@ -107,7 +118,7 @@ export default function VideoTile({
       videoEl.src = directStreamUrl;
       videoEl.playbackRate = playbackSpeed;
       videoEl.muted = isTileMuted;
-      videoEl.play().catch(err => {
+      videoEl.play().catch(() => {
         videoEl.muted = true;
         setIsTileMuted(true);
         videoEl.play().catch(() => {});
@@ -166,8 +177,12 @@ export default function VideoTile({
 
   const formatTime = (seconds) => {
     if (!seconds || isNaN(seconds)) return '00:00';
-    const m = Math.floor(seconds / 60);
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
     const s = Math.floor(seconds % 60);
+    if (h > 0) {
+      return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+    }
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
@@ -189,6 +204,36 @@ export default function VideoTile({
     const pos = (e.clientX - rect.left) / rect.width;
     video.currentTime = pos * video.duration;
   };
+
+  // Mouse Wheel Fast-Forward / Rewind with Real-Time Trickplay
+  const handleWheel = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const video = videoRef.current;
+    if (!video || !video.duration) return;
+
+    const duration = video.duration;
+    const step = 5; // 5 seconds per wheel tick
+    const delta = e.deltaY < 0 ? step : -step; // wheel up = forward, wheel down = backward
+    
+    const baseTime = wheelSeekingTimeRef.current !== null ? wheelSeekingTimeRef.current : video.currentTime;
+    const nextTime = Math.max(0, Math.min(duration, baseTime + delta));
+    
+    wheelSeekingTimeRef.current = nextTime;
+    video.currentTime = nextTime;
+
+    setWheelSeekingState({
+      active: true,
+      time: nextTime,
+      delta: Math.round(nextTime - video.currentTime + delta)
+    });
+
+    if (wheelTimerRef.current) clearTimeout(wheelTimerRef.current);
+    wheelTimerRef.current = setTimeout(() => {
+      wheelSeekingTimeRef.current = null;
+      setWheelSeekingState(prev => ({ ...prev, active: false }));
+    }, 700);
+  }, []);
 
   // Trickplay Hover Scrubber Handler
   const handleScrubberMouseMove = (e) => {
@@ -289,6 +334,12 @@ export default function VideoTile({
     }
   };
 
+  // Wheel Trickplay Style
+  const wheelTrickplayStyle = useMemo(() => {
+    if (!wheelSeekingState.active || !item) return null;
+    return getTrickplayStyle(item, wheelSeekingState.time);
+  }, [wheelSeekingState.active, wheelSeekingState.time, item]);
+
   const posterUrl = item?.Id ? jellyfin.getImageUrl(item.Id, item.ImageTags?.Primary, 'Primary', 1000) : null;
   const isFavorite = !!item?.UserData?.IsFavorite;
   const playCount = item?.UserData?.PlayCount || 0;
@@ -297,6 +348,7 @@ export default function VideoTile({
     <div
       ref={containerRef}
       onAuxClick={handleAuxClick}
+      onWheel={handleWheel}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => {
         setIsHovered(false);
@@ -304,7 +356,6 @@ export default function VideoTile({
       }}
       className="relative w-full h-full bg-black overflow-hidden group select-none border border-slate-800/80 rounded-xl shadow-2xl flex flex-col justify-center items-center touch-none"
       style={{ filter: `brightness(${brightness})` }}
-      title="鼠标中键切片，双击暂停/播放，左右滑动快进"
       {...touchHandlers}
     >
       {/* Fallback & Paused Poster Cover Artwork */}
@@ -337,6 +388,29 @@ export default function VideoTile({
         onEnded={() => onSkip && onSkip(tileId)}
         onTimeUpdate={handleTimeUpdate}
       />
+
+      {/* Mouse Wheel Scroll Seek + Trickplay Center Overlay */}
+      {wheelSeekingState.active && (
+        <div className="absolute inset-0 z-40 flex items-center justify-center pointer-events-none animate-in fade-in zoom-in-95 duration-100">
+          <div className="flex flex-col items-center gap-2 p-2 rounded-2xl bg-black/90 backdrop-blur-md border-2 border-cyan-400 shadow-2xl shadow-cyan-500/30">
+            {/* Trickplay Frame */}
+            <div className="w-[240px] h-[135px] rounded-xl overflow-hidden bg-black flex items-center justify-center relative">
+              {wheelTrickplayStyle ? (
+                <div className="w-full h-full" style={wheelTrickplayStyle} />
+              ) : (
+                <FastForward size={36} className="text-cyan-400 animate-pulse" />
+              )}
+            </div>
+
+            {/* Time Pill */}
+            <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-950/80 border border-cyan-400/40 text-xs font-mono font-bold text-white shadow">
+              <span className="text-cyan-300">{formatTime(wheelSeekingState.time)}</span>
+              <span className="text-gray-400">/</span>
+              <span className="text-gray-300">{durationText}</span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Mobile Touch Gesture HUD Overlay */}
       {gestureState.type && (
@@ -512,7 +586,7 @@ export default function VideoTile({
             if (onSkip) onSkip(tileId);
           }}
           className="p-1.5 rounded-md bg-jf-accent/80 hover:bg-jf-accent text-white backdrop-blur-md border border-cyan-400/30 transition shadow"
-          title="切换下一个 (或鼠标中键点击窗口)"
+          title="切换下一个"
         >
           <SkipForward size={14} />
         </button>
@@ -604,14 +678,6 @@ export default function VideoTile({
           </div>
         </div>
       </div>
-
-      {/* Middle Click / Gesture Hint Watermark */}
-      {isHovered && (
-        <div className="hidden md:flex absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-10 pointer-events-none bg-black/40 backdrop-blur-xs px-3 py-1.5 rounded-full border border-white/5 text-[11px] text-gray-300/60 font-mono items-center gap-1.5">
-          <Zap size={12} className="text-cyan-400" />
-          <span>中键换片 • 双击暂停</span>
-        </div>
-      )}
 
       {/* Poster Lightbox */}
       {showPosterModal && posterUrl && (

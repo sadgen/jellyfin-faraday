@@ -28,11 +28,23 @@ export default function App() {
   // Media items & libraries
   const [mediaItems, setMediaItems] = useState([]);
   const [totalRecordCount, setTotalRecordCount] = useState(0);
-  const [userViews, setUserViews] = useState([]);
+  const [userViews, setUserViews] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('jf_cached_views') || '[]');
+    } catch {
+      return [];
+    }
+  });
   
-  // Default to user's saved library or let views loader set it to views[0].Id (Official Web Client Pattern)
+  // Synchronously initialize to saved library or first cached library (Avoids any initial "All" query)
   const [selectedViewId, setSelectedViewId] = useState(() => {
-    return localStorage.getItem(STORAGE_KEY_VIEW) || '';
+    const saved = localStorage.getItem(STORAGE_KEY_VIEW);
+    if (saved) return saved;
+    try {
+      const cachedViews = JSON.parse(localStorage.getItem('jf_cached_views') || '[]');
+      if (cachedViews.length > 0 && cachedViews[0]?.Id) return cachedViews[0].Id;
+    } catch {}
+    return '';
   });
 
   const [searchKeyword, setSearchKeyword] = useState('');
@@ -100,7 +112,6 @@ export default function App() {
       }
       if (cache.views && cache.views.length > 0) {
         setUserViews(cache.views);
-        // Default to first view if not set
         if (!selectedViewId) {
           const firstId = cache.views[0]?.Id || 'all';
           setSelectedViewId(firstId);
@@ -109,7 +120,7 @@ export default function App() {
       }
     });
 
-    // Fetch user views in background
+    // Fetch user views from server
     jellyfin.getUserViews().then(views => {
       if (views && views.length > 0) {
         setUserViews(views);
@@ -122,11 +133,13 @@ export default function App() {
     }).catch(err => {
       console.warn('Failed to fetch user views:', err);
     });
-  }, [isAuthenticated]);
+  }, [isAuthenticated, selectedViewId]);
 
   // 2. Query Media Items & Save to Local Cache (Fast Stream: 150 items first < 15ms)
   const fetchAllMedia = useCallback(async (viewId, search, status, sort, genre, year, letter, isBackground = false) => {
     if (!jellyfin.auth.isConfigured) return;
+    if (!viewId) return; // Prevent premature all-libraries query!
+
     if (!isBackground) setIsLoading(true);
     setErrorText('');
 
@@ -189,7 +202,7 @@ export default function App() {
   const isFirstMountRef = useRef(true);
 
   useEffect(() => {
-    if (!jellyfin.auth.isConfigured) return;
+    if (!jellyfin.auth.isConfigured || !selectedViewId) return;
 
     if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
 

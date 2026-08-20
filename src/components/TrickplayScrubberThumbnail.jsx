@@ -24,32 +24,32 @@ export default function TrickplayScrubberThumbnail({
 
   if (!item || hoverTime === null) return null;
 
-  // Calculate safe X coordinate so thumbnail doesn't overflow container boundaries
-  const thumbWidth = 140;
+  // Larger Trickplay Preview (240px x 135px 16:9)
+  const thumbWidth = 240;
   const rawX = (hoverPercent || 0) * (containerWidth || 300);
-  const left = Math.max(thumbWidth / 2, Math.min((containerWidth || 300) - thumbWidth / 2, rawX));
+  const left = Math.max(thumbWidth / 2 + 8, Math.min((containerWidth || 300) - thumbWidth / 2 - 8, rawX));
 
   return (
     <div
-      className="absolute bottom-6 z-40 -translate-x-1/2 flex flex-col items-center pointer-events-none transition-all duration-75"
+      className="absolute bottom-6 z-40 -translate-x-1/2 flex flex-col items-center pointer-events-none transition-all duration-75 animate-in fade-in zoom-in-95 duration-100"
       style={{ left: `${left}px` }}
     >
-      {/* Thumbnail Window */}
-      <div className="w-[140px] h-[80px] rounded-lg overflow-hidden bg-black/90 border border-cyan-400/50 shadow-2xl flex items-center justify-center relative">
+      {/* Large Thumbnail Window */}
+      <div className="w-[240px] h-[135px] rounded-xl overflow-hidden bg-black/95 border-2 border-cyan-400 shadow-2xl shadow-cyan-500/25 flex items-center justify-center relative">
         {style ? (
           <div className="w-full h-full" style={style} />
         ) : (
-          <div className="text-[10px] text-gray-500 font-mono">无 Trickplay 帧</div>
+          <div className="text-xs text-gray-500 font-mono">无 Trickplay 帧</div>
         )}
         
-        {/* Time Stamp Pill */}
-        <div className="absolute bottom-1 bg-black/75 backdrop-blur-xs px-2 py-0.5 rounded text-[10px] font-mono text-cyan-300 border border-white/10">
+        {/* Time Stamp Badge */}
+        <div className="absolute bottom-2 bg-black/85 backdrop-blur-sm px-3 py-1 rounded-full text-xs font-mono font-bold text-cyan-300 border border-white/20 shadow-lg">
           {formatTime(hoverTime)}
         </div>
       </div>
 
-      {/* Downward pointer triangle */}
-      <div className="w-0 h-0 border-x-4 border-x-transparent border-t-4 border-t-cyan-400/50 mt-0.5" />
+      {/* Downward pointer arrow */}
+      <div className="w-0 h-0 border-x-6 border-x-transparent border-t-6 border-t-cyan-400 mt-0.5" />
     </div>
   );
 }

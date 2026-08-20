@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import Hls from 'hls.js';
 import { jellyfin } from '../api/jellyfinClient';
+import { getTrickplayStyle } from '../utils/trickplay';
 import { useExternalPlayer } from '../hooks/useExternalPlayer';
 import { useTouchGestures } from '../hooks/useTouchGestures';
 import TrickplayScrubberThumbnail from './TrickplayScrubberThumbnail';
@@ -42,6 +43,15 @@ export default function VideoPlayerModal({
   const [hoverScrubberPercent, setHoverScrubberPercent] = useState(0);
   const [scrubberWidth, setScrubberWidth] = useState(600);
 
+  // Mouse Wheel Seek & Trickplay State
+  const [wheelSeekingState, setWheelSeekingState] = useState({
+    active: false,
+    time: 0,
+    delta: 0
+  });
+  const wheelTimerRef = useRef(null);
+  const wheelSeekingTimeRef = useRef(null);
+
   const { launchPlayer } = useExternalPlayer();
 
   // Mobile Touch Gestures
@@ -78,6 +88,7 @@ export default function VideoPlayerModal({
     setErrorMessage('');
     setProgress(0);
     setHoverScrubberTime(null);
+    setWheelSeekingState({ active: false, time: 0, delta: 0 });
 
     const videoEl = videoRef.current;
     if (!videoEl) return;
@@ -164,6 +175,42 @@ export default function VideoPlayerModal({
     };
   }, [isOpen, item?.Id]);
 
+  // Mouse Wheel Fast-Forward / Rewind
+  const handleWheel = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const video = videoRef.current;
+    if (!video || !video.duration) return;
+
+    const duration = video.duration;
+    const step = 5;
+    const delta = e.deltaY < 0 ? step : -step;
+    
+    const baseTime = wheelSeekingTimeRef.current !== null ? wheelSeekingTimeRef.current : video.currentTime;
+    const nextTime = Math.max(0, Math.min(duration, baseTime + delta));
+    
+    wheelSeekingTimeRef.current = nextTime;
+    video.currentTime = nextTime;
+
+    setWheelSeekingState({
+      active: true,
+      time: nextTime,
+      delta: Math.round(nextTime - video.currentTime + delta)
+    });
+
+    if (wheelTimerRef.current) clearTimeout(wheelTimerRef.current);
+    wheelTimerRef.current = setTimeout(() => {
+      wheelSeekingTimeRef.current = null;
+      setWheelSeekingState(prev => ({ ...prev, active: false }));
+    }, 700);
+  }, []);
+
+  // Wheel Trickplay Style
+  const wheelTrickplayStyle = useMemo(() => {
+    if (!wheelSeekingState.active || !item) return null;
+    return getTrickplayStyle(item, wheelSeekingState.time);
+  }, [wheelSeekingState.active, wheelSeekingState.time, item]);
+
   if (!isOpen || !item) return null;
 
   const formatTime = (seconds) => {
@@ -245,6 +292,7 @@ export default function VideoPlayerModal({
     >
       <div 
         ref={containerRef}
+        onWheel={handleWheel}
         className="relative w-full h-full md:h-auto md:max-w-5xl bg-[#0d1117] md:rounded-2xl overflow-hidden shadow-2xl border border-white/10 flex flex-col justify-between md:justify-start md:max-h-[92vh]"
         style={{ filter: `brightness(${brightness})` }}
         onClick={(e) => e.stopPropagation()}
@@ -342,6 +390,26 @@ export default function VideoPlayerModal({
             onTimeUpdate={handleTimeUpdate}
           />
 
+          {/* Mouse Wheel Seek Trickplay Overlay */}
+          {wheelSeekingState.active && (
+            <div className="absolute inset-0 z-40 flex items-center justify-center pointer-events-none animate-in fade-in zoom-in-95 duration-100">
+              <div className="flex flex-col items-center gap-2 p-2.5 rounded-2xl bg-black/90 backdrop-blur-md border-2 border-cyan-400 shadow-2xl shadow-cyan-500/30">
+                <div className="w-[260px] h-[146px] rounded-xl overflow-hidden bg-black flex items-center justify-center relative">
+                  {wheelTrickplayStyle ? (
+                    <div className="w-full h-full" style={wheelTrickplayStyle} />
+                  ) : (
+                    <FastForward size={40} className="text-cyan-400 animate-pulse" />
+                  )}
+                </div>
+                <div className="flex items-center gap-2 px-3.5 py-1 rounded-full bg-cyan-950/80 border border-cyan-400/40 text-xs font-mono font-bold text-white shadow">
+                  <span className="text-cyan-300">{formatTime(wheelSeekingState.time)}</span>
+                  <span className="text-gray-400">/</span>
+                  <span className="text-gray-300">{durationText}</span>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Touch Gesture HUD Overlay */}
           {gestureState.type && (
             <div className="absolute inset-0 z-30 flex items-center justify-center pointer-events-none animate-in fade-in zoom-in-95 duration-100">
@@ -405,7 +473,6 @@ export default function VideoPlayerModal({
 
           {/* Controls Row */}
           <div className="flex items-center justify-between text-xs text-gray-300">
-            {/* Left: Play/Pause, Navigation, Time */}
             <div className="flex items-center gap-2 sm:gap-3">
               <button
                 onClick={togglePlay}
@@ -446,7 +513,6 @@ export default function VideoPlayerModal({
               </span>
             </div>
 
-            {/* Right: Speed, Fullscreen */}
             <div className="flex items-center gap-2">
               <div className="flex items-center bg-black/40 px-2 py-1 rounded-xl border border-white/5 gap-1">
                 <span className="text-gray-400 text-[11px] hidden sm:inline">倍速:</span>

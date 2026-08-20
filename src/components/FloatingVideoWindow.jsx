@@ -2,11 +2,12 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import Hls from 'hls.js';
 import { jellyfin } from '../api/jellyfinClient';
 import { getTrickplayStyle } from '../utils/trickplay';
+import { calculateSlotStyle } from '../utils/windowLayout';
 import { useExternalPlayer } from '../hooks/useExternalPlayer';
 import TrickplayScrubberThumbnail from './TrickplayScrubberThumbnail';
 import { 
   Play, Pause, SkipForward, Volume2, VolumeX, Maximize, 
-  X, ExternalLink, Move, Minimize2, Film, Star, Eye
+  X, ExternalLink, Move, Film, Star, Eye
 } from 'lucide-react';
 
 export default function FloatingVideoWindow({
@@ -16,24 +17,34 @@ export default function FloatingVideoWindow({
   onExpand,
   onBringToFront
 }) {
-  const { id, slotIndex, item, position } = windowData;
+  const { id, slotIndex, item } = windowData;
 
   const videoRef = useRef(null);
   const hlsRef = useRef(null);
   const containerRef = useRef(null);
   const scrubberRef = useRef(null);
 
-  // Position & Drag state
-  const [pos, setPos] = useState(position || { x: 20 + slotIndex * 340, y: window.innerHeight - 280 });
+  // Initialize position and size using exact Tampermonkey slot formula
+  const [layout, setLayout] = useState(() => calculateSlotStyle(slotIndex));
   const [isDragging, setIsDragging] = useState(false);
   const dragStartRef = useRef({ mouseX: 0, mouseY: 0, posX: 0, posY: 0 });
+
+  // Update layout on window resize
+  useEffect(() => {
+    const handleResize = () => {
+      if (!isDragging) {
+        setLayout(calculateSlotStyle(slotIndex));
+      }
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [slotIndex, isDragging]);
 
   // Playback state
   const [isPlaying, setIsPlaying] = useState(true);
   const [isMuted, setIsMuted] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
-  const [showPlayerMenu, setShowPlayerMenu] = useState(false);
 
   // Progress & Duration
   const [progress, setProgress] = useState(0);
@@ -167,16 +178,16 @@ export default function FloatingVideoWindow({
     dragStartRef.current = {
       mouseX: e.clientX,
       mouseY: e.clientY,
-      posX: pos.x,
-      posY: pos.y
+      posX: layout.left,
+      posY: layout.top
     };
 
     const handleMouseMove = (moveEvent) => {
       const dx = moveEvent.clientX - dragStartRef.current.mouseX;
       const dy = moveEvent.clientY - dragStartRef.current.mouseY;
-      const newX = Math.max(0, Math.min(window.innerWidth - 320, dragStartRef.current.posX + dx));
-      const newY = Math.max(0, Math.min(window.innerHeight - 200, dragStartRef.current.posY + dy));
-      setPos({ x: newX, y: newY });
+      const newX = Math.max(0, Math.min(window.innerWidth - layout.width, dragStartRef.current.posX + dx));
+      const newY = Math.max(0, Math.min(window.innerHeight - 100, dragStartRef.current.posY + dy));
+      setLayout(prev => ({ ...prev, left: newX, top: newY }));
     };
 
     const handleMouseUp = () => {
@@ -315,7 +326,7 @@ export default function FloatingVideoWindow({
     }
   };
 
-  const backdropUrl = item?.Id ? (jellyfin.getImageUrl(item.Id, item.ImageTags?.Backdrop || item.ImageTags?.Primary, 'Backdrop', 450, 80) || jellyfin.getImageUrl(item.Id, item.ImageTags?.Primary, 'Primary', 300, 80)) : null;
+  const backdropUrl = item?.Id ? (jellyfin.getImageUrl(item.Id, item.ImageTags?.Backdrop || item.ImageTags?.Primary, 'Backdrop', 600, 80) || jellyfin.getImageUrl(item.Id, item.ImageTags?.Primary, 'Primary', 400, 80)) : null;
 
   return (
     <div
@@ -324,27 +335,33 @@ export default function FloatingVideoWindow({
       onAuxClick={handleAuxClick}
       onWheel={handleWheel}
       style={{
-        left: `${pos.x}px`,
-        top: `${pos.y}px`,
-        width: '320px',
+        left: `${layout.left}px`,
+        top: `${layout.top}px`,
+        width: `${layout.width}px`,
         zIndex: 50 + slotIndex
       }}
-      className={`fixed rounded-2xl overflow-hidden shadow-2xl border border-cyan-500/30 bg-[#0d1117] flex flex-col group select-none transition-shadow ${
-        isDragging ? 'shadow-cyan-500/40 opacity-95 scale-[1.02]' : 'hover:border-cyan-400/60'
+      className={`fixed rounded-2xl overflow-hidden shadow-2xl border bg-[#0d1117] flex flex-col group select-none transition-shadow ${
+        slotIndex === 0 
+          ? 'border-cyan-400/60 shadow-cyan-500/25' 
+          : 'border-white/15 shadow-black/80'
+      } ${
+        isDragging ? 'shadow-cyan-500/50 opacity-95 scale-[1.01]' : 'hover:border-cyan-400'
       }`}
     >
       {/* Draggable Header */}
       <div
         onMouseDown={handleMouseDownHeader}
-        className="px-3 py-2 bg-slate-950/90 border-b border-white/10 flex items-center justify-between cursor-move text-xs"
+        className={`px-3 py-2 border-b border-white/10 flex items-center justify-between cursor-move text-xs ${
+          slotIndex === 0 ? 'bg-cyan-950/80 text-cyan-200' : 'bg-slate-950/90 text-gray-300'
+        }`}
       >
         <div className="flex items-center gap-1.5 min-w-0 pr-2">
-          <span className="w-2 h-2 rounded-full bg-cyan-400 shadow-sm shadow-cyan-400 animate-pulse" />
-          <span className="font-bold text-white text-xs truncate max-w-[140px]" title={item?.Name}>
+          <span className={`w-2 h-2 rounded-full ${slotIndex === 0 ? 'bg-cyan-400 animate-pulse' : 'bg-amber-400'}`} />
+          <span className="font-bold text-white text-xs truncate max-w-[200px]" title={item?.Name}>
             {item?.Name || '视频预览'}
           </span>
-          <span className="px-1 py-0.2 rounded bg-white/10 text-[9px] font-mono text-gray-400">
-            #{slotIndex + 1}
+          <span className="px-1.5 py-0.2 rounded bg-white/10 text-[10px] font-mono text-cyan-300 font-bold">
+            {slotIndex === 0 ? '主窗' : `副窗 #${slotIndex}`}
           </span>
         </div>
 
@@ -355,7 +372,7 @@ export default function FloatingVideoWindow({
             className="p-1 rounded hover:bg-white/10 text-gray-400 hover:text-cyan-300 transition"
             title="MPV 打开"
           >
-            <ExternalLink size={12} />
+            <ExternalLink size={13} />
           </button>
 
           {/* Expand to full theater */}
@@ -364,7 +381,7 @@ export default function FloatingVideoWindow({
             className="p-1 rounded hover:bg-white/10 text-gray-400 hover:text-cyan-300 transition"
             title="放大影院全屏"
           >
-            <Maximize size={12} />
+            <Maximize size={13} />
           </button>
 
           {/* Skip next */}
@@ -373,7 +390,7 @@ export default function FloatingVideoWindow({
             className="p-1 rounded hover:bg-white/10 text-gray-400 hover:text-cyan-300 transition"
             title="换一个 (中键)"
           >
-            <SkipForward size={12} />
+            <SkipForward size={13} />
           </button>
 
           {/* Close */}
@@ -382,12 +399,12 @@ export default function FloatingVideoWindow({
             className="p-1 rounded hover:bg-red-500/20 text-gray-400 hover:text-red-400 transition"
             title="关闭窗口"
           >
-            <X size={13} />
+            <X size={14} />
           </button>
         </div>
       </div>
 
-      {/* Video Viewport */}
+      {/* Video Viewport (16:9) */}
       <div className="relative w-full aspect-video bg-black flex items-center justify-center overflow-hidden">
         {/* Backdrop Thumbnail */}
         {backdropUrl && (
@@ -428,8 +445,8 @@ export default function FloatingVideoWindow({
             onClick={togglePlay}
             className="absolute inset-0 z-20 flex items-center justify-center bg-black/30 cursor-pointer"
           >
-            <div className="w-10 h-10 rounded-full bg-black/60 border border-white/20 flex items-center justify-center text-white">
-              <Play size={18} className="ml-0.5 fill-white" />
+            <div className="w-11 h-11 rounded-full bg-black/60 border border-white/20 flex items-center justify-center text-white">
+              <Play size={20} className="ml-0.5 fill-white" />
             </div>
           </div>
         )}
@@ -468,17 +485,17 @@ export default function FloatingVideoWindow({
               onClick={togglePlay}
               className="p-1 hover:bg-white/10 rounded text-white transition"
             >
-              {isPlaying ? <Pause size={13} /> : <Play size={13} />}
+              {isPlaying ? <Pause size={14} /> : <Play size={14} />}
             </button>
 
             <button
               onClick={toggleMute}
               className="p-1 hover:bg-white/10 rounded text-white transition"
             >
-              {isMuted ? <VolumeX size={13} className="text-gray-400" /> : <Volume2 size={13} className="text-cyan-400" />}
+              {isMuted ? <VolumeX size={14} className="text-gray-400" /> : <Volume2 size={14} className="text-cyan-400" />}
             </button>
 
-            <span className="font-mono text-[10px] text-gray-400">
+            <span className="font-mono text-[11px] text-gray-400">
               {currentTimeText} / {durationText}
             </span>
           </div>
@@ -486,9 +503,9 @@ export default function FloatingVideoWindow({
           <div className="flex items-center gap-1">
             <button
               onClick={() => onSkip && onSkip(slotIndex)}
-              className="px-2 py-0.5 rounded bg-cyan-950 hover:bg-cyan-900 border border-cyan-500/40 text-cyan-300 text-[10px] font-medium transition flex items-center gap-1"
+              className="px-2.5 py-0.5 rounded-lg bg-cyan-950 hover:bg-cyan-900 border border-cyan-500/40 text-cyan-300 text-[11px] font-medium transition flex items-center gap-1"
             >
-              <SkipForward size={10} />
+              <SkipForward size={11} />
               <span>切片</span>
             </button>
           </div>

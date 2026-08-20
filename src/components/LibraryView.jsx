@@ -46,7 +46,9 @@ const SORT_OPTIONS = [
 ];
 
 /**
- * Movie Card with Clean Unmasked Timeline Trickplay (Strict 16:9, No Masks, No Center Button)
+ * Movie Card with Clean Unmasked Timeline Trickplay
+ * - In Poster mode (2:3): Pops up a large 260x146 Trickplay preview ABOVE the poster!
+ * - In Backdrop mode (16:9): Renders inside the 16:9 card.
  */
 function MediaCard({
   item,
@@ -123,15 +125,31 @@ function MediaCard({
     <div
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={handleCoverMouseLeave}
-      className={`group relative flex flex-col bg-slate-900/50 rounded-xl overflow-hidden border transition-all duration-300 transform hover:-translate-y-1 select-none ${
+      className={`group relative flex flex-col bg-slate-900/50 rounded-xl transition-all duration-300 transform hover:-translate-y-1 select-none ${
         isDuplicate 
-          ? 'border-red-500/60 shadow-lg shadow-red-500/10' 
-          : 'border-white/5 hover:border-cyan-500/40 hover:shadow-xl hover:shadow-cyan-500/10'
+          ? 'border border-red-500/60 shadow-lg shadow-red-500/10' 
+          : 'border border-white/5 hover:border-cyan-500/40 hover:shadow-xl hover:shadow-cyan-500/10'
       }`}
     >
+      {/* 
+        POSTER MODE: Large Floating Trickplay Preview Window ABOVE the card 
+        (Avoids narrow poster width constraints, completely uncompressed & large)
+      */}
+      {!isBackdrop && tpStyle && (
+        <div className="absolute bottom-[calc(100%+8px)] left-1/2 -translate-x-1/2 z-50 flex flex-col items-center pointer-events-none animate-in fade-in zoom-in-95 duration-100">
+          <div className="w-[260px] h-[146px] rounded-xl overflow-hidden bg-black/95 border-2 border-cyan-400 shadow-2xl shadow-cyan-500/30 flex items-center justify-center relative">
+            <div className="w-full h-full" style={tpStyle} />
+            <div className="absolute bottom-2 bg-black/85 backdrop-blur-md px-3 py-1 rounded-full text-xs font-mono font-bold text-cyan-300 border border-white/20 shadow-lg">
+              {formatTime(trickplayTime)}
+            </div>
+          </div>
+          <div className="w-0 h-0 border-x-6 border-x-transparent border-t-6 border-t-cyan-400 mt-0.5" />
+        </div>
+      )}
+
       {/* Poster / Backdrop Canvas */}
       <div 
-        className={`relative w-full bg-black overflow-hidden cursor-pointer flex items-center justify-center ${
+        className={`relative w-full bg-black rounded-t-xl overflow-hidden cursor-pointer flex items-center justify-center ${
           isBackdrop ? 'aspect-video' : 'aspect-[2/3]'
         }`}
         onClick={() => onPlay(item)}
@@ -144,7 +162,7 @@ function MediaCard({
             alt={item.Name}
             loading="lazy"
             className={`w-full h-full object-cover transition-opacity duration-200 ${
-              tpStyle ? 'opacity-0' : 'opacity-100'
+              isBackdrop && tpStyle ? 'opacity-0' : 'opacity-100'
             }`}
           />
         ) : (
@@ -153,28 +171,29 @@ function MediaCard({
           </div>
         )}
 
-        {/* Clean Trickplay Frame */}
-        {tpStyle && (
+        {/* BACKDROP MODE: Inside 16:9 Card */}
+        {isBackdrop && tpStyle && (
           <div className="absolute inset-0 bg-black flex items-center justify-center overflow-hidden pointer-events-none">
             <div 
               className="w-full aspect-video relative shadow-2xl"
               style={tpStyle}
             />
 
-            {/* Trickplay Timestamp Badge */}
             <div className="absolute bottom-2 left-2 z-30 pointer-events-none">
               <div className="px-2 py-0.5 rounded-full bg-black/85 backdrop-blur-md border border-cyan-400/50 text-[10px] font-mono font-bold text-cyan-300 shadow-lg">
                 {formatTime(trickplayTime)}
               </div>
             </div>
+          </div>
+        )}
 
-            {/* Bottom Timeline Progress Line */}
-            <div className="absolute bottom-0 inset-x-0 h-1 bg-white/20">
-              <div 
-                className="h-full bg-cyan-400 shadow-sm shadow-cyan-400 transition-all duration-75"
-                style={{ width: `${hoverPercent * 100}%` }}
-              />
-            </div>
+        {/* Bottom Timeline Progress Line on Hover */}
+        {tpStyle && (
+          <div className="absolute bottom-0 inset-x-0 h-1 bg-white/20 z-20 pointer-events-none">
+            <div 
+              className="h-full bg-cyan-400 shadow-sm shadow-cyan-400 transition-all duration-75"
+              style={{ width: `${hoverPercent * 100}%` }}
+            />
           </div>
         )}
 
@@ -610,7 +629,7 @@ export default function LibraryView({
 
             <button
               onClick={() => onSelectView('all')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition flex-shrink-0 ${
+              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-medium transition flex-shrink-0 ${
                 selectedViewId === 'all'
                   ? 'bg-jf-accent text-white shadow-lg shadow-cyan-500/25'
                   : 'bg-black/40 hover:bg-white/10 text-gray-400 border border-white/5'
@@ -627,7 +646,7 @@ export default function LibraryView({
             <button
               onClick={onOpenRandom3Windows}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 text-xs font-bold shadow-lg transition transform hover:scale-[1.02]"
-              title="复刻油猴脚本：在当前页面随机开启3个独立悬浮播放窗"
+              title="复刻油猴脚本：开启 1大+2小 经典非对称 3 独立悬浮播放窗"
             >
               <Tv size={13} className="text-amber-400" />
               <span>随机3窗</span>

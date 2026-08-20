@@ -602,6 +602,32 @@ export class JellyfinClient {
   }
 
   /**
+   * Report Playback Session progress to Jellyfin server (Increments PlayCount and updates last played)
+   */
+  async reportPlayback(itemId, positionSec = 0, isPaused = false, type = 'Progress') {
+    if (!this.auth.isConfigured || !itemId) return false;
+    const endpoint = type === 'Started' ? '' : `/${type}`;
+    const url = `${this.auth.serverUrl}/Sessions/Playing${endpoint}?api_key=${this.auth.token}`;
+    const body = {
+      ItemId: itemId,
+      PositionTicks: Math.floor(positionSec * 10000000),
+      IsPaused: isPaused,
+      VolumeLevel: 100,
+      EventName: type
+    };
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: this.getAuthHeaders(),
+        body: JSON.stringify(body)
+      });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * Trigger Jellyfin library rescan
    */
   async refreshLibrary() {

@@ -9,7 +9,7 @@ import InlineVrCanvas from './InlineVrCanvas';
 import { 
   Play, Pause, SkipForward, Volume2, VolumeX, Maximize, 
   Star, Eye, EyeOff, ExternalLink, Zap, Image as ImageIcon,
-  X, Info, Tag, Calendar, Film, Sun, FastForward, Glasses
+  X, Info, Film, Sun, FastForward, Glasses, Trash2
 } from 'lucide-react';
 
 export default function VideoTile({
@@ -19,7 +19,8 @@ export default function VideoTile({
   isGlobalMuted = true,
   playbackSpeed = 1.0,
   onSkip,
-  onUpdateItem
+  onUpdateItem,
+  onDeleteItem
 }) {
   const videoRef = useRef(null);
   const hlsRef = useRef(null);
@@ -38,7 +39,7 @@ export default function VideoTile({
   // Pinned Poster PIP: ENABLED BY DEFAULT and enlarged 1.5x
   const [showPinnedPoster, setShowPinnedPoster] = useState(true);
   
-  // INLINE VR Projection State (renders right inside this tile!)
+  // INLINE VR Projection State
   const [isVrActive, setIsVrActive] = useState(false);
   
   // Progress & Duration
@@ -59,6 +60,10 @@ export default function VideoTile({
   const [isWheelSeeking, setIsWheelSeeking] = useState(false);
   const wheelTimerRef = useRef(null);
   const wheelSeekingTimeRef = useRef(null);
+
+  // Playback reporting & PlayCount Tracking
+  const playReportTimerRef = useRef(null);
+  const hasCountedPlayRef = useRef(false);
 
   const { launchPlayer } = useExternalPlayer();
 
@@ -103,7 +108,7 @@ export default function VideoTile({
     }
   }, [playbackSpeed]);
 
-  // Load and play video when item changes
+  // Load and play video when item changes + Report Playback to Jellyfin
   useEffect(() => {
     if (!item?.Id) {
       setIsLoading(false);
@@ -116,6 +121,7 @@ export default function VideoTile({
     setProgress(0);
     setHoverScrubberTime(null);
     setIsWheelSeeking(false);
+    hasCountedPlayRef.current = false;
 
     const videoEl = videoRef.current;
     if (!videoEl) return;
@@ -124,6 +130,29 @@ export default function VideoTile({
       hlsRef.current.destroy();
       hlsRef.current = null;
     }
+
+    // Report playback start to Jellyfin
+    jellyfin.reportPlayback(item.Id, 0, false, 'Started');
+
+    // Periodic progress reporting (every 10s)
+    if (playReportTimerRef.current) clearInterval(playReportTimerRef.current);
+    playReportTimerRef.current = setInterval(() => {
+      if (videoEl && !videoEl.paused && videoEl.currentTime > 0) {
+        jellyfin.reportPlayback(item.Id, videoEl.currentTime, false, 'Progress');
+        
+        // Count playback if played for >= 10s
+        if (!hasCountedPlayRef.current && videoEl.currentTime >= 10) {
+          hasCountedPlayRef.current = true;
+          const nextCount = (item.UserData?.PlayCount || 0) + 1;
+          if (onUpdateItem) {
+            onUpdateItem({
+              ...item,
+              UserData: { ...item.UserData, PlayCount: nextCount }
+            });
+          }
+        }
+      }
+    }, 10000);
 
     const directStreamUrl = jellyfin.getStreamUrl(item.Id);
     const hlsUrl = jellyfin.getHlsUrl(item.Id);
@@ -179,6 +208,10 @@ export default function VideoTile({
     setupDirectPlay();
 
     return () => {
+      if (playReportTimerRef.current) clearInterval(playReportTimerRef.current);
+      if (videoEl && videoEl.currentTime > 0) {
+        jellyfin.reportPlayback(item.Id, videoEl.currentTime, true, 'Stopped');
+      }
       videoEl.removeEventListener('error', handleDirectError);
       if (hlsRef.current) {
         hlsRef.current.destroy();
@@ -208,7 +241,23 @@ export default function VideoTile({
     setDurationText(formatTime(video.duration));
   };
 
-  // Mouse Wheel Fast-Forward (Down) / Rewind (Up) with Direct Scrubber Trickplay
+  // Video Ended -> increment play count and skip
+  const handleEnded = () => {
+    if (!hasCountedPlayRef.current) {
+      hasCountedPlayRef.current = true;
+      const nextCount = (item.UserData?.PlayCount || 0) + 1;
+      if (onUpdateItem) {
+        onUpdateItem({
+          ...item,
+          UserData: { ...item.UserData, Played: true, PlayCount: nextCount }
+        });
+      }
+    }
+    jellyfin.reportPlayback(item.Id, videoRef.current?.duration || 0, true, 'Stopped');
+    if (onSkip) onSkip(tileId);
+  };
+
+  // Mouse Wheel Fast-Forward / Rewind
   const handleWheel = useCallback((e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -388,6 +437,22 @@ export default function VideoTile({
     }
   };
 
+  // Delete Video from Disk (Tampermonkey Replica)
+  const handleDeleteVideo = async (e) => {
+    if (e) e.stopPropagation();
+    if (!item?.Id) return;
+    if (!confirm(`确定要从服务器和物理磁盘中永久删除「${item.Name}」吗？\n警告：这将从物理硬盘上永久删除该文件且无法撤销！`)) {
+      return;
+    }
+    try {
+      await jellyfin.deleteItem(item.Id);
+      if (onDeleteItem) onDeleteItem(item.Id);
+      if (onSkip) onSkip(tileId);
+    } catch (err) {
+      alert(err.message || '删除失败');
+    }
+  };
+
   const coverUrl = useMemo(() => {
     if (!item?.Id) return null;
     return jellyfin.getImageUrl(item.Id, item.ImageTags?.Primary, 'Primary', 600, 80);
@@ -447,11 +512,11 @@ export default function VideoTile({
           setIsPlaying(true);
         }}
         onPause={() => setIsPlaying(false)}
-        onEnded={() => onSkip && onSkip(tileId)}
+        onEnded={handleEnded}
         onTimeUpdate={handleTimeUpdate}
       />
 
-      {/* INLINE VR WEBGL PROJECTION CANVAS (Renders inside this tile, no fullscreen popup!) */}
+      {/* INLINE VR WEBGL PROJECTION CANVAS */}
       <InlineVrCanvas
         videoRef={videoRef}
         isActive={isVrActive}
@@ -475,12 +540,11 @@ export default function VideoTile({
         Pinned Poster Floating PIP View:
         - ENABLED BY DEFAULT
         - ENLARGED BY 1.5x (w-36 sm:w-44 aspect-[2/3])
-        - Clean close button & click for lightbox
       */}
       {showPinnedPoster && coverUrl && (
         <div 
           className={`absolute z-30 w-36 sm:w-44 aspect-[2/3] rounded-2xl overflow-hidden shadow-2xl border-2 border-cyan-400/60 bg-black/90 backdrop-blur-md animate-in zoom-in-95 duration-200 group/poster-pip cursor-pointer ${
-            isBottomRowIn4Window ? 'bottom-12 right-3' : 'top-10 right-3'
+            isBottomRowIn4Window ? 'bottom-16 right-3' : 'top-3 right-3'
           }`}
           onClick={(e) => {
             e.stopPropagation();
@@ -541,156 +605,22 @@ export default function VideoTile({
         </div>
       )}
 
-      {/* Badges: Top-Left for top tiles, BOTTOM-LEFT for 4-window bottom row */}
-      <div className={`absolute left-2.5 z-20 flex items-center gap-1.5 pointer-events-none ${
-        isBottomRowIn4Window ? 'bottom-3' : 'top-2.5'
-      }`}>
-        <div 
-          className="flex items-center gap-1 px-2 py-0.5 rounded bg-black/60 backdrop-blur-md border border-white/10 text-[11px] font-mono font-medium text-cyan-300 shadow-sm"
-          title={`已播放 ${playCount} 次`}
-        >
-          <Eye size={12} className="text-cyan-400" />
-          <span>{playCount}</span>
-        </div>
-
-        {item?.CommunityRating && (
-          <div className="flex items-center gap-1 px-2 py-0.5 rounded bg-black/60 backdrop-blur-md border border-white/10 text-[11px] font-mono font-medium text-amber-300 shadow-sm">
-            <Star size={11} className="fill-amber-400 text-amber-400" />
-            <span>{item.CommunityRating.toFixed(1)}</span>
-          </div>
-        )}
-      </div>
-
-      {/* Quick Actions: Top-Right for top tiles, BOTTOM-RIGHT for 4-window bottom row */}
-      <div className={`absolute right-2.5 z-20 flex items-center gap-1.5 transition-opacity duration-200 ${
-        isBottomRowIn4Window ? 'bottom-3' : 'top-2.5'
-      } ${isHovered ? 'opacity-100' : 'opacity-80 md:opacity-0 group-hover:opacity-100'}`}>
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            setShowPinnedPoster(!showPinnedPoster);
-          }}
-          className={`p-1.5 rounded-md backdrop-blur-md border transition-all ${
-            showPinnedPoster 
-              ? 'bg-cyan-500/30 border-cyan-400 text-cyan-300 shadow-md' 
-              : 'bg-black/60 border-white/10 text-gray-300 hover:text-cyan-400 hover:bg-black/80'
-          }`}
-          title="浮动展示高清海报 (默认开启 1.5倍)"
-        >
-          <ImageIcon size={14} />
-        </button>
-
-        {/* Inline VR Toggle Button */}
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            setIsVrActive(!isVrActive);
-          }}
-          className={`p-1.5 rounded-md backdrop-blur-md border transition-all ${
-            isVrActive 
-              ? 'bg-amber-500/40 border-amber-400 text-amber-300 shadow-md animate-pulse' 
-              : 'bg-black/60 border-white/10 text-gray-300 hover:text-amber-400 hover:bg-black/80'
-          }`}
-          title="🥽 开启/退出 当前窗口 VR 180° / 360° 全景"
-        >
-          <Glasses size={14} />
-        </button>
-
-        <button
-          onClick={handleToggleFavorite}
-          className={`p-1.5 rounded-md backdrop-blur-md border transition-all ${
-            isFavorite 
-              ? 'bg-amber-500/20 border-amber-500/40 text-amber-400' 
-              : 'bg-black/60 border-white/10 text-gray-300 hover:text-amber-400 hover:bg-black/80'
-          }`}
-          title={isFavorite ? '取消收藏' : '加入最爱'}
-        >
-          <Star size={14} className={isFavorite ? 'fill-amber-400' : ''} />
-        </button>
-
-        <button
-          onClick={handleTogglePlayed}
-          className="p-1.5 rounded-md bg-black/60 hover:bg-black/80 backdrop-blur-md border border-white/10 text-gray-300 hover:text-cyan-400 transition"
-          title={item?.UserData?.Played ? '标记为未播' : '标记为已播'}
-        >
-          {item?.UserData?.Played ? <EyeOff size={14} /> : <Eye size={14} />}
-        </button>
-
-        <div className="relative">
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setShowPlayerMenu(!showPlayerMenu);
-            }}
-            className="p-1.5 rounded-md bg-black/60 hover:bg-black/80 backdrop-blur-md border border-white/10 text-gray-300 hover:text-cyan-400 transition"
-            title="调用外部播放器 (MPV / PotPlayer / VLC)"
-          >
-            <ExternalLink size={14} />
-          </button>
-
-          {showPlayerMenu && (
-            <div 
-              className={`absolute right-0 w-32 glass-panel rounded-md shadow-2xl py-1 z-30 text-xs text-gray-200 divide-y divide-white/5 ${
-                isBottomRowIn4Window ? 'bottom-8' : 'top-8'
-              }`}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <button 
-                onClick={() => { launchPlayer('mpv', item); setShowPlayerMenu(false); }}
-                className="w-full px-3 py-1.5 text-left hover:bg-white/10 flex items-center justify-between"
-              >
-                <span>MPV 播放器</span>
-                <span className="text-[10px] text-cyan-400">mpv://</span>
-              </button>
-              <button 
-                onClick={() => { launchPlayer('potplayer', item); setShowPlayerMenu(false); }}
-                className="w-full px-3 py-1.5 text-left hover:bg-white/10 flex items-center justify-between"
-              >
-                <span>PotPlayer</span>
-                <span className="text-[10px] text-amber-400">pot://</span>
-              </button>
-              <button 
-                onClick={() => { launchPlayer('vlc', item); setShowPlayerMenu(false); }}
-                className="w-full px-3 py-1.5 text-left hover:bg-white/10 flex items-center justify-between"
-              >
-                <span>VLC 播放器</span>
-                <span className="text-[10px] text-orange-400">vlc://</span>
-              </button>
-              <button 
-                onClick={() => { launchPlayer('direct', item); setShowPlayerMenu(false); }}
-                className="w-full px-3 py-1.5 text-left hover:bg-white/10 flex items-center justify-between"
-              >
-                <span>新标签页直链</span>
-              </button>
-            </div>
-          )}
-        </div>
-
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            if (onSkip) onSkip(tileId);
-          }}
-          className="p-1.5 rounded-md bg-jf-accent/80 hover:bg-jf-accent text-white backdrop-blur-md border border-cyan-400/30 transition shadow"
-          title="切换下一个"
-        >
-          <SkipForward size={14} />
-        </button>
-      </div>
-
-      {/* Floating Scrubber & Info Bar */}
+      {/* 
+        Integrated Progress Bar & Control Bar:
+        ALL buttons consolidated into this sleek bar on top of/below the video!
+      */}
       <div 
-        className={`absolute inset-x-0 z-30 p-3 transition-all duration-300 ${scrubberPositionClass} ${
+        className={`absolute inset-x-0 z-30 p-2.5 sm:p-3 transition-all duration-300 ${scrubberPositionClass} ${
           isBottomRowIn4Window 
-            ? 'pt-2.5 pb-4 bg-gradient-to-b from-black/95 via-black/80 to-transparent' 
-            : 'pt-6 pb-2.5 bg-gradient-to-t from-black/95 via-black/80 to-transparent'
+            ? 'pt-2 pb-3.5 bg-gradient-to-b from-black/95 via-black/85 to-transparent' 
+            : 'pt-5 pb-2 bg-gradient-to-t from-black/95 via-black/85 to-transparent'
         } ${
-          isHovered || isWheelSeeking ? 'opacity-100 translate-y-0' : 'opacity-90 md:opacity-0 md:translate-y-2'
+          isHovered || isWheelSeeking ? 'opacity-100 translate-y-0' : 'opacity-90 md:opacity-0 md:translate-y-1'
         }`}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Scrubber Container with Real-Time Mouse Drag */}
-        <div className="relative w-full mb-2">
+        <div className="relative w-full mb-1.5">
           <TrickplayScrubberThumbnail
             item={item}
             hoverTime={hoverScrubberTime}
@@ -701,7 +631,7 @@ export default function VideoTile({
 
           <div 
             ref={scrubberRef}
-            className="w-full h-2.5 hover:h-3.5 bg-white/20 rounded-full cursor-pointer transition-all relative overflow-hidden group/bar"
+            className="w-full h-2 hover:h-3 bg-white/20 rounded-full cursor-pointer transition-all relative overflow-hidden group/bar"
             onMouseDown={handleScrubberMouseDown}
             onMouseMove={handleScrubberMouseMove}
             onMouseLeave={handleScrubberMouseLeave}
@@ -715,46 +645,171 @@ export default function VideoTile({
           </div>
         </div>
 
-        {/* Bar info row */}
-        <div className="flex items-center justify-between text-xs text-gray-300 gap-2">
-          <div className="flex items-center gap-2 min-w-0 pr-2">
-            <div className="flex flex-col min-w-0">
-              <div 
-                onClick={() => setShowPosterModal(true)}
-                className="font-semibold text-white truncate max-w-[160px] sm:max-w-[220px] text-xs drop-shadow hover:text-cyan-300 cursor-pointer transition" 
-                title={item?.Name}
-              >
-                {item?.Name || '未知影片'}
-              </div>
-              <div className="text-[10px] text-gray-400 flex items-center gap-1 mt-0.5 font-mono">
-                <span>{currentTimeText} / {durationText}</span>
-              </div>
+        {/* Integrated All-in-One Controls Row */}
+        <div className="flex items-center justify-between text-xs text-gray-300 gap-1.5 pt-0.5">
+          {/* Left: Info & Badges */}
+          <div className="flex items-center gap-2 min-w-0 pr-1 flex-1">
+            <div 
+              onClick={() => setShowPosterModal(true)}
+              className="font-bold text-white truncate max-w-[130px] sm:max-w-[200px] text-xs drop-shadow hover:text-cyan-300 cursor-pointer transition flex-shrink-0" 
+              title={item?.Name}
+            >
+              {item?.Name || '未知影片'}
+            </div>
+
+            <div className="flex items-center gap-1.5 font-mono text-[10px] text-gray-400 flex-shrink-0 hidden xs:flex">
+              <span>{currentTimeText} / {durationText}</span>
+            </div>
+
+            {/* PlayCount & Rating Badges */}
+            <div className="hidden sm:flex items-center gap-1">
+              <span className="px-1.5 py-0.2 rounded bg-black/60 border border-white/10 text-[10px] font-mono text-cyan-300 flex items-center gap-0.5" title={`已播 ${playCount} 次`}>
+                <Eye size={10} className="text-cyan-400" />
+                <span>{playCount}</span>
+              </span>
+
+              {item?.CommunityRating && (
+                <span className="px-1.5 py-0.2 rounded bg-black/60 border border-white/10 text-[10px] font-mono text-amber-300 flex items-center gap-0.5">
+                  <Star size={10} className="fill-amber-400 text-amber-400" />
+                  <span>{item.CommunityRating.toFixed(1)}</span>
+                </span>
+              )}
             </div>
           </div>
 
+          {/* Right: Consolidated Action Buttons */}
           <div className="flex items-center gap-1 flex-shrink-0">
+            {/* Play / Pause */}
             <button
               onClick={togglePlay}
-              className="p-1 hover:bg-white/15 rounded text-white transition"
+              className="p-1.5 hover:bg-white/15 rounded-lg text-white transition"
               title={isPlaying ? '暂停' : '播放'}
             >
-              {isPlaying ? <Pause size={13} /> : <Play size={13} />}
+              {isPlaying ? <Pause size={14} /> : <Play size={14} />}
             </button>
 
+            {/* Mute */}
             <button
               onClick={toggleMute}
-              className="p-1 hover:bg-white/15 rounded text-white transition"
+              className="p-1.5 hover:bg-white/15 rounded-lg text-white transition"
               title={isTileMuted ? '取消静音' : '静音'}
             >
-              {isTileMuted ? <VolumeX size={13} className="text-gray-400" /> : <Volume2 size={13} className="text-cyan-400" />}
+              {isTileMuted ? <VolumeX size={14} className="text-gray-400" /> : <Volume2 size={14} className="text-cyan-400" />}
             </button>
 
+            {/* VR Toggle */}
+            <button
+              onClick={() => setIsVrActive(!isVrActive)}
+              className={`p-1.5 rounded-lg transition ${
+                isVrActive 
+                  ? 'bg-amber-500/40 border border-amber-400 text-amber-300 animate-pulse' 
+                  : 'hover:bg-white/15 text-gray-300 hover:text-amber-400'
+              }`}
+              title="🥽 开启/退出 当前窗口 VR 全景"
+            >
+              <Glasses size={14} />
+            </button>
+
+            {/* Poster PIP Toggle */}
+            <button
+              onClick={() => setShowPinnedPoster(!showPinnedPoster)}
+              className={`p-1.5 rounded-lg transition ${
+                showPinnedPoster 
+                  ? 'bg-cyan-500/30 border border-cyan-400/60 text-cyan-300' 
+                  : 'hover:bg-white/15 text-gray-300 hover:text-cyan-400'
+              }`}
+              title="海报画中画 (默认开启 1.5倍)"
+            >
+              <ImageIcon size={14} />
+            </button>
+
+            {/* Favorite */}
+            <button
+              onClick={handleToggleFavorite}
+              className={`p-1.5 rounded-lg transition ${
+                isFavorite ? 'text-amber-400' : 'hover:bg-white/15 text-gray-300 hover:text-amber-400'
+              }`}
+              title={isFavorite ? '取消收藏' : '加入最爱'}
+            >
+              <Star size={14} className={isFavorite ? 'fill-amber-400' : ''} />
+            </button>
+
+            {/* Played */}
+            <button
+              onClick={handleTogglePlayed}
+              className="p-1.5 hover:bg-white/15 rounded-lg text-gray-300 hover:text-cyan-400 transition"
+              title={item?.UserData?.Played ? '标记为未播' : '标记为已播'}
+            >
+              {item?.UserData?.Played ? <EyeOff size={14} /> : <Eye size={14} />}
+            </button>
+
+            {/* Delete Video from Disk (Tampermonkey Replica) */}
+            <button
+              onClick={handleDeleteVideo}
+              className="p-1.5 hover:bg-red-500/20 rounded-lg text-gray-400 hover:text-red-400 transition"
+              title="从服务器和物理磁盘中彻底删除"
+            >
+              <Trash2 size={14} />
+            </button>
+
+            {/* External Player Menu */}
+            <div className="relative">
+              <button
+                onClick={() => setShowPlayerMenu(!showPlayerMenu)}
+                className="p-1.5 hover:bg-white/15 rounded-lg text-gray-300 hover:text-cyan-400 transition"
+                title="调用外部播放器 (MPV / PotPlayer / VLC)"
+              >
+                <ExternalLink size={14} />
+              </button>
+
+              {showPlayerMenu && (
+                <div 
+                  className={`absolute right-0 w-32 glass-panel rounded-xl shadow-2xl py-1 z-50 text-xs text-gray-200 divide-y divide-white/5 ${
+                    isBottomRowIn4Window ? 'top-8' : 'bottom-8'
+                  }`}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <button 
+                    onClick={() => { launchPlayer('mpv', item); setShowPlayerMenu(false); }}
+                    className="w-full px-3 py-1.5 text-left hover:bg-white/10 flex items-center justify-between text-cyan-300 font-medium"
+                  >
+                    <span>MPV 播放器</span>
+                    <span className="text-[10px]">mpv://</span>
+                  </button>
+                  <button 
+                    onClick={() => { launchPlayer('potplayer', item); setShowPlayerMenu(false); }}
+                    className="w-full px-3 py-1.5 text-left hover:bg-white/10 flex items-center justify-between text-amber-300"
+                  >
+                    <span>PotPlayer</span>
+                    <span className="text-[10px]">pot://</span>
+                  </button>
+                  <button 
+                    onClick={() => { launchPlayer('vlc', item); setShowPlayerMenu(false); }}
+                    className="w-full px-3 py-1.5 text-left hover:bg-white/10 flex items-center justify-between text-orange-300"
+                  >
+                    <span>VLC 播放器</span>
+                    <span className="text-[10px]">vlc://</span>
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Skip */}
+            <button
+              onClick={() => onSkip && onSkip(tileId)}
+              className="p-1.5 rounded-lg bg-jf-accent/80 hover:bg-jf-accent text-white transition shadow"
+              title="切换下一个"
+            >
+              <SkipForward size={14} />
+            </button>
+
+            {/* Fullscreen */}
             <button
               onClick={toggleFullscreen}
-              className="p-1 hover:bg-white/15 rounded text-white transition"
+              className="p-1.5 hover:bg-white/15 rounded-lg text-white transition"
               title="全屏"
             >
-              <Maximize size={12} />
+              <Maximize size={14} />
             </button>
           </div>
         </div>

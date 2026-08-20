@@ -501,6 +501,7 @@ export default function App() {
               isRefreshing={isLoading}
               onOpenLibraryView={() => setViewMode('library')}
               onOpenVr={(item) => setVrPlayingItem(item)}
+              onDeleteItem={handleDeleteItem}
               activeScopeName={activeScopeName}
               initialPlayingItem={initialKanbanItem}
             />
@@ -516,6 +517,7 @@ export default function App() {
             onExpandWindow={(item) => setModalPlayingItem(item)}
             onBringToFront={handleBringFloatingToFront}
             onUpdateItem={handleUpdateItem}
+            onDeleteItem={handleDeleteItem}
           />
         )}
 

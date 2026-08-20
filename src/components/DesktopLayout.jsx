@@ -19,6 +19,7 @@ export default function DesktopLayout({
   isRefreshing,
   onOpenLibraryView,
   onOpenVr,
+  onDeleteItem,
   activeScopeName,
   initialPlayingItem = null
 }) {
@@ -76,6 +77,7 @@ export default function DesktopLayout({
                 playbackSpeed={playbackSpeed}
                 onSkip={consumeNext}
                 onUpdateItem={updateItemInTiles}
+                onDeleteItem={onDeleteItem}
                 onOpenVr={onOpenVr}
               />
             );

@@ -9,7 +9,7 @@ import InlineVrCanvas from './InlineVrCanvas';
 import { 
   Play, Pause, SkipForward, Volume2, VolumeX, Maximize, 
   X, ExternalLink, Film, Star, Eye, EyeOff, Image as ImageIcon,
-  Glasses
+  Glasses, Trash2
 } from 'lucide-react';
 
 export default function FloatingVideoWindow({
@@ -18,7 +18,8 @@ export default function FloatingVideoWindow({
   onSkip,
   onExpand,
   onBringToFront,
-  onUpdateItem
+  onUpdateItem,
+  onDeleteItem
 }) {
   const { id, slotIndex, item } = windowData;
 
@@ -83,9 +84,13 @@ export default function FloatingVideoWindow({
   const wheelTimerRef = useRef(null);
   const wheelSeekingTimeRef = useRef(null);
 
+  // Playback reporting & PlayCount Tracking
+  const playReportTimerRef = useRef(null);
+  const hasCountedPlayRef = useRef(false);
+
   const { launchPlayer } = useExternalPlayer();
 
-  // Load and play video when item changes
+  // Load and play video when item changes + Report Playback to Jellyfin
   useEffect(() => {
     if (!item?.Id) {
       setIsLoading(false);
@@ -97,6 +102,7 @@ export default function FloatingVideoWindow({
     setProgress(0);
     setHoverScrubberTime(null);
     setIsWheelSeeking(false);
+    hasCountedPlayRef.current = false;
 
     const videoEl = videoRef.current;
     if (!videoEl) return;
@@ -105,6 +111,29 @@ export default function FloatingVideoWindow({
       hlsRef.current.destroy();
       hlsRef.current = null;
     }
+
+    // Report playback start to Jellyfin
+    jellyfin.reportPlayback(item.Id, 0, false, 'Started');
+
+    // Periodic progress reporting (every 10s)
+    if (playReportTimerRef.current) clearInterval(playReportTimerRef.current);
+    playReportTimerRef.current = setInterval(() => {
+      if (videoEl && !videoEl.paused && videoEl.currentTime > 0) {
+        jellyfin.reportPlayback(item.Id, videoEl.currentTime, false, 'Progress');
+        
+        // Count playback if played for >= 10s
+        if (!hasCountedPlayRef.current && videoEl.currentTime >= 10) {
+          hasCountedPlayRef.current = true;
+          const nextCount = (item.UserData?.PlayCount || 0) + 1;
+          if (onUpdateItem) {
+            onUpdateItem({
+              ...item,
+              UserData: { ...item.UserData, PlayCount: nextCount }
+            });
+          }
+        }
+      }
+    }, 10000);
 
     const directStreamUrl = jellyfin.getStreamUrl(item.Id);
     const hlsUrl = jellyfin.getHlsUrl(item.Id);
@@ -159,6 +188,10 @@ export default function FloatingVideoWindow({
     setupDirectPlay();
 
     return () => {
+      if (playReportTimerRef.current) clearInterval(playReportTimerRef.current);
+      if (videoEl && videoEl.currentTime > 0) {
+        jellyfin.reportPlayback(item.Id, videoEl.currentTime, true, 'Stopped');
+      }
       videoEl.removeEventListener('error', handleDirectError);
       if (hlsRef.current) {
         hlsRef.current.destroy();
@@ -186,6 +219,22 @@ export default function FloatingVideoWindow({
     setProgress(p);
     setCurrentTimeText(formatTime(video.currentTime));
     setDurationText(formatTime(video.duration));
+  };
+
+  // Video Ended -> increment play count and skip (trigger promotion)
+  const handleEnded = () => {
+    if (!hasCountedPlayRef.current) {
+      hasCountedPlayRef.current = true;
+      const nextCount = (item.UserData?.PlayCount || 0) + 1;
+      if (onUpdateItem) {
+        onUpdateItem({
+          ...item,
+          UserData: { ...item.UserData, Played: true, PlayCount: nextCount }
+        });
+      }
+    }
+    jellyfin.reportPlayback(item.Id, videoRef.current?.duration || 0, true, 'Stopped');
+    if (onSkip) onSkip(slotIndex);
   };
 
   // Dragging the floating window
@@ -370,6 +419,22 @@ export default function FloatingVideoWindow({
     }
   };
 
+  // Delete Video from Disk (Tampermonkey Replica)
+  const handleDeleteVideo = async (e) => {
+    if (e) e.stopPropagation();
+    if (!item?.Id) return;
+    if (!confirm(`确定要从服务器和物理磁盘中永久删除「${item.Name}」吗？\n警告：这将从物理硬盘上永久删除该文件且无法撤销！`)) {
+      return;
+    }
+    try {
+      await jellyfin.deleteItem(item.Id);
+      if (onDeleteItem) onDeleteItem(item.Id);
+      if (onSkip) onSkip(slotIndex); // Triggers shift & slot promotion!
+    } catch (err) {
+      alert(err.message || '删除失败');
+    }
+  };
+
   // Middle Click to Skip (Trigger Shift & Next Window Promotion)
   const handleAuxClick = (e) => {
     if (e.button === 1) {
@@ -419,7 +484,7 @@ export default function FloatingVideoWindow({
       >
         <div className="flex items-center gap-1.5 min-w-0 pr-2">
           <span className={`w-2 h-2 rounded-full ${slotIndex === 0 ? 'bg-cyan-400 animate-pulse' : 'bg-amber-400'}`} />
-          <span className="font-bold text-white text-xs truncate max-w-[180px] sm:max-w-[240px]" title={item?.Name}>
+          <span className="font-bold text-white text-xs truncate max-w-[160px] sm:max-w-[220px]" title={item?.Name}>
             {item?.Name || '视频预览'}
           </span>
           <span className="px-1.5 py-0.2 rounded bg-white/10 text-[10px] font-mono text-cyan-300 font-bold">
@@ -468,6 +533,15 @@ export default function FloatingVideoWindow({
             title={item?.UserData?.Played ? '标记为未播' : '标记为已播'}
           >
             {item?.UserData?.Played ? <EyeOff size={13} /> : <Eye size={13} />}
+          </button>
+
+          {/* Delete Video */}
+          <button
+            onClick={handleDeleteVideo}
+            className="p-1 rounded text-gray-400 hover:text-red-400 transition"
+            title="从服务器和磁盘删除"
+          >
+            <Trash2 size={13} />
           </button>
 
           {/* External Player Menu */}
@@ -563,7 +637,7 @@ export default function FloatingVideoWindow({
             setIsPlaying(true);
           }}
           onPause={() => setIsPlaying(false)}
-          onEnded={() => onSkip && onSkip(slotIndex)}
+          onEnded={handleEnded}
           onTimeUpdate={handleTimeUpdate}
         />
 

@@ -8,7 +8,7 @@ import TrickplayScrubberThumbnail from './TrickplayScrubberThumbnail';
 import { 
   Play, Pause, SkipForward, Volume2, VolumeX, Maximize, 
   Star, Eye, EyeOff, ExternalLink, Zap, Image as ImageIcon,
-  X, Info, Tag, Calendar, Film, Sun, FastForward
+  X, Info, Tag, Calendar, Film, Sun, FastForward, Glasses
 } from 'lucide-react';
 
 export default function VideoTile({
@@ -18,7 +18,8 @@ export default function VideoTile({
   isGlobalMuted = true,
   playbackSpeed = 1.0,
   onSkip,
-  onUpdateItem
+  onUpdateItem,
+  onOpenVr
 }) {
   const videoRef = useRef(null);
   const hlsRef = useRef(null);
@@ -49,18 +50,23 @@ export default function VideoTile({
   // Scrubber Dragging State
   const isDraggingScrubberRef = useRef(false);
 
-  // Mouse Wheel Seek State (directly drives scrubber trickplay without center obstruction)
+  // Mouse Wheel Seek State
   const [isWheelSeeking, setIsWheelSeeking] = useState(false);
   const wheelTimerRef = useRef(null);
   const wheelSeekingTimeRef = useRef(null);
 
   const { launchPlayer } = useExternalPlayer();
 
-  // Determine top/bottom row in 4-window grid
+  // 4-Window Geometric Layout Calculations:
+  // Top Row (Tile 0 & 1): Scrubber at bottom (bottom-0), Trickplay popover BELOW (position="below", overlaps bottom window)
+  // Bottom Row (Tile 2 & 3): Scrubber at top (top-0), Trickplay popover ABOVE (position="above", overlaps top window)
+  // Bottom Row Buttons: Located at BOTTOM-RIGHT to avoid colliding with top progress bar!
   const is4Window = activeTileCount === 4;
+  const isTopRowIn4Window = is4Window && (tileId === 0 || tileId === 1);
   const isBottomRowIn4Window = is4Window && (tileId === 2 || tileId === 3);
+  
   const scrubberPositionClass = isBottomRowIn4Window ? 'top-0' : 'bottom-0';
-  const trickplayPopupPosition = isBottomRowIn4Window ? 'above' : 'above';
+  const trickplayPosition = isTopRowIn4Window ? 'below' : 'above';
 
   // Mobile Touch Gestures
   const { gestureState, brightness, touchHandlers } = useTouchGestures({
@@ -186,9 +192,7 @@ export default function VideoTile({
     const h = Math.floor(seconds / 3600);
     const m = Math.floor((seconds % 3600) / 60);
     const s = Math.floor(seconds % 60);
-    if (h > 0) {
-      return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-    }
+    if (h > 0) return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
@@ -202,7 +206,7 @@ export default function VideoTile({
     setDurationText(formatTime(video.duration));
   };
 
-  // Mouse Wheel Fast-Forward (Down) / Rewind (Up) with Direct Scrubber Trickplay (No Center Obstruction)
+  // Mouse Wheel Fast-Forward (Down) / Rewind (Up) with Direct Scrubber Trickplay
   const handleWheel = useCallback((e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -211,7 +215,6 @@ export default function VideoTile({
 
     const duration = video.duration;
     const step = 5;
-    // Scroll Down (deltaY > 0) = Fast-forward (+5s), Scroll Up (deltaY < 0) = Rewind (-5s)
     const delta = e.deltaY > 0 ? step : -step;
     
     const baseTime = wheelSeekingTimeRef.current !== null ? wheelSeekingTimeRef.current : video.currentTime;
@@ -220,7 +223,6 @@ export default function VideoTile({
     wheelSeekingTimeRef.current = nextTime;
     video.currentTime = nextTime;
 
-    // Directly drive the progress bar trickplay
     const percent = nextTime / duration;
     setProgress(percent * 100);
     setCurrentTimeText(formatTime(nextTime));
@@ -283,7 +285,6 @@ export default function VideoTile({
     window.addEventListener('mouseup', handleWindowMouseUp);
   }, [updateScrubberDrag]);
 
-  // Trickplay Hover Scrubber Handler
   const handleScrubberMouseMove = (e) => {
     if (isDraggingScrubberRef.current) return;
     const rect = e.currentTarget.getBoundingClientRect();
@@ -385,7 +386,6 @@ export default function VideoTile({
     }
   };
 
-  // Select poster artwork (Backdrop for 4-window mode if available, or full uncropped Primary)
   const coverUrl = useMemo(() => {
     if (!item?.Id) return null;
     if (is4Window && item.ImageTags?.Backdrop) {
@@ -407,21 +407,20 @@ export default function VideoTile({
         setIsHovered(false);
         setShowPlayerMenu(false);
       }}
-      className="relative w-full h-full bg-black overflow-hidden group select-none border border-slate-800/80 rounded-xl shadow-2xl flex flex-col justify-center items-center touch-none"
-      style={{ filter: `brightness(${brightness})` }}
+      className={`relative w-full h-full bg-black rounded-xl border border-slate-800/80 shadow-2xl flex flex-col justify-center items-center select-none touch-none ${
+        is4Window ? 'overflow-visible' : 'overflow-hidden'
+      }`}
+      style={{ filter: `brightness(${brightness})`, zIndex: isHovered || isWheelSeeking ? 40 : 10 }}
       {...touchHandlers}
     >
-      {/* Complete Uncropped Poster Cover Artwork with Subtle Blur Backdrop */}
+      {/* Complete Uncropped Poster Cover Artwork */}
       {coverUrl && (
-        <div className="absolute inset-0 w-full h-full overflow-hidden pointer-events-none flex items-center justify-center">
-          {/* Blurred Background to Fill Aspect Ratio Gaps */}
+        <div className="absolute inset-0 w-full h-full overflow-hidden pointer-events-none flex items-center justify-center rounded-xl">
           <img
             src={coverUrl}
             alt=""
             className="absolute inset-0 w-full h-full object-cover opacity-25 blur-lg scale-110"
           />
-
-          {/* Fully Visible, Complete Uncropped Artwork (object-contain) */}
           <img
             src={coverUrl}
             alt={item?.Name || 'Poster'}
@@ -440,7 +439,7 @@ export default function VideoTile({
       <video
         ref={videoRef}
         playsInline
-        className="w-full h-full object-contain z-10 cursor-pointer"
+        className="w-full h-full object-contain z-10 cursor-pointer rounded-xl"
         onClick={togglePlay}
         onWaiting={() => setIsLoading(true)}
         onPlaying={() => {
@@ -506,7 +505,7 @@ export default function VideoTile({
 
       {/* Error Overlay */}
       {hasError && (
-        <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-black/80 gap-3 p-4 text-center">
+        <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-black/80 gap-3 p-4 text-center rounded-xl">
           <div className="text-jf-danger text-sm font-semibold">{errorMessage || '播放失败'}</div>
           <button
             onClick={() => onSkip && onSkip(tileId)}
@@ -517,8 +516,12 @@ export default function VideoTile({
         </div>
       )}
 
-      {/* Top Left Badges */}
-      <div className={`absolute left-2.5 z-20 flex items-center gap-1.5 pointer-events-none ${isBottomRowIn4Window ? 'top-14' : 'top-2.5'}`}>
+      {/* 
+        Badges: Top-Left for normal/top tiles, BOTTOM-LEFT for 4-window bottom row (to avoid top scrubber conflict) 
+      */}
+      <div className={`absolute left-2.5 z-20 flex items-center gap-1.5 pointer-events-none ${
+        isBottomRowIn4Window ? 'bottom-3' : 'top-2.5'
+      }`}>
         <div 
           className="flex items-center gap-1 px-2 py-0.5 rounded bg-black/60 backdrop-blur-md border border-white/10 text-[11px] font-mono font-medium text-cyan-300 shadow-sm"
           title={`已播放 ${playCount} 次`}
@@ -535,9 +538,11 @@ export default function VideoTile({
         )}
       </div>
 
-      {/* Top Right Quick Actions */}
+      {/* 
+        Quick Actions: Top-Right for normal/top tiles, BOTTOM-RIGHT for 4-window bottom row (to avoid top scrubber conflict) 
+      */}
       <div className={`absolute right-2.5 z-20 flex items-center gap-1.5 transition-opacity duration-200 ${
-        isBottomRowIn4Window ? 'top-14' : 'top-2.5'
+        isBottomRowIn4Window ? 'bottom-3' : 'top-2.5'
       } ${isHovered ? 'opacity-100' : 'opacity-80 md:opacity-0 group-hover:opacity-100'}`}>
         <button
           onClick={(e) => {
@@ -552,6 +557,18 @@ export default function VideoTile({
           title="浮动展示高清海报"
         >
           <ImageIcon size={14} />
+        </button>
+
+        {/* VR Player Launcher */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            if (onOpenVr) onOpenVr(item);
+          }}
+          className="p-1.5 rounded-md bg-black/60 hover:bg-amber-950/80 backdrop-blur-md border border-white/10 hover:border-amber-400 text-gray-300 hover:text-amber-400 transition"
+          title="🥽 开启 VR 180° / 360° / 3D 全景播放"
+        >
+          <Glasses size={14} />
         </button>
 
         <button
@@ -588,7 +605,9 @@ export default function VideoTile({
 
           {showPlayerMenu && (
             <div 
-              className="absolute right-0 top-8 w-32 glass-panel rounded-md shadow-2xl py-1 z-30 text-xs text-gray-200 divide-y divide-white/5"
+              className={`absolute right-0 w-32 glass-panel rounded-md shadow-2xl py-1 z-30 text-xs text-gray-200 divide-y divide-white/5 ${
+                isBottomRowIn4Window ? 'bottom-8' : 'top-8'
+              }`}
               onClick={(e) => e.stopPropagation()}
             >
               <button 
@@ -634,10 +653,12 @@ export default function VideoTile({
         </button>
       </div>
 
-      {/* Floating Scrubber & Info Bar (Top of tile for 4-window bottom row, Bottom for others) */}
+      {/* Floating Scrubber & Info Bar */}
       <div 
-        className={`absolute inset-x-0 z-30 bg-gradient-to-t from-black/95 via-black/80 to-transparent p-3 transition-all duration-300 ${scrubberPositionClass} ${
-          isBottomRowIn4Window ? 'pt-3 pb-5 bg-gradient-to-b' : 'pt-6 pb-3'
+        className={`absolute inset-x-0 z-30 p-3 transition-all duration-300 ${scrubberPositionClass} ${
+          isBottomRowIn4Window 
+            ? 'pt-2.5 pb-4 bg-gradient-to-b from-black/95 via-black/80 to-transparent' 
+            : 'pt-6 pb-2.5 bg-gradient-to-t from-black/95 via-black/80 to-transparent'
         } ${
           isHovered || isWheelSeeking ? 'opacity-100 translate-y-0' : 'opacity-90 md:opacity-0 md:translate-y-2'
         }`}
@@ -645,12 +666,13 @@ export default function VideoTile({
       >
         {/* Scrubber Container with Real-Time Mouse Drag */}
         <div className="relative w-full mb-2">
+          {/* Trickplay Popover: Below top window, Above bottom window */}
           <TrickplayScrubberThumbnail
             item={item}
             hoverTime={hoverScrubberTime}
             hoverPercent={hoverScrubberPercent}
             containerWidth={scrubberWidth}
-            position={trickplayPopupPosition}
+            position={trickplayPosition}
           />
 
           <div 
@@ -664,38 +686,34 @@ export default function VideoTile({
               className="absolute top-0 left-0 bottom-0 bg-cyan-400 rounded-full transition-all duration-75 relative"
               style={{ width: `${progress}%` }}
             >
-              {/* Draggable scrubber thumb handle */}
               <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 rounded-full bg-white shadow-md shadow-black scale-0 group-hover/bar:scale-100 transition-transform" />
             </div>
           </div>
         </div>
 
+        {/* Bar info row (Only in top row or standard layout; in bottom row we keep it sleek) */}
         <div className="flex items-center justify-between text-xs text-gray-300 gap-2">
-          <div className="flex items-center gap-2.5 min-w-0 pr-2">
-            {coverUrl && (
+          <div className="flex items-center gap-2 min-w-0 pr-2">
+            {coverUrl && !isBottomRowIn4Window && (
               <div 
                 onClick={() => setShowPosterModal(true)}
-                className="relative w-8 h-12 rounded-md overflow-hidden bg-black/60 border border-white/20 hover:border-cyan-400 shadow-md cursor-pointer flex-shrink-0 group/poster hover:scale-105 transition"
+                className="relative w-7 h-10 rounded-md overflow-hidden bg-black/60 border border-white/20 hover:border-cyan-400 shadow-md cursor-pointer flex-shrink-0 group/poster hover:scale-105 transition"
                 title="点击查看大图"
               >
                 <img src={coverUrl} alt="Cover" className="w-full h-full object-contain bg-black" />
-                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/poster:opacity-100 flex items-center justify-center text-white transition">
-                  <ImageIcon size={12} />
-                </div>
               </div>
             )}
 
             <div className="flex flex-col min-w-0">
               <div 
                 onClick={() => setShowPosterModal(true)}
-                className="font-semibold text-white truncate max-w-[150px] sm:max-w-[200px] text-xs sm:text-sm drop-shadow hover:text-cyan-300 cursor-pointer transition" 
+                className="font-semibold text-white truncate max-w-[140px] sm:max-w-[180px] text-xs drop-shadow hover:text-cyan-300 cursor-pointer transition" 
                 title={item?.Name}
               >
                 {item?.Name || '未知影片'}
               </div>
-              <div className="text-[10px] sm:text-[11px] text-gray-400 flex items-center gap-1.5 mt-0.5">
+              <div className="text-[10px] text-gray-400 flex items-center gap-1 mt-0.5 font-mono">
                 <span>{currentTimeText} / {durationText}</span>
-                {item?.ProductionYear && <span>• {item.ProductionYear}</span>}
               </div>
             </div>
           </div>
@@ -703,26 +721,26 @@ export default function VideoTile({
           <div className="flex items-center gap-1 flex-shrink-0">
             <button
               onClick={togglePlay}
-              className="p-1.5 hover:bg-white/15 rounded text-white transition"
+              className="p-1 hover:bg-white/15 rounded text-white transition"
               title={isPlaying ? '暂停' : '播放'}
             >
-              {isPlaying ? <Pause size={14} /> : <Play size={14} />}
+              {isPlaying ? <Pause size={13} /> : <Play size={13} />}
             </button>
 
             <button
               onClick={toggleMute}
-              className="p-1.5 hover:bg-white/15 rounded text-white transition"
+              className="p-1 hover:bg-white/15 rounded text-white transition"
               title={isTileMuted ? '取消静音' : '静音'}
             >
-              {isTileMuted ? <VolumeX size={14} className="text-gray-400" /> : <Volume2 size={14} className="text-cyan-400" />}
+              {isTileMuted ? <VolumeX size={13} className="text-gray-400" /> : <Volume2 size={13} className="text-cyan-400" />}
             </button>
 
             <button
               onClick={toggleFullscreen}
-              className="p-1.5 hover:bg-white/15 rounded text-white transition"
+              className="p-1 hover:bg-white/15 rounded text-white transition"
               title="全屏"
             >
-              <Maximize size={13} />
+              <Maximize size={12} />
             </button>
           </div>
         </div>
@@ -777,6 +795,17 @@ export default function VideoTile({
               )}
 
               <div className="flex justify-end gap-2 mt-1">
+                <button
+                  onClick={() => {
+                    setShowPosterModal(false);
+                    if (onOpenVr) onOpenVr(item);
+                  }}
+                  className="px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/40 text-amber-300 text-xs font-medium flex items-center gap-1"
+                >
+                  <Glasses size={13} />
+                  <span>开启 VR 全景</span>
+                </button>
+
                 <button
                   onClick={() => {
                     setShowPosterModal(false);

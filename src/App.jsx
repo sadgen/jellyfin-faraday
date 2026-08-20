@@ -15,6 +15,7 @@ import SettingsModal from './components/SettingsModal';
 import MetadataEditorModal from './components/MetadataEditorModal';
 import IdentifyModal from './components/IdentifyModal';
 import VideoPlayerModal from './components/VideoPlayerModal';
+import VrPlayerModal from './components/VrPlayerModal';
 import MobileNavBar from './components/MobileNavBar';
 import ErrorBoundary from './components/ErrorBoundary';
 import { Film, AlertCircle } from 'lucide-react';
@@ -69,7 +70,6 @@ export default function App() {
 
   // Floating 3-Window PIP Preview System (Tampermonkey Multi-Slot Replica)
   const [floatingWindows, setFloatingWindows] = useState([]);
-  const MAX_FLOATING_WINDOWS = 3;
 
   // Preferences
   const [activeTileCount, setActiveTileCount] = useState(() => {
@@ -92,6 +92,7 @@ export default function App() {
   const [editingItem, setEditingItem] = useState(null);
   const [identifyingItem, setIdentifyingItem] = useState(null);
   const [modalPlayingItem, setModalPlayingItem] = useState(null);
+  const [vrPlayingItem, setVrPlayingItem] = useState(null);
   const [initialKanbanItem, setInitialKanbanItem] = useState(null);
 
   // Change View & Persist
@@ -103,7 +104,6 @@ export default function App() {
   const handleSortMethodChange = (sort) => {
     setSortMethod(sort);
     localStorage.setItem(STORAGE_KEY_SORT, sort);
-    // Instant sort current items in memory
     setMediaItems(prev => sortMediaItems(prev, sort));
   };
 
@@ -117,14 +117,12 @@ export default function App() {
     localStorage.setItem(STORAGE_KEY_FILTER, mode);
   };
 
-  // 1. INSTANT LOCAL CACHE HYDRATION & USER VIEWS INITIALIZATION (< 5ms, 0 Network Latency)
+  // 1. INSTANT LOCAL CACHE HYDRATION & USER VIEWS INITIALIZATION
   useEffect(() => {
     if (!jellyfin.auth.isConfigured) return;
 
-    // Load from local IndexedDB cache immediately with IDENTICAL sort order
     loadFullCache().then(cache => {
       if (cache.items && cache.items.length > 0) {
-        // Pre-sort cache identically to sortMethod to prevent order jumping on refresh!
         const sortedCached = sortMediaItems(cache.items, sortMethod);
         setMediaItems(sortedCached);
         setTotalRecordCount(cache.count || sortedCached.length);
@@ -139,7 +137,6 @@ export default function App() {
       }
     });
 
-    // Fetch user views from server
     jellyfin.getUserViews().then(views => {
       if (views && views.length > 0) {
         setUserViews(views);
@@ -154,7 +151,7 @@ export default function App() {
     });
   }, [isAuthenticated, selectedViewId, sortMethod]);
 
-  // 2. Query Media Items & Save to Local Cache (Fast Stream: 150 items first < 15ms)
+  // 2. Query Media Items & Save to Local Cache
   const fetchAllMedia = useCallback(async (viewId, search, status, sort, genre, year, letter, isBackground = false) => {
     if (!jellyfin.auth.isConfigured) return;
     if (!viewId) return;
@@ -163,7 +160,6 @@ export default function App() {
     setErrorText('');
 
     try {
-      // Step A: Fast first page (150 items) for instant < 15ms frame render
       const firstPageData = await jellyfin.queryMediaPage({
         parentId: viewId,
         searchTerm: search,
@@ -184,7 +180,6 @@ export default function App() {
 
       if (!isBackground) setIsLoading(false);
 
-      // Step B: If there are more items in this library, fetch the rest in background
       if (total > 150) {
         const fullData = await jellyfin.queryMediaPage({
           parentId: viewId,
@@ -252,7 +247,6 @@ export default function App() {
     }
   }, [selectedViewId, filterMode]);
 
-  // When entering Kanban mode, fetch random pool
   useEffect(() => {
     if (viewMode === 'kanban') {
       loadKanbanStream();
@@ -260,29 +254,13 @@ export default function App() {
   }, [viewMode, loadKanbanStream]);
 
   // ==================== FLOATING 3-WINDOW PIP SYSTEM ====================
-  // Calculate slot position (docked at bottom or cascaded)
-  const getSlotPosition = (slotIndex) => {
-    const marginX = 20;
-    const windowWidth = 330;
-    const bottomY = Math.max(10, window.innerHeight - 275);
-    const leftX = marginX + slotIndex * windowWidth;
-    // If overflowing screen width, cascade slightly
-    if (leftX + 320 > window.innerWidth) {
-      return { x: window.innerWidth - 340 - slotIndex * 30, y: bottomY - slotIndex * 40 };
-    }
-    return { x: leftX, y: bottomY };
-  };
-
-  // Open item in a floating slot (FIFO replacement if all 3 full: "相互替代")
   const handleOpenFloatingWindow = useCallback((item) => {
     if (!item?.Id) return;
     setFloatingWindows(prev => {
       const occupiedSlots = prev.map(w => w.slotIndex);
-      // Find empty slot (0, 1, 2)
       let targetSlot = [0, 1, 2].find(s => !occupiedSlots.includes(s));
 
       if (targetSlot === undefined) {
-        // All 3 slots full: replace oldest window (FIFO)
         const sortedByTime = [...prev].sort((a, b) => a.timestamp - b.timestamp);
         const oldest = sortedByTime[0];
         targetSlot = oldest.slotIndex;
@@ -293,8 +271,7 @@ export default function App() {
             id: `win-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
             slotIndex: targetSlot,
             item,
-            timestamp: Date.now(),
-            position: getSlotPosition(targetSlot)
+            timestamp: Date.now()
           }
         ];
       }
@@ -305,19 +282,16 @@ export default function App() {
           id: `win-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
           slotIndex: targetSlot,
           item,
-          timestamp: Date.now(),
-          position: getSlotPosition(targetSlot)
+          timestamp: Date.now()
         }
       ];
     });
   }, []);
 
-  // Open 3 random videos in 3 slots simultaneously (Tampermonkey 随机3窗)
   const handleOpenRandom3Windows = useCallback(() => {
     const pool = mediaItems.length > 0 ? mediaItems : kanbanPool;
     if (pool.length === 0) return;
 
-    // Prefer unplayed items
     const unplayed = pool.filter(it => !it.UserData?.Played);
     const candidatePool = unplayed.length >= 3 ? unplayed : pool;
 
@@ -329,18 +303,15 @@ export default function App() {
         id: `win-${Date.now()}-${idx}`,
         slotIndex: idx,
         item: it,
-        timestamp: Date.now() + idx,
-        position: getSlotPosition(idx)
+        timestamp: Date.now() + idx
       }))
     );
   }, [mediaItems, kanbanPool]);
 
-  // Close floating window
   const handleCloseFloatingWindow = useCallback((slotIndex) => {
     setFloatingWindows(prev => prev.filter(w => w.slotIndex !== slotIndex));
   }, []);
 
-  // Skip video in floating window to another random item
   const handleSkipFloatingWindow = useCallback((slotIndex) => {
     const pool = mediaItems.length > 0 ? mediaItems : kanbanPool;
     if (pool.length === 0) return;
@@ -359,7 +330,6 @@ export default function App() {
     }));
   }, [mediaItems, kanbanPool]);
 
-  // Bring clicked window to front
   const handleBringFloatingToFront = useCallback((winId) => {
     setFloatingWindows(prev => {
       const target = prev.find(w => w.id === winId);
@@ -368,31 +338,20 @@ export default function App() {
     });
   }, []);
 
-  // Active scope name
   const activeScopeName = useMemo(() => {
     let name = '全部媒体库';
     if (selectedViewId && selectedViewId !== 'all') {
       const view = userViews.find(v => v.Id === selectedViewId);
       if (view) name = view.Name;
     }
-    if (searchKeyword) {
-      name += ` • "${searchKeyword}"`;
-    }
-    if (selectedGenre) {
-      name += ` • ${selectedGenre}`;
-    }
-    if (selectedLetter) {
-      name += ` • 字母 ${selectedLetter}`;
-    }
-    if (statusFilter === 'favorites') {
-      name += ' • 最爱';
-    } else if (statusFilter === 'unplayed') {
-      name += ' • 未看';
-    }
+    if (searchKeyword) name += ` • "${searchKeyword}"`;
+    if (selectedGenre) name += ` • ${selectedGenre}`;
+    if (selectedLetter) name += ` • 字母 ${selectedLetter}`;
+    if (statusFilter === 'favorites') name += ' • 最爱';
+    else if (statusFilter === 'unplayed') name += ' • 未看';
     return name;
   }, [selectedViewId, userViews, searchKeyword, selectedGenre, selectedLetter, statusFilter]);
 
-  // Update item in local state & IndexedDB
   const handleUpdateItem = useCallback((updatedItem) => {
     if (!updatedItem?.Id) return;
     setMediaItems(prev => prev.map(item => item.Id === updatedItem.Id ? { ...item, ...updatedItem } : item));
@@ -401,7 +360,6 @@ export default function App() {
     updateItemInCache(updatedItem);
   }, []);
 
-  // Delete item from local state & IndexedDB
   const handleDeleteItem = useCallback((deletedId) => {
     setMediaItems(prev => prev.filter(item => item.Id !== deletedId));
     setKanbanPool(prev => prev.filter(item => item.Id !== deletedId));
@@ -410,9 +368,7 @@ export default function App() {
     deleteItemFromCache(deletedId);
   }, []);
 
-  // Play single item clicked from Media Library
   const handlePlaySingleItem = useCallback((item) => {
-    // Open in floating window (Tampermonkey slot behavior) on desktop, or modal on mobile
     if (typeof window !== 'undefined' && window.innerWidth < 768) {
       setModalPlayingItem(item);
     } else {
@@ -420,14 +376,12 @@ export default function App() {
     }
   }, [handleOpenFloatingWindow]);
 
-  // Login handler
   const handleLoginSuccess = () => {
     setIsAuthenticated(true);
     setIsLoginModalOpen(false);
     fetchAllMedia(selectedViewId, searchKeyword, statusFilter, sortMethod, selectedGenre, selectedYear, selectedLetter);
   };
 
-  // Logout handler
   const handleLogout = () => {
     setIsAuthenticated(false);
     setMediaItems([]);
@@ -454,7 +408,7 @@ export default function App() {
           </div>
         )}
 
-        {/* Main View Area (100% full screen) */}
+        {/* Main View Area */}
         <div className="flex-1 w-full h-full overflow-hidden">
           {viewMode === 'library' ? (
             <LibraryView
@@ -482,6 +436,7 @@ export default function App() {
               onOpenRandom3Windows={handleOpenRandom3Windows}
               onPlaySingleItem={handlePlaySingleItem}
               onPlayModal={(item) => setModalPlayingItem(item)}
+              onPlayVr={(item) => setVrPlayingItem(item)}
               onUpdateItem={handleUpdateItem}
               onDeleteItem={handleDeleteItem}
               onOpenMetadataEditor={(item) => setEditingItem(item)}
@@ -504,13 +459,14 @@ export default function App() {
               onRefreshLibrary={loadKanbanStream}
               isRefreshing={isLoading}
               onOpenLibraryView={() => setViewMode('library')}
+              onOpenVr={(item) => setVrPlayingItem(item)}
               activeScopeName={activeScopeName}
               initialPlayingItem={initialKanbanItem}
             />
           )}
         </div>
 
-        {/* Floating 3-Window PIP Preview System (Tampermonkey Multi-Slot Replica) */}
+        {/* Floating 3-Window PIP Preview System */}
         {viewMode === 'library' && (
           <FloatingWindowsContainer
             windows={floatingWindows}
@@ -521,7 +477,7 @@ export default function App() {
           />
         )}
 
-        {/* Mobile Bottom Navigation Bar (ONLY in Library View, Never Blocks Video Playback) */}
+        {/* Mobile Bottom Navigation Bar */}
         {viewMode === 'library' && (
           <MobileNavBar
             viewMode={viewMode}
@@ -553,6 +509,26 @@ export default function App() {
             }
           }}
           onUpdateItem={handleUpdateItem}
+          onOpenVr={(item) => setVrPlayingItem(item)}
+        />
+
+        {/* Three.js VR 180 / 360 SBS 3D Player Modal */}
+        <VrPlayerModal
+          isOpen={!!vrPlayingItem}
+          item={vrPlayingItem}
+          onClose={() => setVrPlayingItem(null)}
+          onNext={() => {
+            const idx = mediaItems.findIndex(it => it.Id === vrPlayingItem?.Id);
+            if (idx >= 0 && idx < mediaItems.length - 1) {
+              setVrPlayingItem(mediaItems[idx + 1]);
+            }
+          }}
+          onPrev={() => {
+            const idx = mediaItems.findIndex(it => it.Id === vrPlayingItem?.Id);
+            if (idx > 0) {
+              setVrPlayingItem(mediaItems[idx - 1]);
+            }
+          }}
         />
 
         {/* Login Modal */}

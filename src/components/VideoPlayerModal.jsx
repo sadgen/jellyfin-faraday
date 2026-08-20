@@ -8,7 +8,7 @@ import TrickplayScrubberThumbnail from './TrickplayScrubberThumbnail';
 import { 
   Play, Pause, Volume2, VolumeX, Maximize, 
   Star, Eye, EyeOff, ExternalLink, X, Film, 
-  SkipForward, SkipBack, Sun, Zap, FastForward
+  SkipForward, SkipBack, Sun, Zap, FastForward, Glasses
 } from 'lucide-react';
 
 export default function VideoPlayerModal({
@@ -17,7 +17,8 @@ export default function VideoPlayerModal({
   onClose,
   onNext,
   onPrev,
-  onUpdateItem
+  onUpdateItem,
+  onOpenVr
 }) {
   const videoRef = useRef(null);
   const hlsRef = useRef(null);
@@ -183,7 +184,6 @@ export default function VideoPlayerModal({
 
     const duration = video.duration;
     const step = 5;
-    // Scroll Down (deltaY > 0) = Fast-forward (+5s), Scroll Up (deltaY < 0) = Rewind (-5s)
     const delta = e.deltaY > 0 ? step : -step;
     
     const baseTime = wheelSeekingTimeRef.current !== null ? wheelSeekingTimeRef.current : video.currentTime;
@@ -350,6 +350,19 @@ export default function VideoPlayerModal({
           </div>
 
           <div className="flex items-center gap-2">
+            {/* VR Mode Launcher */}
+            <button
+              onClick={() => {
+                onClose();
+                if (onOpenVr) onOpenVr(item);
+              }}
+              className="px-2.5 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/40 text-amber-300 font-bold transition flex items-center gap-1.5"
+              title="🥽 开启 VR 180° / 360° 全景播放"
+            >
+              <Glasses size={14} />
+              <span>开启 VR</span>
+            </button>
+
             {/* External Player Menu */}
             <div className="relative">
               <button
@@ -406,7 +419,6 @@ export default function VideoPlayerModal({
 
         {/* Video Canvas Container */}
         <div className="relative flex-1 min-h-0 w-full md:aspect-video bg-black flex items-center justify-center overflow-hidden touch-none">
-          {/* Complete Uncropped Backdrop Poster */}
           {posterUrl && (
             <div className="absolute inset-0 w-full h-full overflow-hidden pointer-events-none flex items-center justify-center">
               <img 

@@ -9,7 +9,7 @@ import {
   Edit3, Sparkles, Trash2, Folder, Film, 
   ArrowUpDown, X, RefreshCw, Layers, LayoutGrid,
   Grid, List, MoreVertical, ExternalLink, Calendar,
-  Users, Tag, Check, ChevronRight, Tv
+  Users, Tag, Check, ChevronRight, Tv, Glasses
 } from 'lucide-react';
 
 const ALPHABET = ['#', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'];
@@ -47,8 +47,8 @@ const SORT_OPTIONS = [
 
 /**
  * Movie Card with Clean Unmasked Timeline Trickplay
- * - In Poster mode (2:3): Pops up a large 260x146 Trickplay preview ABOVE the poster!
- * - In Backdrop mode (16:9): Renders inside the 16:9 card.
+ * - In Poster mode (2:3): Pops up a 480x270 2X-enlarged Trickplay preview
+ * - Auto-detects top viewport boundary: pops below card if near top, pops above otherwise!
  */
 function MediaCard({
   item,
@@ -56,6 +56,7 @@ function MediaCard({
   viewLayout = 'poster',
   onPlay,
   onPlayModal,
+  onPlayVr,
   onToggleFavorite,
   onTogglePlayed,
   onOpenMetadataEditor,
@@ -68,6 +69,7 @@ function MediaCard({
   const [showContextMenu, setShowContextMenu] = useState(false);
   const [trickplayTime, setTrickplayTime] = useState(null);
   const [hoverPercent, setHoverPercent] = useState(0);
+  const [isNearTop, setIsNearTop] = useState(false);
   const { launchPlayer } = useExternalPlayer();
 
   const isBackdrop = viewLayout === 'backdrop';
@@ -107,6 +109,8 @@ function MediaCard({
     const percent = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
     setHoverPercent(percent);
     setTrickplayTime(durationSec * percent);
+    // Auto-detect boundary: if card top is less than 300px from viewport top, display below!
+    setIsNearTop(rect.top < 300);
   }, [durationSec]);
 
   const handleCoverMouseLeave = useCallback(() => {
@@ -132,18 +136,32 @@ function MediaCard({
       }`}
     >
       {/* 
-        POSTER MODE: Large Floating Trickplay Preview Window ABOVE the card 
-        (Avoids narrow poster width constraints, completely uncompressed & large)
+        POSTER MODE: 2X-Enlarged Floating Trickplay Preview Window (480px x 270px 16:9)
+        Auto boundary: floats below card if near top, above card otherwise!
       */}
       {!isBackdrop && tpStyle && (
-        <div className="absolute bottom-[calc(100%+8px)] left-1/2 -translate-x-1/2 z-50 flex flex-col items-center pointer-events-none animate-in fade-in zoom-in-95 duration-100">
-          <div className="w-[260px] h-[146px] rounded-xl overflow-hidden bg-black/95 border-2 border-cyan-400 shadow-2xl shadow-cyan-500/30 flex items-center justify-center relative">
+        <div 
+          className={`absolute left-1/2 -translate-x-1/2 z-50 flex flex-col items-center pointer-events-none animate-in fade-in zoom-in-95 duration-100 ${
+            isNearTop ? 'top-[calc(100%+10px)]' : 'bottom-[calc(100%+10px)]'
+          }`}
+        >
+          {/* Upward arrow if positioned below */}
+          {isNearTop && (
+            <div className="w-0 h-0 border-x-8 border-x-transparent border-b-8 border-b-cyan-400 mb-0.5" />
+          )}
+
+          {/* 480x270 2X Enlarged Frame */}
+          <div className="w-[360px] sm:w-[480px] h-[202px] sm:h-[270px] rounded-2xl overflow-hidden bg-black/95 border-2 border-cyan-400 shadow-2xl shadow-cyan-500/35 flex items-center justify-center relative">
             <div className="w-full h-full" style={tpStyle} />
-            <div className="absolute bottom-2 bg-black/85 backdrop-blur-md px-3 py-1 rounded-full text-xs font-mono font-bold text-cyan-300 border border-white/20 shadow-lg">
+            <div className="absolute bottom-2.5 bg-black/85 backdrop-blur-md px-3.5 py-1 rounded-full text-xs font-mono font-bold text-cyan-300 border border-white/20 shadow-lg">
               {formatTime(trickplayTime)}
             </div>
           </div>
-          <div className="w-0 h-0 border-x-6 border-x-transparent border-t-6 border-t-cyan-400 mt-0.5" />
+
+          {/* Downward arrow if positioned above */}
+          {!isNearTop && (
+            <div className="w-0 h-0 border-x-8 border-x-transparent border-t-8 border-t-cyan-400 mt-0.5" />
+          )}
         </div>
       )}
 
@@ -171,7 +189,7 @@ function MediaCard({
           </div>
         )}
 
-        {/* BACKDROP MODE: Inside 16:9 Card */}
+        {/* BACKDROP MODE: Inline inside 16:9 Card */}
         {isBackdrop && tpStyle && (
           <div className="absolute inset-0 bg-black flex items-center justify-center overflow-hidden pointer-events-none">
             <div 
@@ -189,7 +207,7 @@ function MediaCard({
 
         {/* Bottom Timeline Progress Line on Hover */}
         {tpStyle && (
-          <div className="absolute bottom-0 inset-x-0 h-1 bg-white/20 z-20 pointer-events-none">
+          <div className="absolute bottom-0 inset-x-0 h-1.5 bg-white/20 z-20 pointer-events-none">
             <div 
               className="h-full bg-cyan-400 shadow-sm shadow-cyan-400 transition-all duration-75"
               style={{ width: `${hoverPercent * 100}%` }}
@@ -291,6 +309,14 @@ function MediaCard({
                   >
                     <Play size={13} />
                     <span>影院全屏模式</span>
+                  </button>
+
+                  <button 
+                    onClick={() => { if (onPlayVr) onPlayVr(item); setShowContextMenu(false); }}
+                    className="w-full px-3 py-1.5 text-left hover:bg-white/10 flex items-center gap-2 text-amber-300 font-medium"
+                  >
+                    <Glasses size={13} />
+                    <span>🥽 VR 全景播放</span>
                   </button>
 
                   <button 
@@ -507,6 +533,7 @@ export default function LibraryView({
   onOpenRandom3Windows,
   onPlaySingleItem,
   onPlayModal,
+  onPlayVr,
   onUpdateItem,
   onDeleteItem,
   onOpenMetadataEditor,
@@ -629,7 +656,7 @@ export default function LibraryView({
 
             <button
               onClick={() => onSelectView('all')}
-              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-medium transition flex-shrink-0 ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition flex-shrink-0 ${
                 selectedViewId === 'all'
                   ? 'bg-jf-accent text-white shadow-lg shadow-cyan-500/25'
                   : 'bg-black/40 hover:bg-white/10 text-gray-400 border border-white/5'
@@ -655,7 +682,7 @@ export default function LibraryView({
             {/* Kanban Mode Launcher */}
             <button
               onClick={onEnterKanban}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white text-xs font-bold shadow-lg shadow-cyan-500/25 transition transform hover:scale-[1.02]"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white text-xs font-bold shadow-lg shadow-cyan-500/25 transition transform hover:scale-[1.02]"
               title="开启全屏随机多视口看板"
             >
               <Shuffle size={13} />
@@ -935,6 +962,7 @@ export default function LibraryView({
                     viewLayout={viewLayout}
                     onPlay={onPlaySingleItem}
                     onPlayModal={onPlayModal}
+                    onPlayVr={onPlayVr}
                     onToggleFavorite={handleToggleFavorite}
                     onTogglePlayed={handleTogglePlayed}
                     onOpenMetadataEditor={onOpenMetadataEditor}

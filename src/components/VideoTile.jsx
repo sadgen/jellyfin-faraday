@@ -45,6 +45,9 @@ export default function VideoTile({
   const [hoverScrubberPercent, setHoverScrubberPercent] = useState(0);
   const [scrubberWidth, setScrubberWidth] = useState(300);
 
+  // Scrubber Dragging State
+  const isDraggingScrubberRef = useRef(false);
+
   // Mouse Wheel Seek & Trickplay State
   const [wheelSeekingState, setWheelSeekingState] = useState({
     active: false,
@@ -188,7 +191,7 @@ export default function VideoTile({
 
   const handleTimeUpdate = () => {
     const video = videoRef.current;
-    if (!video || !video.duration) return;
+    if (!video || !video.duration || isDraggingScrubberRef.current) return;
     setRawDuration(video.duration);
     const p = (video.currentTime / video.duration) * 100;
     setProgress(p);
@@ -196,16 +199,7 @@ export default function VideoTile({
     setDurationText(formatTime(video.duration));
   };
 
-  const handleSeek = (e) => {
-    e.stopPropagation();
-    const video = videoRef.current;
-    if (!video || !video.duration) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const pos = (e.clientX - rect.left) / rect.width;
-    video.currentTime = pos * video.duration;
-  };
-
-  // Mouse Wheel Fast-Forward / Rewind with Real-Time Trickplay
+  // Mouse Wheel Fast-Forward (Down) / Rewind (Up) with Real-Time Trickplay
   const handleWheel = useCallback((e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -213,8 +207,9 @@ export default function VideoTile({
     if (!video || !video.duration) return;
 
     const duration = video.duration;
-    const step = 5; // 5 seconds per wheel tick
-    const delta = e.deltaY < 0 ? step : -step; // wheel up = forward, wheel down = backward
+    const step = 5;
+    // User requirement: Wheel DOWN (deltaY > 0) is Fast-Forward (+5s), Wheel UP (deltaY < 0) is Rewind (-5s)
+    const delta = e.deltaY > 0 ? step : -step;
     
     const baseTime = wheelSeekingTimeRef.current !== null ? wheelSeekingTimeRef.current : video.currentTime;
     const nextTime = Math.max(0, Math.min(duration, baseTime + delta));
@@ -235,8 +230,52 @@ export default function VideoTile({
     }, 700);
   }, []);
 
+  // Scrubber Mouse Drag Seeking
+  const updateScrubberDrag = useCallback((clientX) => {
+    if (!scrubberRef.current || !videoRef.current) return;
+    const rect = scrubberRef.current.getBoundingClientRect();
+    const duration = videoRef.current.duration || (item?.RunTimeTicks ? item.RunTimeTicks / 10000000 : 0);
+    if (!duration) return;
+
+    const pos = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    const targetTime = duration * pos;
+
+    setProgress(pos * 100);
+    setCurrentTimeText(formatTime(targetTime));
+    setHoverScrubberTime(targetTime);
+    setHoverScrubberPercent(pos);
+    setScrubberWidth(rect.width);
+    videoRef.current.currentTime = targetTime;
+  }, [item?.RunTimeTicks]);
+
+  const handleScrubberMouseDown = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    isDraggingScrubberRef.current = true;
+    updateScrubberDrag(e.clientX);
+
+    const handleWindowMouseMove = (moveEvent) => {
+      if (isDraggingScrubberRef.current) {
+        updateScrubberDrag(moveEvent.clientX);
+      }
+    };
+
+    const handleWindowMouseUp = (upEvent) => {
+      if (isDraggingScrubberRef.current) {
+        isDraggingScrubberRef.current = false;
+        updateScrubberDrag(upEvent.clientX);
+      }
+      window.removeEventListener('mousemove', handleWindowMouseMove);
+      window.removeEventListener('mouseup', handleWindowMouseUp);
+    };
+
+    window.addEventListener('mousemove', handleWindowMouseMove);
+    window.addEventListener('mouseup', handleWindowMouseUp);
+  }, [updateScrubberDrag]);
+
   // Trickplay Hover Scrubber Handler
   const handleScrubberMouseMove = (e) => {
+    if (isDraggingScrubberRef.current) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const pos = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
     const duration = videoRef.current?.duration || (item?.RunTimeTicks ? item.RunTimeTicks / 10000000 : 0);
@@ -247,7 +286,9 @@ export default function VideoTile({
   };
 
   const handleScrubberMouseLeave = () => {
-    setHoverScrubberTime(null);
+    if (!isDraggingScrubberRef.current) {
+      setHoverScrubberTime(null);
+    }
   };
 
   const togglePlay = () => {
@@ -393,7 +434,7 @@ export default function VideoTile({
       {wheelSeekingState.active && (
         <div className="absolute inset-0 z-40 flex items-center justify-center pointer-events-none animate-in fade-in zoom-in-95 duration-100">
           <div className="flex flex-col items-center gap-2 p-2 rounded-2xl bg-black/90 backdrop-blur-md border-2 border-cyan-400 shadow-2xl shadow-cyan-500/30">
-            {/* Trickplay Frame */}
+            {/* Trickplay Frame (Strict 16:9 Aspect Ratio) */}
             <div className="w-[240px] h-[135px] rounded-xl overflow-hidden bg-black flex items-center justify-center relative">
               {wheelTrickplayStyle ? (
                 <div className="w-full h-full" style={wheelTrickplayStyle} />
@@ -599,6 +640,7 @@ export default function VideoTile({
         }`}
         onClick={(e) => e.stopPropagation()}
       >
+        {/* Scrubber Container with Real-Time Mouse Drag */}
         <div className="relative w-full mb-2.5">
           <TrickplayScrubberThumbnail
             item={item}
@@ -609,15 +651,18 @@ export default function VideoTile({
 
           <div 
             ref={scrubberRef}
-            className="w-full h-2 bg-white/20 hover:h-3 rounded-full cursor-pointer transition-all relative overflow-hidden"
-            onClick={handleSeek}
+            className="w-full h-2.5 hover:h-3.5 bg-white/20 rounded-full cursor-pointer transition-all relative overflow-hidden group/bar"
+            onMouseDown={handleScrubberMouseDown}
             onMouseMove={handleScrubberMouseMove}
             onMouseLeave={handleScrubberMouseLeave}
           >
             <div 
-              className="absolute top-0 left-0 bottom-0 bg-jf-accent rounded-full transition-all duration-100"
+              className="absolute top-0 left-0 bottom-0 bg-cyan-400 rounded-full transition-all duration-75 relative"
               style={{ width: `${progress}%` }}
-            />
+            >
+              {/* Draggable scrubber thumb handle */}
+              <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 rounded-full bg-white shadow-md shadow-black scale-0 group-hover/bar:scale-100 transition-transform" />
+            </div>
           </div>
         </div>
 

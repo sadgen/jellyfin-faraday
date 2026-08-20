@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { jellyfin } from '../api/jellyfinClient';
 import { getTrickplayStyle, getTrickplayInfo } from '../utils/trickplay';
 import { detectDuplicateMedia } from '../utils/duplicateChecker';
@@ -47,7 +47,7 @@ const SORT_OPTIONS = [
 ];
 
 /**
- * Movie Card with Poster (2:3) or Backdrop (16:9) and Context Menu
+ * Movie Card with Timeline Mousemove Trickplay (No Stretching, Strict 16:9 Aspect Ratio)
  */
 function MediaCard({
   item,
@@ -65,8 +65,7 @@ function MediaCard({
   const [isHovered, setIsHovered] = useState(false);
   const [showContextMenu, setShowContextMenu] = useState(false);
   const [trickplayTime, setTrickplayTime] = useState(null);
-  const hoverTimerRef = useRef(null);
-  const animTimerRef = useRef(null);
+  const [hoverPercent, setHoverPercent] = useState(0);
   const { launchPlayer } = useExternalPlayer();
 
   const isBackdrop = viewLayout === 'backdrop';
@@ -78,6 +77,10 @@ function MediaCard({
   const isPlayed = !!item.UserData?.Played;
   const playCount = item.UserData?.PlayCount || 0;
 
+  const durationSec = useMemo(() => {
+    return item.RunTimeTicks ? item.RunTimeTicks / 10000000 : 7200;
+  }, [item.RunTimeTicks]);
+
   const durationText = useMemo(() => {
     if (!item.RunTimeTicks) return '';
     const totalMinutes = Math.floor(item.RunTimeTicks / (10000000 * 60));
@@ -87,33 +90,30 @@ function MediaCard({
     return `${mins}分钟`;
   }, [item.RunTimeTicks]);
 
-  // Trickplay Animation on Hover (Desktop)
-  useEffect(() => {
-    if (isHovered && !showContextMenu) {
-      hoverTimerRef.current = setTimeout(() => {
-        const tp = getTrickplayInfo(item);
-        const duration = item.RunTimeTicks ? item.RunTimeTicks / 10000000 : 7200;
-        let currentTime = 0;
-        const step = Math.max(15, duration / 50);
+  const formatTime = (seconds) => {
+    if (!seconds || isNaN(seconds)) return '00:00';
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = Math.floor(seconds % 60);
+    if (h > 0) return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  };
 
-        setTrickplayTime(currentTime);
+  // Mousemove Trickplay timeline handler (cursor X controls video timeline frame)
+  const handleCoverMouseMove = useCallback((e) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    if (!rect.width) return;
+    const percent = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    setHoverPercent(percent);
+    setTrickplayTime(durationSec * percent);
+  }, [durationSec]);
 
-        animTimerRef.current = setInterval(() => {
-          currentTime = (currentTime + step) % duration;
-          setTrickplayTime(currentTime);
-        }, 300);
-      }, 350);
-    } else {
-      if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
-      if (animTimerRef.current) clearInterval(animTimerRef.current);
-      setTrickplayTime(null);
-    }
-
-    return () => {
-      if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
-      if (animTimerRef.current) clearInterval(animTimerRef.current);
-    };
-  }, [isHovered, showContextMenu, item]);
+  const handleCoverMouseLeave = useCallback(() => {
+    setIsHovered(false);
+    setShowContextMenu(false);
+    setTrickplayTime(null);
+    setHoverPercent(0);
+  }, []);
 
   const tpStyle = useMemo(() => {
     if (trickplayTime === null) return null;
@@ -123,10 +123,7 @@ function MediaCard({
   return (
     <div
       onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => {
-        setIsHovered(false);
-        setShowContextMenu(false);
-      }}
+      onMouseLeave={handleCoverMouseLeave}
       className={`group relative flex flex-col bg-slate-900/50 rounded-xl overflow-hidden border transition-all duration-300 transform hover:-translate-y-1 select-none ${
         isDuplicate 
           ? 'border-red-500/60 shadow-lg shadow-red-500/10' 
@@ -135,17 +132,19 @@ function MediaCard({
     >
       {/* Poster / Backdrop Canvas */}
       <div 
-        className={`relative w-full bg-black/70 overflow-hidden cursor-pointer ${
+        className={`relative w-full bg-black overflow-hidden cursor-pointer flex items-center justify-center ${
           isBackdrop ? 'aspect-video' : 'aspect-[2/3]'
         }`}
         onClick={() => onPlay(item)}
+        onMouseMove={handleCoverMouseMove}
       >
+        {/* Static Poster Artwork */}
         {posterUrl ? (
           <img
             src={posterUrl}
             alt={item.Name}
             loading="lazy"
-            className={`w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 ${
+            className={`w-full h-full object-cover transition-opacity duration-200 ${
               tpStyle ? 'opacity-0' : 'opacity-100'
             }`}
           />
@@ -155,12 +154,30 @@ function MediaCard({
           </div>
         )}
 
-        {/* Dynamic Trickplay Animation */}
+        {/* Trickplay Frame (Strict 16:9 Aspect Ratio, NEVER Stretched) */}
         {tpStyle && (
-          <div 
-            className="absolute inset-0 w-full h-full animate-in fade-in duration-200"
-            style={tpStyle}
-          />
+          <div className="absolute inset-0 bg-black flex items-center justify-center overflow-hidden pointer-events-none">
+            {/* 16:9 Aspect Ratio Frame Container */}
+            <div 
+              className="w-full aspect-video relative shadow-2xl"
+              style={tpStyle}
+            />
+
+            {/* Trickplay Timeline Scrubber & Timestamp Pill */}
+            <div className="absolute bottom-2 inset-x-3 z-30 flex items-center justify-between pointer-events-none">
+              <div className="px-2 py-0.5 rounded-full bg-black/85 backdrop-blur-md border border-cyan-400/50 text-[10px] font-mono font-bold text-cyan-300 shadow-lg">
+                {formatTime(trickplayTime)}
+              </div>
+            </div>
+
+            {/* Real-time Bottom Progress Line */}
+            <div className="absolute bottom-0 inset-x-0 h-1 bg-white/20">
+              <div 
+                className="h-full bg-cyan-400 shadow-sm shadow-cyan-400 transition-all duration-75"
+                style={{ width: `${hoverPercent * 100}%` }}
+              />
+            </div>
+          </div>
         )}
 
         {/* Top-Right: Played Checkmark */}
@@ -207,7 +224,7 @@ function MediaCard({
         </div>
 
         {/* Hover Center Play Button */}
-        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center z-20 pointer-events-none">
+        <div className={`absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent transition-opacity duration-200 flex items-center justify-center z-20 pointer-events-none ${isHovered ? 'opacity-100' : 'opacity-0'}`}>
           <div className="w-12 h-12 rounded-full bg-jf-accent hover:bg-cyan-400 text-white flex items-center justify-center shadow-xl shadow-cyan-500/40 transition transform group-hover:scale-105">
             <Play size={20} className="ml-0.5 fill-white" />
           </div>
@@ -571,13 +588,12 @@ export default function LibraryView({
   return (
     <div className="w-full h-full flex flex-col bg-[#080b11] text-gray-100 overflow-hidden select-none">
       
-      {/* Top Navigation Bar (User Library Folders First, Aligned with Official Jellyfin Web) */}
+      {/* Top Navigation Bar */}
       <div className="border-b border-white/5 bg-slate-950/90 backdrop-blur-md px-3 sm:px-5 py-2.5 sm:py-3 flex flex-col gap-2.5 z-30 pt-[max(0.5rem,env(safe-area-inset-top))]">
         
-        {/* Row 1: Primary Library Tabs (User Views First) & Kanban Launcher */}
+        {/* Row 1: Primary Library Tabs & Kanban Launcher */}
         <div className="flex items-center justify-between gap-2.5">
           <div className="flex items-center gap-1.5 overflow-x-auto py-0.5 flex-1 min-w-0">
-            {/* User Specific Libraries (Fastest Indexed Queries < 15ms) */}
             {userViews.map(view => (
               <button
                 key={view.Id}
@@ -593,7 +609,6 @@ export default function LibraryView({
               </button>
             ))}
 
-            {/* All Media Option at the end */}
             <button
               onClick={() => onSelectView('all')}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition flex-shrink-0 ${
@@ -620,7 +635,7 @@ export default function LibraryView({
           </button>
         </div>
 
-        {/* Row 2: Secondary Sub-Tabs (影片 / 类型 / 演职员 / 年份 / 合集 / 查重) */}
+        {/* Row 2: Secondary Sub-Tabs */}
         <div className="flex items-center justify-between gap-2 border-t border-white/5 pt-2 text-xs">
           <div className="flex items-center gap-1 overflow-x-auto flex-1 min-w-0">
             {SUB_TABS.map(tab => {

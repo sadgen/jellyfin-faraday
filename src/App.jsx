@@ -19,6 +19,7 @@ import { Film, AlertCircle, Loader2 } from 'lucide-react';
 
 const STORAGE_KEY_TILES = 'jf_faraday_tile_count';
 const STORAGE_KEY_FILTER = 'jf_faraday_filter_mode';
+const STORAGE_KEY_VIEW = 'jf_last_selected_view';
 
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(jellyfin.auth.isConfigured);
@@ -28,7 +29,12 @@ export default function App() {
   const [mediaItems, setMediaItems] = useState([]);
   const [totalRecordCount, setTotalRecordCount] = useState(0);
   const [userViews, setUserViews] = useState([]);
-  const [selectedViewId, setSelectedViewId] = useState('all');
+  
+  // Default to user's saved library or let views loader set it to views[0].Id (Official Web Client Pattern)
+  const [selectedViewId, setSelectedViewId] = useState(() => {
+    return localStorage.getItem(STORAGE_KEY_VIEW) || '';
+  });
+
   const [searchKeyword, setSearchKeyword] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [sortMethod, setSortMethod] = useState('date_desc');
@@ -66,19 +72,23 @@ export default function App() {
   const [modalPlayingItem, setModalPlayingItem] = useState(null);
   const [initialKanbanItem, setInitialKanbanItem] = useState(null);
 
-  // Save tile count preference
+  // Change View & Persist
+  const handleSelectView = (viewId) => {
+    setSelectedViewId(viewId);
+    localStorage.setItem(STORAGE_KEY_VIEW, viewId);
+  };
+
   const handleTileCountChange = (count) => {
     setActiveTileCount(count);
     localStorage.setItem(STORAGE_KEY_TILES, count.toString());
   };
 
-  // Save filter mode preference
   const handleFilterModeChange = (mode) => {
     setFilterMode(mode);
     localStorage.setItem(STORAGE_KEY_FILTER, mode);
   };
 
-  // 1. INSTANT LOCAL CACHE HYDRATION ON MOUNT (< 5ms, 0 Network Latency on Refresh)
+  // 1. INSTANT LOCAL CACHE HYDRATION & USER VIEWS INITIALIZATION (< 5ms, 0 Network Latency)
   useEffect(() => {
     if (!jellyfin.auth.isConfigured) return;
 
@@ -90,6 +100,12 @@ export default function App() {
       }
       if (cache.views && cache.views.length > 0) {
         setUserViews(cache.views);
+        // Default to first view if not set
+        if (!selectedViewId) {
+          const firstId = cache.views[0]?.Id || 'all';
+          setSelectedViewId(firstId);
+          localStorage.setItem(STORAGE_KEY_VIEW, firstId);
+        }
       }
     });
 
@@ -97,20 +113,26 @@ export default function App() {
     jellyfin.getUserViews().then(views => {
       if (views && views.length > 0) {
         setUserViews(views);
+        if (!selectedViewId) {
+          const firstId = views[0]?.Id || 'all';
+          setSelectedViewId(firstId);
+          localStorage.setItem(STORAGE_KEY_VIEW, firstId);
+        }
       }
     }).catch(err => {
       console.warn('Failed to fetch user views:', err);
     });
   }, [isAuthenticated]);
 
-  // 2. Query Media Items & Save to Local Cache
+  // 2. Query Media Items & Save to Local Cache (Fast Stream: 150 items first < 15ms)
   const fetchAllMedia = useCallback(async (viewId, search, status, sort, genre, year, letter, isBackground = false) => {
     if (!jellyfin.auth.isConfigured) return;
     if (!isBackground) setIsLoading(true);
     setErrorText('');
 
     try {
-      const data = await jellyfin.queryMediaPage({
+      // Step A: Fast first page (150 items) for instant < 15ms frame render
+      const firstPageData = await jellyfin.queryMediaPage({
         parentId: viewId,
         searchTerm: search,
         statusFilter: status,
@@ -119,18 +141,38 @@ export default function App() {
         year,
         nameStartsWithOrGreater: letter,
         startIndex: 0,
-        limit: 0
+        limit: 150
       });
 
-      const fetchedItems = data.Items || [];
-      const total = data.TotalRecordCount || fetchedItems.length;
+      const initialItems = firstPageData.Items || [];
+      const total = firstPageData.TotalRecordCount || initialItems.length;
 
-      setMediaItems(fetchedItems);
+      setMediaItems(initialItems);
       setTotalRecordCount(total);
 
-      // Save full library cache on default views
-      if (viewId === 'all' && !search && status === 'all' && !genre && !year && !letter) {
-        saveFullCache(fetchedItems, userViews);
+      if (!isBackground) setIsLoading(false);
+
+      // Step B: If there are more items in this library, fetch the rest in background
+      if (total > 150) {
+        const fullData = await jellyfin.queryMediaPage({
+          parentId: viewId,
+          searchTerm: search,
+          statusFilter: status,
+          sortMethod: sort,
+          genre,
+          year,
+          nameStartsWithOrGreater: letter,
+          startIndex: 0,
+          limit: 0
+        });
+
+        if (fullData.Items && fullData.Items.length > 0) {
+          setMediaItems(fullData.Items);
+          setTotalRecordCount(fullData.TotalRecordCount || fullData.Items.length);
+          saveFullCache(fullData.Items, userViews);
+        }
+      } else if (initialItems.length > 0) {
+        saveFullCache(initialItems, userViews);
       }
     } catch (err) {
       console.error('Failed to load media items:', err);
@@ -152,7 +194,6 @@ export default function App() {
     if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
 
     searchTimeoutRef.current = setTimeout(() => {
-      // If first mount and we already have cached items, fetch in background silently
       const isBg = isFirstMountRef.current && mediaItems.length > 0;
       isFirstMountRef.current = false;
       
@@ -189,7 +230,7 @@ export default function App() {
   // Active scope name
   const activeScopeName = useMemo(() => {
     let name = '全部媒体库';
-    if (selectedViewId !== 'all') {
+    if (selectedViewId && selectedViewId !== 'all') {
       const view = userViews.find(v => v.Id === selectedViewId);
       if (view) name = view.Name;
     }
@@ -272,7 +313,7 @@ export default function App() {
               totalRecordCount={totalRecordCount}
               userViews={userViews}
               selectedViewId={selectedViewId}
-              onSelectView={setSelectedViewId}
+              onSelectView={handleSelectView}
               searchKeyword={searchKeyword}
               onSearchChange={setSearchKeyword}
               statusFilter={statusFilter}

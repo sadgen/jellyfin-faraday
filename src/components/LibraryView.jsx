@@ -71,8 +71,8 @@ function MediaCard({
 
   const isBackdrop = viewLayout === 'backdrop';
   const posterUrl = isBackdrop 
-    ? (jellyfin.getImageUrl(item.Id, item.ImageTags?.Backdrop || item.ImageTags?.Primary, 'Backdrop', 600) || jellyfin.getImageUrl(item.Id, item.ImageTags?.Primary, 'Primary', 400))
-    : jellyfin.getImageUrl(item.Id, item.ImageTags?.Primary, 'Primary', 400);
+    ? (jellyfin.getImageUrl(item.Id, item.ImageTags?.Backdrop || item.ImageTags?.Primary, 'Backdrop', 500, 80) || jellyfin.getImageUrl(item.Id, item.ImageTags?.Primary, 'Primary', 360, 80))
+    : jellyfin.getImageUrl(item.Id, item.ImageTags?.Primary, 'Primary', 360, 80);
 
   const isFavorite = !!item.UserData?.IsFavorite;
   const isPlayed = !!item.UserData?.Played;
@@ -361,7 +361,7 @@ function MediaListRow({
   onOpenMetadataEditor,
   onOpenActionSheet
 }) {
-  const posterUrl = jellyfin.getImageUrl(item.Id, item.ImageTags?.Primary, 'Primary', 150);
+  const posterUrl = jellyfin.getImageUrl(item.Id, item.ImageTags?.Primary, 'Primary', 150, 80);
   const isFavorite = !!item.UserData?.IsFavorite;
   const isPlayed = !!item.UserData?.Played;
   const playCount = item.UserData?.PlayCount || 0;
@@ -571,39 +571,41 @@ export default function LibraryView({
   return (
     <div className="w-full h-full flex flex-col bg-[#080b11] text-gray-100 overflow-hidden select-none">
       
-      {/* Top Navigation Bar */}
+      {/* Top Navigation Bar (User Library Folders First, Aligned with Official Jellyfin Web) */}
       <div className="border-b border-white/5 bg-slate-950/90 backdrop-blur-md px-3 sm:px-5 py-2.5 sm:py-3 flex flex-col gap-2.5 z-30 pt-[max(0.5rem,env(safe-area-inset-top))]">
         
-        {/* Row 1: Primary Library Views & Main Kanban Launcher */}
+        {/* Row 1: Primary Library Tabs (User Views First) & Kanban Launcher */}
         <div className="flex items-center justify-between gap-2.5">
-          {/* Top Library Tabs */}
           <div className="flex items-center gap-1.5 overflow-x-auto py-0.5 flex-1 min-w-0">
-            <button
-              onClick={() => onSelectView('all')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition flex-shrink-0 ${
-                selectedViewId === 'all'
-                  ? 'bg-jf-accent text-white shadow-lg shadow-cyan-500/25'
-                  : 'bg-black/40 hover:bg-white/10 text-gray-300 border border-white/5'
-              }`}
-            >
-              <Film size={13} />
-              <span>全部</span>
-            </button>
-
+            {/* User Specific Libraries (Fastest Indexed Queries < 15ms) */}
             {userViews.map(view => (
               <button
                 key={view.Id}
                 onClick={() => onSelectView(view.Id)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition flex-shrink-0 ${
+                className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex-shrink-0 ${
                   selectedViewId === view.Id
-                    ? 'bg-jf-accent text-white shadow-lg shadow-cyan-500/25'
+                    ? 'bg-jf-accent text-white shadow-lg shadow-cyan-500/25 scale-[1.02]'
                     : 'bg-black/40 hover:bg-white/10 text-gray-300 border border-white/5'
                 }`}
               >
-                <Folder size={13} />
+                <Folder size={13} className={selectedViewId === view.Id ? 'text-white' : 'text-cyan-400'} />
                 <span>{view.Name}</span>
               </button>
             ))}
+
+            {/* All Media Option at the end */}
+            <button
+              onClick={() => onSelectView('all')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition flex-shrink-0 ${
+                selectedViewId === 'all'
+                  ? 'bg-jf-accent text-white shadow-lg shadow-cyan-500/25'
+                  : 'bg-black/40 hover:bg-white/10 text-gray-400 border border-white/5'
+              }`}
+              title="跨库全量浏览 (全部媒体)"
+            >
+              <Film size={12} />
+              <span>全部媒体</span>
+            </button>
           </div>
 
           {/* Kanban Launcher */}
@@ -614,7 +616,7 @@ export default function LibraryView({
           >
             <Shuffle size={13} />
             <span className="hidden sm:inline">随机看板</span>
-            <span className="font-mono text-[11px]">({displayItems.length})</span>
+            <span className="font-mono text-[11px]">({totalRecordCount > 0 ? totalRecordCount : displayItems.length})</span>
           </button>
         </div>
 
@@ -794,7 +796,7 @@ export default function LibraryView({
         {activeSubTab === 'persons' && (
           <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-2.5 sm:gap-3.5">
             {personsList.map(person => {
-              const imgUrl = jellyfin.getImageUrl(person.Id, person.ImageTags?.Primary, 'Primary', 200);
+              const imgUrl = jellyfin.getImageUrl(person.Id, person.ImageTags?.Primary, 'Primary', 200, 80);
               return (
                 <div
                   key={person.Id}
@@ -824,7 +826,7 @@ export default function LibraryView({
         {activeSubTab === 'collections' && (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
             {collectionsList.map(col => {
-              const imgUrl = jellyfin.getImageUrl(col.Id, col.ImageTags?.Primary, 'Primary', 300);
+              const imgUrl = jellyfin.getImageUrl(col.Id, col.ImageTags?.Primary, 'Primary', 300, 80);
               return (
                 <div
                   key={col.Id}

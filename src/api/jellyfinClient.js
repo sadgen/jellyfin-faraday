@@ -1,6 +1,6 @@
 /**
  * Jellyfin REST API Client (Official Web Client-Style Architecture)
- * High-performance, supports all media views, genres, persons, collections, server-side and bulk queries.
+ * High-performance, supports indexed library views, genres, persons, collections, server-side and bulk queries.
  */
 
 const STORAGE_KEY = 'jellyfin_faraday_auth';
@@ -197,7 +197,7 @@ export class JellyfinClient {
    * High performance: Server executes indexed query with lightweight fields.
    */
   async queryMediaPage({
-    parentId = 'all',
+    parentId = '',
     searchTerm = '',
     statusFilter = 'all',
     sortMethod = 'date_desc',
@@ -205,7 +205,7 @@ export class JellyfinClient {
     year = '',
     nameStartsWithOrGreater = '',
     startIndex = 0,
-    limit = 0 // 0 means fetch all items at once!
+    limit = 0
   } = {}) {
     if (!this.auth.isConfigured) return { Items: [], TotalRecordCount: 0 };
 
@@ -320,7 +320,7 @@ export class JellyfinClient {
   /**
    * Fetch all genres for current library or global
    */
-  async getGenres(parentId = 'all') {
+  async getGenres(parentId = '') {
     if (!this.auth.isConfigured) return [];
     try {
       const query = new URLSearchParams({
@@ -346,7 +346,7 @@ export class JellyfinClient {
   /**
    * Fetch all persons (Actors/Directors) for current library
    */
-  async getPersons(parentId = 'all', limit = 100) {
+  async getPersons(parentId = '', limit = 100) {
     if (!this.auth.isConfigured) return [];
     try {
       const query = new URLSearchParams({
@@ -372,7 +372,7 @@ export class JellyfinClient {
   /**
    * Fetch collections (BoxSets)
    */
-  async getCollections(parentId = 'all') {
+  async getCollections(parentId = '') {
     if (!this.auth.isConfigured) return [];
     try {
       const query = new URLSearchParams({
@@ -398,7 +398,7 @@ export class JellyfinClient {
    * Fast Batch Fetch for Kanban Random Queue
    */
   async queryRandomBatch({
-    parentId = 'all',
+    parentId = '',
     filterMode = 'pure_random',
     limit = 100
   } = {}) {
@@ -564,11 +564,11 @@ export class JellyfinClient {
   }
 
   /**
-   * Get Poster/Backdrop Image URL
+   * Get Poster/Backdrop Image URL (Optimized for instant decoding)
    */
-  getImageUrl(itemId, tag = null, type = 'Primary', maxWidth = 800) {
+  getImageUrl(itemId, tag = null, type = 'Primary', maxWidth = 360, quality = 80) {
     if (!this.auth.serverUrl || !itemId) return '';
-    let url = `${this.auth.serverUrl}/Items/${itemId}/Images/${type}?maxWidth=${maxWidth}&quality=90`;
+    let url = `${this.auth.serverUrl}/Items/${itemId}/Images/${type}?maxWidth=${maxWidth}&quality=${quality}`;
     if (tag) {
       url += `&tag=${tag}`;
     }

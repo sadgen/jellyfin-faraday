@@ -60,7 +60,7 @@ export default function DesktopLayout({
         </div>
       )}
 
-      {/* Video Tiles Grid Viewport (100% full height without bottom obstruction) */}
+      {/* Video Tiles Grid Viewport */}
       {items && items.length > 0 && (
         <div className={`flex-1 w-full h-full grid gap-2 sm:gap-2.5 ${gridClasses}`}>
           {Array.from({ length: activeTileCount }).map((_, index) => {
@@ -69,6 +69,7 @@ export default function DesktopLayout({
               <VideoTile
                 key={item?.Id ? `${index}-${item.Id}` : `tile-${index}`}
                 tileId={index}
+                activeTileCount={activeTileCount}
                 item={item}
                 isGlobalMuted={isGlobalMuted}
                 playbackSpeed={playbackSpeed}

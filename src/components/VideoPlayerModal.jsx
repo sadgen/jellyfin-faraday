@@ -46,12 +46,8 @@ export default function VideoPlayerModal({
   // Scrubber Mouse Dragging
   const isDraggingScrubberRef = useRef(false);
 
-  // Mouse Wheel Seek & Trickplay State
-  const [wheelSeekingState, setWheelSeekingState] = useState({
-    active: false,
-    time: 0,
-    delta: 0
-  });
+  // Mouse Wheel Seek State
+  const [isWheelSeeking, setIsWheelSeeking] = useState(false);
   const wheelTimerRef = useRef(null);
   const wheelSeekingTimeRef = useRef(null);
 
@@ -91,7 +87,7 @@ export default function VideoPlayerModal({
     setErrorMessage('');
     setProgress(0);
     setHoverScrubberTime(null);
-    setWheelSeekingState({ active: false, time: 0, delta: 0 });
+    setIsWheelSeeking(false);
 
     const videoEl = videoRef.current;
     if (!videoEl) return;
@@ -178,7 +174,7 @@ export default function VideoPlayerModal({
     };
   }, [isOpen, item?.Id]);
 
-  // Mouse Wheel Fast-Forward (Down) / Rewind (Up)
+  // Mouse Wheel Fast-Forward (Down) / Rewind (Up) with Direct Scrubber Trickplay
   const handleWheel = useCallback((e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -187,7 +183,7 @@ export default function VideoPlayerModal({
 
     const duration = video.duration;
     const step = 5;
-    // User requirement: Wheel DOWN (deltaY > 0) is Fast-Forward (+5s), Wheel UP (deltaY < 0) is Rewind (-5s)
+    // Scroll Down (deltaY > 0) = Fast-forward (+5s), Scroll Up (deltaY < 0) = Rewind (-5s)
     const delta = e.deltaY > 0 ? step : -step;
     
     const baseTime = wheelSeekingTimeRef.current !== null ? wheelSeekingTimeRef.current : video.currentTime;
@@ -196,17 +192,23 @@ export default function VideoPlayerModal({
     wheelSeekingTimeRef.current = nextTime;
     video.currentTime = nextTime;
 
-    setWheelSeekingState({
-      active: true,
-      time: nextTime,
-      delta: Math.round(nextTime - video.currentTime + delta)
-    });
+    const percent = nextTime / duration;
+    setProgress(percent * 100);
+    setCurrentTimeText(formatTime(nextTime));
+    setHoverScrubberTime(nextTime);
+    setHoverScrubberPercent(percent);
+    setIsWheelSeeking(true);
+
+    if (scrubberRef.current) {
+      setScrubberWidth(scrubberRef.current.getBoundingClientRect().width);
+    }
 
     if (wheelTimerRef.current) clearTimeout(wheelTimerRef.current);
     wheelTimerRef.current = setTimeout(() => {
       wheelSeekingTimeRef.current = null;
-      setWheelSeekingState(prev => ({ ...prev, active: false }));
-    }, 700);
+      setIsWheelSeeking(false);
+      setHoverScrubberTime(null);
+    }, 750);
   }, []);
 
   // Scrubber Mouse Drag Seeking
@@ -252,12 +254,6 @@ export default function VideoPlayerModal({
     window.addEventListener('mouseup', handleWindowMouseUp);
   }, [updateScrubberDrag]);
 
-  // Wheel Trickplay Style
-  const wheelTrickplayStyle = useMemo(() => {
-    if (!wheelSeekingState.active || !item) return null;
-    return getTrickplayStyle(item, wheelSeekingState.time);
-  }, [wheelSeekingState.active, wheelSeekingState.time, item]);
-
   if (!isOpen || !item) return null;
 
   const formatTime = (seconds) => {
@@ -293,7 +289,7 @@ export default function VideoPlayerModal({
   };
 
   const handleScrubberMouseLeave = () => {
-    if (!isDraggingScrubberRef.current) {
+    if (!isDraggingScrubberRef.current && !isWheelSeeking) {
       setHoverScrubberTime(null);
     }
   };
@@ -328,7 +324,7 @@ export default function VideoPlayerModal({
     }
   };
 
-  const posterUrl = item?.Id ? jellyfin.getImageUrl(item.Id, item.ImageTags?.Primary, 'Primary', 1000) : null;
+  const posterUrl = item?.Id ? (jellyfin.getImageUrl(item.Id, item.ImageTags?.Backdrop || item.ImageTags?.Primary, 'Backdrop', 800, 80) || jellyfin.getImageUrl(item.Id, item.ImageTags?.Primary, 'Primary', 800, 80)) : null;
 
   return (
     <div 
@@ -410,15 +406,22 @@ export default function VideoPlayerModal({
 
         {/* Video Canvas Container */}
         <div className="relative flex-1 min-h-0 w-full md:aspect-video bg-black flex items-center justify-center overflow-hidden touch-none">
-          {/* Poster Backdrop */}
+          {/* Complete Uncropped Backdrop Poster */}
           {posterUrl && (
-            <img 
-              src={posterUrl} 
-              alt="Poster" 
-              className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-700 pointer-events-none ${
-                isLoading ? 'opacity-50 blur-sm' : 'opacity-10 blur-md'
-              }`} 
-            />
+            <div className="absolute inset-0 w-full h-full overflow-hidden pointer-events-none flex items-center justify-center">
+              <img 
+                src={posterUrl} 
+                alt="" 
+                className="absolute inset-0 w-full h-full object-cover opacity-25 blur-lg scale-110" 
+              />
+              <img 
+                src={posterUrl} 
+                alt="Poster" 
+                className={`relative max-w-full max-h-full object-contain transition-opacity duration-500 ${
+                  isLoading ? 'opacity-70 blur-xs' : 'opacity-0'
+                }`} 
+              />
+            </div>
           )}
 
           <video
@@ -434,26 +437,6 @@ export default function VideoPlayerModal({
             onPause={() => setIsPlaying(false)}
             onTimeUpdate={handleTimeUpdate}
           />
-
-          {/* Mouse Wheel Seek Trickplay Overlay */}
-          {wheelSeekingState.active && (
-            <div className="absolute inset-0 z-40 flex items-center justify-center pointer-events-none animate-in fade-in zoom-in-95 duration-100">
-              <div className="flex flex-col items-center gap-2 p-2.5 rounded-2xl bg-black/90 backdrop-blur-md border-2 border-cyan-400 shadow-2xl shadow-cyan-500/30">
-                <div className="w-[260px] h-[146px] rounded-xl overflow-hidden bg-black flex items-center justify-center relative">
-                  {wheelTrickplayStyle ? (
-                    <div className="w-full h-full" style={wheelTrickplayStyle} />
-                  ) : (
-                    <FastForward size={40} className="text-cyan-400 animate-pulse" />
-                  )}
-                </div>
-                <div className="flex items-center gap-2 px-3.5 py-1 rounded-full bg-cyan-950/80 border border-cyan-400/40 text-xs font-mono font-bold text-white shadow">
-                  <span className="text-cyan-300">{formatTime(wheelSeekingState.time)}</span>
-                  <span className="text-gray-400">/</span>
-                  <span className="text-gray-300">{durationText}</span>
-                </div>
-              </div>
-            </div>
-          )}
 
           {/* Touch Gesture HUD Overlay */}
           {gestureState.type && (
@@ -500,6 +483,7 @@ export default function VideoPlayerModal({
               hoverTime={hoverScrubberTime}
               hoverPercent={hoverScrubberPercent}
               containerWidth={scrubberWidth}
+              position="above"
             />
 
             <div

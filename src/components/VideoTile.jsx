@@ -12,7 +12,8 @@ import {
 } from 'lucide-react';
 
 export default function VideoTile({
-  tileId,
+  tileId = 0,
+  activeTileCount = 2,
   item,
   isGlobalMuted = true,
   playbackSpeed = 1.0,
@@ -48,16 +49,18 @@ export default function VideoTile({
   // Scrubber Dragging State
   const isDraggingScrubberRef = useRef(false);
 
-  // Mouse Wheel Seek & Trickplay State
-  const [wheelSeekingState, setWheelSeekingState] = useState({
-    active: false,
-    time: 0,
-    delta: 0
-  });
+  // Mouse Wheel Seek State (directly drives scrubber trickplay without center obstruction)
+  const [isWheelSeeking, setIsWheelSeeking] = useState(false);
   const wheelTimerRef = useRef(null);
   const wheelSeekingTimeRef = useRef(null);
 
   const { launchPlayer } = useExternalPlayer();
+
+  // Determine top/bottom row in 4-window grid
+  const is4Window = activeTileCount === 4;
+  const isBottomRowIn4Window = is4Window && (tileId === 2 || tileId === 3);
+  const scrubberPositionClass = isBottomRowIn4Window ? 'top-0' : 'bottom-0';
+  const trickplayPopupPosition = isBottomRowIn4Window ? 'above' : 'above';
 
   // Mobile Touch Gestures
   const { gestureState, brightness, touchHandlers } = useTouchGestures({
@@ -104,7 +107,7 @@ export default function VideoTile({
     setErrorMessage('');
     setProgress(0);
     setHoverScrubberTime(null);
-    setWheelSeekingState({ active: false, time: 0, delta: 0 });
+    setIsWheelSeeking(false);
 
     const videoEl = videoRef.current;
     if (!videoEl) return;
@@ -199,7 +202,7 @@ export default function VideoTile({
     setDurationText(formatTime(video.duration));
   };
 
-  // Mouse Wheel Fast-Forward (Down) / Rewind (Up) with Real-Time Trickplay
+  // Mouse Wheel Fast-Forward (Down) / Rewind (Up) with Direct Scrubber Trickplay (No Center Obstruction)
   const handleWheel = useCallback((e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -208,7 +211,7 @@ export default function VideoTile({
 
     const duration = video.duration;
     const step = 5;
-    // User requirement: Wheel DOWN (deltaY > 0) is Fast-Forward (+5s), Wheel UP (deltaY < 0) is Rewind (-5s)
+    // Scroll Down (deltaY > 0) = Fast-forward (+5s), Scroll Up (deltaY < 0) = Rewind (-5s)
     const delta = e.deltaY > 0 ? step : -step;
     
     const baseTime = wheelSeekingTimeRef.current !== null ? wheelSeekingTimeRef.current : video.currentTime;
@@ -217,17 +220,24 @@ export default function VideoTile({
     wheelSeekingTimeRef.current = nextTime;
     video.currentTime = nextTime;
 
-    setWheelSeekingState({
-      active: true,
-      time: nextTime,
-      delta: Math.round(nextTime - video.currentTime + delta)
-    });
+    // Directly drive the progress bar trickplay
+    const percent = nextTime / duration;
+    setProgress(percent * 100);
+    setCurrentTimeText(formatTime(nextTime));
+    setHoverScrubberTime(nextTime);
+    setHoverScrubberPercent(percent);
+    setIsWheelSeeking(true);
+
+    if (scrubberRef.current) {
+      setScrubberWidth(scrubberRef.current.getBoundingClientRect().width);
+    }
 
     if (wheelTimerRef.current) clearTimeout(wheelTimerRef.current);
     wheelTimerRef.current = setTimeout(() => {
       wheelSeekingTimeRef.current = null;
-      setWheelSeekingState(prev => ({ ...prev, active: false }));
-    }, 700);
+      setIsWheelSeeking(false);
+      setHoverScrubberTime(null);
+    }, 750);
   }, []);
 
   // Scrubber Mouse Drag Seeking
@@ -286,7 +296,7 @@ export default function VideoTile({
   };
 
   const handleScrubberMouseLeave = () => {
-    if (!isDraggingScrubberRef.current) {
+    if (!isDraggingScrubberRef.current && !isWheelSeeking) {
       setHoverScrubberTime(null);
     }
   };
@@ -375,13 +385,15 @@ export default function VideoTile({
     }
   };
 
-  // Wheel Trickplay Style
-  const wheelTrickplayStyle = useMemo(() => {
-    if (!wheelSeekingState.active || !item) return null;
-    return getTrickplayStyle(item, wheelSeekingState.time);
-  }, [wheelSeekingState.active, wheelSeekingState.time, item]);
+  // Select poster artwork (Backdrop for 4-window mode if available, or full uncropped Primary)
+  const coverUrl = useMemo(() => {
+    if (!item?.Id) return null;
+    if (is4Window && item.ImageTags?.Backdrop) {
+      return jellyfin.getImageUrl(item.Id, item.ImageTags.Backdrop, 'Backdrop', 600, 80);
+    }
+    return jellyfin.getImageUrl(item.Id, item.ImageTags?.Primary, 'Primary', 600, 80);
+  }, [item?.Id, item?.ImageTags, is4Window]);
 
-  const posterUrl = item?.Id ? jellyfin.getImageUrl(item.Id, item.ImageTags?.Primary, 'Primary', 1000) : null;
   const isFavorite = !!item?.UserData?.IsFavorite;
   const playCount = item?.UserData?.PlayCount || 0;
 
@@ -399,19 +411,29 @@ export default function VideoTile({
       style={{ filter: `brightness(${brightness})` }}
       {...touchHandlers}
     >
-      {/* Fallback & Paused Poster Cover Artwork */}
-      {posterUrl && (
-        <img
-          src={posterUrl}
-          alt={item?.Name || 'Poster'}
-          className={`absolute inset-0 w-full h-full object-cover transition-all duration-700 pointer-events-none ${
-            isLoading 
-              ? 'opacity-60 blur-sm scale-105' 
-              : !isPlaying 
-                ? 'opacity-40 blur-xs scale-100' 
-                : 'opacity-15 blur-md'
-          }`}
-        />
+      {/* Complete Uncropped Poster Cover Artwork with Subtle Blur Backdrop */}
+      {coverUrl && (
+        <div className="absolute inset-0 w-full h-full overflow-hidden pointer-events-none flex items-center justify-center">
+          {/* Blurred Background to Fill Aspect Ratio Gaps */}
+          <img
+            src={coverUrl}
+            alt=""
+            className="absolute inset-0 w-full h-full object-cover opacity-25 blur-lg scale-110"
+          />
+
+          {/* Fully Visible, Complete Uncropped Artwork (object-contain) */}
+          <img
+            src={coverUrl}
+            alt={item?.Name || 'Poster'}
+            className={`relative max-w-full max-h-full object-contain transition-all duration-500 ${
+              isLoading 
+                ? 'opacity-60 blur-xs scale-100' 
+                : !isPlaying 
+                  ? 'opacity-80 scale-100' 
+                  : 'opacity-0 scale-95'
+            }`}
+          />
+        </div>
       )}
 
       {/* Main Video Element */}
@@ -430,29 +452,6 @@ export default function VideoTile({
         onTimeUpdate={handleTimeUpdate}
       />
 
-      {/* Mouse Wheel Scroll Seek + Trickplay Center Overlay */}
-      {wheelSeekingState.active && (
-        <div className="absolute inset-0 z-40 flex items-center justify-center pointer-events-none animate-in fade-in zoom-in-95 duration-100">
-          <div className="flex flex-col items-center gap-2 p-2 rounded-2xl bg-black/90 backdrop-blur-md border-2 border-cyan-400 shadow-2xl shadow-cyan-500/30">
-            {/* Trickplay Frame (Strict 16:9 Aspect Ratio) */}
-            <div className="w-[240px] h-[135px] rounded-xl overflow-hidden bg-black flex items-center justify-center relative">
-              {wheelTrickplayStyle ? (
-                <div className="w-full h-full" style={wheelTrickplayStyle} />
-              ) : (
-                <FastForward size={36} className="text-cyan-400 animate-pulse" />
-              )}
-            </div>
-
-            {/* Time Pill */}
-            <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-950/80 border border-cyan-400/40 text-xs font-mono font-bold text-white shadow">
-              <span className="text-cyan-300">{formatTime(wheelSeekingState.time)}</span>
-              <span className="text-gray-400">/</span>
-              <span className="text-gray-300">{durationText}</span>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Mobile Touch Gesture HUD Overlay */}
       {gestureState.type && (
         <div className="absolute inset-0 z-30 flex items-center justify-center pointer-events-none animate-in fade-in zoom-in-95 duration-100">
@@ -467,12 +466,12 @@ export default function VideoTile({
       )}
 
       {/* Pinned Poster Floating PIP View */}
-      {showPinnedPoster && posterUrl && (
+      {showPinnedPoster && coverUrl && (
         <div 
           className="absolute top-12 right-2.5 z-30 w-24 sm:w-28 aspect-[2/3] rounded-xl overflow-hidden shadow-2xl border border-cyan-500/40 bg-black/80 backdrop-blur-md animate-in zoom-in-95 duration-200"
           onClick={(e) => e.stopPropagation()}
         >
-          <img src={posterUrl} alt="Cover" className="w-full h-full object-cover" />
+          <img src={coverUrl} alt="Cover" className="w-full h-full object-cover" />
           <button
             onClick={() => setShowPinnedPoster(false)}
             className="absolute top-1 right-1 p-1 rounded-full bg-black/70 text-white/80 hover:text-white"
@@ -490,17 +489,17 @@ export default function VideoTile({
         </div>
       )}
 
-      {/* Paused Center Overlay Indicator */}
+      {/* Paused Center Indicator */}
       {!isPlaying && !isLoading && !hasError && (
         <div 
           onClick={togglePlay}
-          className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/30 backdrop-blur-xs cursor-pointer group/play"
+          className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/20 backdrop-blur-xs cursor-pointer group/play"
         >
           <div className="w-14 h-14 rounded-full bg-black/60 border border-white/20 flex items-center justify-center text-white shadow-2xl group-hover/play:scale-110 group-hover/play:bg-jf-accent transition-all duration-300">
             <Play size={24} className="ml-1 fill-white" />
           </div>
           <span className="text-xs font-medium text-gray-200 mt-2.5 drop-shadow bg-black/50 px-2.5 py-1 rounded-full border border-white/10">
-            已暂停 (点击继续播放)
+            已暂停 (点击播放)
           </span>
         </div>
       )}
@@ -519,7 +518,7 @@ export default function VideoTile({
       )}
 
       {/* Top Left Badges */}
-      <div className="absolute top-2.5 left-2.5 z-20 flex items-center gap-1.5 pointer-events-none">
+      <div className={`absolute left-2.5 z-20 flex items-center gap-1.5 pointer-events-none ${isBottomRowIn4Window ? 'top-14' : 'top-2.5'}`}>
         <div 
           className="flex items-center gap-1 px-2 py-0.5 rounded bg-black/60 backdrop-blur-md border border-white/10 text-[11px] font-mono font-medium text-cyan-300 shadow-sm"
           title={`已播放 ${playCount} 次`}
@@ -537,7 +536,9 @@ export default function VideoTile({
       </div>
 
       {/* Top Right Quick Actions */}
-      <div className={`absolute top-2.5 right-2.5 z-20 flex items-center gap-1.5 transition-opacity duration-200 ${isHovered ? 'opacity-100' : 'opacity-80 md:opacity-0 group-hover:opacity-100'}`}>
+      <div className={`absolute right-2.5 z-20 flex items-center gap-1.5 transition-opacity duration-200 ${
+        isBottomRowIn4Window ? 'top-14' : 'top-2.5'
+      } ${isHovered ? 'opacity-100' : 'opacity-80 md:opacity-0 group-hover:opacity-100'}`}>
         <button
           onClick={(e) => {
             e.stopPropagation();
@@ -548,7 +549,7 @@ export default function VideoTile({
               ? 'bg-cyan-500/30 border-cyan-400 text-cyan-300' 
               : 'bg-black/60 border-white/10 text-gray-300 hover:text-cyan-400 hover:bg-black/80'
           }`}
-          title="浮动展示高清海报 (Poster PIP)"
+          title="浮动展示高清海报"
         >
           <ImageIcon size={14} />
         </button>
@@ -633,20 +634,23 @@ export default function VideoTile({
         </button>
       </div>
 
-      {/* Bottom Floating Scrubber & Info Bar */}
+      {/* Floating Scrubber & Info Bar (Top of tile for 4-window bottom row, Bottom for others) */}
       <div 
-        className={`absolute bottom-0 inset-x-0 z-20 bg-gradient-to-t from-black/95 via-black/80 to-transparent p-3 pt-6 transition-all duration-300 ${
-          isHovered ? 'opacity-100 translate-y-0' : 'opacity-90 md:opacity-0 md:translate-y-2'
+        className={`absolute inset-x-0 z-30 bg-gradient-to-t from-black/95 via-black/80 to-transparent p-3 transition-all duration-300 ${scrubberPositionClass} ${
+          isBottomRowIn4Window ? 'pt-3 pb-5 bg-gradient-to-b' : 'pt-6 pb-3'
+        } ${
+          isHovered || isWheelSeeking ? 'opacity-100 translate-y-0' : 'opacity-90 md:opacity-0 md:translate-y-2'
         }`}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Scrubber Container with Real-Time Mouse Drag */}
-        <div className="relative w-full mb-2.5">
+        <div className="relative w-full mb-2">
           <TrickplayScrubberThumbnail
             item={item}
             hoverTime={hoverScrubberTime}
             hoverPercent={hoverScrubberPercent}
             containerWidth={scrubberWidth}
+            position={trickplayPopupPosition}
           />
 
           <div 
@@ -668,15 +672,15 @@ export default function VideoTile({
 
         <div className="flex items-center justify-between text-xs text-gray-300 gap-2">
           <div className="flex items-center gap-2.5 min-w-0 pr-2">
-            {posterUrl && (
+            {coverUrl && (
               <div 
                 onClick={() => setShowPosterModal(true)}
-                className="relative w-9 h-13 rounded-md overflow-hidden bg-black/60 border border-white/20 hover:border-cyan-400 shadow-md cursor-pointer flex-shrink-0 group/poster hover:scale-105 transition"
-                title="点击查看高清海报"
+                className="relative w-8 h-12 rounded-md overflow-hidden bg-black/60 border border-white/20 hover:border-cyan-400 shadow-md cursor-pointer flex-shrink-0 group/poster hover:scale-105 transition"
+                title="点击查看大图"
               >
-                <img src={posterUrl} alt="Cover" className="w-full h-full object-cover" />
+                <img src={coverUrl} alt="Cover" className="w-full h-full object-contain bg-black" />
                 <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/poster:opacity-100 flex items-center justify-center text-white transition">
-                  <ImageIcon size={13} />
+                  <ImageIcon size={12} />
                 </div>
               </div>
             )}
@@ -684,25 +688,25 @@ export default function VideoTile({
             <div className="flex flex-col min-w-0">
               <div 
                 onClick={() => setShowPosterModal(true)}
-                className="font-semibold text-white truncate max-w-[180px] sm:max-w-[220px] text-sm drop-shadow hover:text-cyan-300 cursor-pointer transition" 
+                className="font-semibold text-white truncate max-w-[150px] sm:max-w-[200px] text-xs sm:text-sm drop-shadow hover:text-cyan-300 cursor-pointer transition" 
                 title={item?.Name}
               >
                 {item?.Name || '未知影片'}
               </div>
-              <div className="text-[11px] text-gray-400 flex items-center gap-2 mt-0.5">
+              <div className="text-[10px] sm:text-[11px] text-gray-400 flex items-center gap-1.5 mt-0.5">
                 <span>{currentTimeText} / {durationText}</span>
                 {item?.ProductionYear && <span>• {item.ProductionYear}</span>}
               </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5 flex-shrink-0">
+          <div className="flex items-center gap-1 flex-shrink-0">
             <button
               onClick={togglePlay}
               className="p-1.5 hover:bg-white/15 rounded text-white transition"
               title={isPlaying ? '暂停' : '播放'}
             >
-              {isPlaying ? <Pause size={15} /> : <Play size={15} />}
+              {isPlaying ? <Pause size={14} /> : <Play size={14} />}
             </button>
 
             <button
@@ -710,7 +714,7 @@ export default function VideoTile({
               className="p-1.5 hover:bg-white/15 rounded text-white transition"
               title={isTileMuted ? '取消静音' : '静音'}
             >
-              {isTileMuted ? <VolumeX size={15} className="text-gray-400" /> : <Volume2 size={15} className="text-cyan-400" />}
+              {isTileMuted ? <VolumeX size={14} className="text-gray-400" /> : <Volume2 size={14} className="text-cyan-400" />}
             </button>
 
             <button
@@ -718,14 +722,14 @@ export default function VideoTile({
               className="p-1.5 hover:bg-white/15 rounded text-white transition"
               title="全屏"
             >
-              <Maximize size={14} />
+              <Maximize size={13} />
             </button>
           </div>
         </div>
       </div>
 
       {/* Poster Lightbox */}
-      {showPosterModal && posterUrl && (
+      {showPosterModal && coverUrl && (
         <div 
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4 animate-in fade-in duration-200"
           onClick={() => setShowPosterModal(false)}
@@ -749,7 +753,7 @@ export default function VideoTile({
 
             <div className="relative w-full max-h-[55vh] bg-black/80 flex items-center justify-center overflow-hidden">
               <img
-                src={posterUrl}
+                src={coverUrl}
                 alt={item?.Name}
                 className="max-h-[55vh] w-auto object-contain shadow-2xl"
               />

@@ -47,7 +47,7 @@ const SORT_OPTIONS = [
 ];
 
 /**
- * Movie Card with Timeline Mousemove Trickplay (No Stretching, Strict 16:9 Aspect Ratio)
+ * Movie Card with Clean Unmasked Timeline Trickplay (Strict 16:9, No Masks, No Center Button)
  */
 function MediaCard({
   item,
@@ -154,7 +154,7 @@ function MediaCard({
           </div>
         )}
 
-        {/* Trickplay Frame (Strict 16:9 Aspect Ratio, NEVER Stretched) */}
+        {/* Clean Trickplay Frame (Strict 16:9 Aspect Ratio, NO DARK MASKS, NO CENTER BUTTON) */}
         {tpStyle && (
           <div className="absolute inset-0 bg-black flex items-center justify-center overflow-hidden pointer-events-none">
             {/* 16:9 Aspect Ratio Frame Container */}
@@ -163,14 +163,14 @@ function MediaCard({
               style={tpStyle}
             />
 
-            {/* Trickplay Timeline Scrubber & Timestamp Pill */}
-            <div className="absolute bottom-2 inset-x-3 z-30 flex items-center justify-between pointer-events-none">
+            {/* Trickplay Timestamp Badge */}
+            <div className="absolute bottom-2 left-2 z-30 pointer-events-none">
               <div className="px-2 py-0.5 rounded-full bg-black/85 backdrop-blur-md border border-cyan-400/50 text-[10px] font-mono font-bold text-cyan-300 shadow-lg">
                 {formatTime(trickplayTime)}
               </div>
             </div>
 
-            {/* Real-time Bottom Progress Line */}
+            {/* Bottom Timeline Progress Line */}
             <div className="absolute bottom-0 inset-x-0 h-1 bg-white/20">
               <div 
                 className="h-full bg-cyan-400 shadow-sm shadow-cyan-400 transition-all duration-75"
@@ -181,7 +181,7 @@ function MediaCard({
         )}
 
         {/* Top-Right: Played Checkmark */}
-        <div className="absolute top-2 right-2 flex items-center gap-1 z-10">
+        <div className="absolute top-2 right-2 flex items-center gap-1 z-20">
           {isPlayed ? (
             <div 
               onClick={(e) => { e.stopPropagation(); onTogglePlayed(item); }}
@@ -200,7 +200,7 @@ function MediaCard({
         </div>
 
         {/* Top-Left: Duplicate Badge or Play Count */}
-        <div className="absolute top-2 left-2 flex items-center gap-1.5 z-10 pointer-events-none">
+        <div className="absolute top-2 left-2 flex items-center gap-1.5 z-20 pointer-events-none">
           {isDuplicate && (
             <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-red-600/90 backdrop-blur-md border border-red-400/50 text-[10px] font-mono font-bold text-white shadow-lg animate-pulse">
               <Layers size={10} />
@@ -223,14 +223,7 @@ function MediaCard({
           )}
         </div>
 
-        {/* Hover Center Play Button */}
-        <div className={`absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent transition-opacity duration-200 flex items-center justify-center z-20 pointer-events-none ${isHovered ? 'opacity-100' : 'opacity-0'}`}>
-          <div className="w-12 h-12 rounded-full bg-jf-accent hover:bg-cyan-400 text-white flex items-center justify-center shadow-xl shadow-cyan-500/40 transition transform group-hover:scale-105">
-            <Play size={20} className="ml-0.5 fill-white" />
-          </div>
-        </div>
-
-        {/* Hover Action Buttons */}
+        {/* Hover Corner Action Buttons (No Full-Screen Dark Mask) */}
         <div className="absolute inset-x-2 bottom-2 z-30 flex items-center justify-between opacity-80 md:opacity-0 group-hover:opacity-100 transition-opacity duration-200">
           {/* Favorite Toggle */}
           <button
@@ -611,7 +604,7 @@ export default function LibraryView({
 
             <button
               onClick={() => onSelectView('all')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition flex-shrink-0 ${
+              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-medium transition flex-shrink-0 ${
                 selectedViewId === 'all'
                   ? 'bg-jf-accent text-white shadow-lg shadow-cyan-500/25'
                   : 'bg-black/40 hover:bg-white/10 text-gray-400 border border-white/5'

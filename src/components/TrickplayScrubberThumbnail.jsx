@@ -1,11 +1,12 @@
 import React, { useMemo } from 'react';
-import { getTrickplayStyle, getTrickplayInfo } from '../utils/trickplay';
+import { getTrickplayStyle } from '../utils/trickplay';
 
 export default function TrickplayScrubberThumbnail({
   item,
   hoverTime,
   hoverPercent,
-  containerWidth
+  containerWidth,
+  position = 'above' // 'above' | 'below'
 }) {
   const style = useMemo(() => {
     return getTrickplayStyle(item, hoverTime);
@@ -29,13 +30,22 @@ export default function TrickplayScrubberThumbnail({
   const rawX = (hoverPercent || 0) * (containerWidth || 300);
   const left = Math.max(thumbWidth / 2 + 8, Math.min((containerWidth || 300) - thumbWidth / 2 - 8, rawX));
 
+  const isBelow = position === 'below';
+
   return (
     <div
-      className="absolute bottom-6 z-40 -translate-x-1/2 flex flex-col items-center pointer-events-none transition-all duration-75 animate-in fade-in zoom-in-95 duration-100"
+      className={`absolute z-40 -translate-x-1/2 flex flex-col items-center pointer-events-none transition-all duration-75 animate-in fade-in zoom-in-95 duration-100 ${
+        isBelow ? 'top-7' : 'bottom-7'
+      }`}
       style={{ left: `${left}px` }}
     >
+      {/* Upward pointer arrow when positioned below scrubber */}
+      {isBelow && (
+        <div className="w-0 h-0 border-x-6 border-x-transparent border-b-6 border-b-cyan-400 mb-0.5" />
+      )}
+
       {/* Large Thumbnail Window */}
-      <div className="w-[240px] h-[135px] rounded-xl overflow-hidden bg-black/95 border-2 border-cyan-400 shadow-2xl shadow-cyan-500/25 flex items-center justify-center relative">
+      <div className="w-[240px] h-[135px] rounded-xl overflow-hidden bg-black/95 border-2 border-cyan-400 shadow-2xl shadow-cyan-500/30 flex items-center justify-center relative">
         {style ? (
           <div className="w-full h-full" style={style} />
         ) : (
@@ -48,8 +58,10 @@ export default function TrickplayScrubberThumbnail({
         </div>
       </div>
 
-      {/* Downward pointer arrow */}
-      <div className="w-0 h-0 border-x-6 border-x-transparent border-t-6 border-t-cyan-400 mt-0.5" />
+      {/* Downward pointer arrow when positioned above scrubber */}
+      {!isBelow && (
+        <div className="w-0 h-0 border-x-6 border-x-transparent border-t-6 border-t-cyan-400 mt-0.5" />
+      )}
     </div>
   );
 }

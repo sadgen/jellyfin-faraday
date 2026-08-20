@@ -129,6 +129,7 @@ function MediaCard({
     <div
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={handleCoverMouseLeave}
+      style={{ zIndex: (isHovered || tpStyle) ? 100 : 1 }}
       className={`group relative flex flex-col bg-slate-900/50 rounded-xl transition-all duration-300 transform hover:-translate-y-1 select-none ${
         isDuplicate 
           ? 'border border-red-500/60 shadow-lg shadow-red-500/10' 

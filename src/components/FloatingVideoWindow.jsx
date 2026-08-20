@@ -340,7 +340,7 @@ export default function FloatingVideoWindow({
         width: `${layout.width}px`,
         zIndex: 50 + slotIndex
       }}
-      className={`fixed rounded-2xl overflow-hidden shadow-2xl border bg-[#0d1117] flex flex-col group select-none transition-shadow ${
+      className={`fixed rounded-2xl overflow-visible shadow-2xl border bg-[#0d1117] flex flex-col group select-none transition-shadow ${
         slotIndex === 0 
           ? 'border-cyan-400/60 shadow-cyan-500/25' 
           : 'border-white/15 shadow-black/80'
@@ -351,7 +351,7 @@ export default function FloatingVideoWindow({
       {/* Draggable Header */}
       <div
         onMouseDown={handleMouseDownHeader}
-        className={`px-3 py-2 border-b border-white/10 flex items-center justify-between cursor-move text-xs ${
+        className={`px-3 py-2 border-b border-white/10 rounded-t-2xl flex items-center justify-between cursor-move text-xs ${
           slotIndex === 0 ? 'bg-cyan-950/80 text-cyan-200' : 'bg-slate-950/90 text-gray-300'
         }`}
       >
@@ -453,7 +453,7 @@ export default function FloatingVideoWindow({
       </div>
 
       {/* Scrubber & Controls Footer */}
-      <div className="p-2.5 bg-slate-950/95 border-t border-white/5 flex flex-col gap-1.5 text-xs">
+      <div className="p-2.5 bg-slate-950/95 border-t border-white/5 rounded-b-2xl flex flex-col gap-1.5 text-xs">
         {/* Scrubber with Real-time Drag & Trickplay */}
         <div className="relative w-full">
           <TrickplayScrubberThumbnail
@@ -461,7 +461,7 @@ export default function FloatingVideoWindow({
             hoverTime={hoverScrubberTime}
             hoverPercent={hoverScrubberPercent}
             containerWidth={scrubberWidth}
-            position="above"
+            position="below"
           />
 
           <div

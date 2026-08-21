@@ -3,7 +3,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 /**
  * Mobile Video Player Touch Gestures Hook
  * Supports:
- * 1. Horizontal swipe: Seek forward / rewind with seconds indicator
+ * 1. Horizontal swipe: Seek forward / rewind with real-time Trickplay thumbnail preview
  * 2. Left vertical swipe: Brightness adjust (0.2 - 1.0)
  * 3. Right vertical swipe: Volume adjust (0.0 - 1.0)
  * 4. Double tap: Play / Pause toggle
@@ -15,6 +15,8 @@ export function useTouchGestures({
   duration = 0,
   currentTime = 0,
   onSeek,
+  onSeekPreview,
+  onSeekPreviewEnd,
   onTogglePlay,
   normalSpeed = 1.0,
   onSpeedChange
@@ -59,7 +61,7 @@ export function useTouchGestures({
 
     touchActionRef.current = null;
 
-    // Double-tap detection (< 300ms, < 30px displacement)
+    // Double-tap detection (< 300ms, < 35px displacement)
     const now = Date.now();
     const timeDiff = now - lastTapRef.current.time;
     const distDiff = Math.hypot(touch.clientX - lastTapRef.current.x, touch.clientY - lastTapRef.current.y);
@@ -136,12 +138,18 @@ export function useTouchGestures({
       const seekDelta = (dx / start.rectWidth) * 90;
       const targetTime = Math.max(0, Math.min(videoDuration, initialValueRef.current + seekDelta));
       const deltaSec = Math.round(targetTime - initialValueRef.current);
+      const percent = videoDuration > 0 ? targetTime / videoDuration : 0;
 
       setGestureState({
         type: 'seek',
         value: targetTime,
         text: `${deltaSec >= 0 ? '+' : ''}${deltaSec}s (${formatSec(targetTime)} / ${formatSec(videoDuration)})`
       });
+
+      // Trigger real-time Trickplay thumbnail update during touch seek
+      if (onSeekPreview) {
+        onSeekPreview(targetTime, percent);
+      }
     } else if (touchActionRef.current === 'brightness') {
       // Vertical swipe on left: up increases, down decreases
       const delta = -(dy / start.rectHeight) * 1.5;
@@ -155,7 +163,7 @@ export function useTouchGestures({
     } else if (touchActionRef.current === 'volume') {
       // Vertical swipe on right: up increases, down decreases
       const delta = -(dy / start.rectHeight) * 1.5;
-      const nextV = Math.max(0, Math.min(1.0, initialValueRef.current + delta));
+      const nextV = Math.max(0.0, Math.min(1.0, initialValueRef.current + delta));
       if (videoRef.current) {
         videoRef.current.volume = nextV;
         videoRef.current.muted = nextV === 0;
@@ -166,7 +174,7 @@ export function useTouchGestures({
         text: `音量 ${Math.round(nextV * 100)}%`
       });
     }
-  }, [currentTime, duration, brightness, videoRef]);
+  }, [currentTime, duration, brightness, videoRef, onSeekPreview]);
 
   const handleTouchEnd = useCallback(() => {
     if (longPressTimerRef.current) {
@@ -186,11 +194,12 @@ export function useTouchGestures({
     if (touchActionRef.current === 'seek' && gestureState.type === 'seek') {
       if (onSeek) onSeek(gestureState.value);
       if (videoRef.current) videoRef.current.currentTime = gestureState.value;
+      if (onSeekPreviewEnd) onSeekPreviewEnd();
     }
 
     touchActionRef.current = null;
     setGestureState({ type: null, value: 0, text: '' });
-  }, [gestureState, onSeek, normalSpeed, onSpeedChange, videoRef]);
+  }, [gestureState, onSeek, onSeekPreviewEnd, normalSpeed, onSpeedChange, videoRef]);
 
   function formatSec(seconds) {
     if (!seconds || isNaN(seconds)) return '00:00';

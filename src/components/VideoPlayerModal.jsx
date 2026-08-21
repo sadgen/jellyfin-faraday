@@ -61,7 +61,7 @@ export default function VideoPlayerModal({
 
   const { launchPlayer } = useExternalPlayer();
 
-  // Mobile Touch Gestures
+  // Mobile Touch Gestures with real-time Trickplay preview
   const { gestureState, brightness, touchHandlers } = useTouchGestures({
     videoRef,
     containerRef,
@@ -71,6 +71,20 @@ export default function VideoPlayerModal({
       if (videoRef.current) {
         videoRef.current.currentTime = target;
       }
+    },
+    onSeekPreview: (targetTime, percent) => {
+      setHoverScrubberTime(targetTime);
+      setHoverScrubberPercent(percent);
+      setIsWheelSeeking(true);
+      if (scrubberRef.current) {
+        setScrubberWidth(scrubberRef.current.getBoundingClientRect().width);
+      }
+    },
+    onSeekPreviewEnd: () => {
+      setTimeout(() => {
+        setHoverScrubberTime(null);
+        setIsWheelSeeking(false);
+      }, 600);
     },
     onTogglePlay: () => {
       togglePlay();

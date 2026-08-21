@@ -75,7 +75,7 @@ export default function VideoTile({
   const scrubberPositionClass = isBottomRowIn4Window ? 'top-0' : 'bottom-0';
   const trickplayPosition = isTopRowIn4Window ? 'below' : 'above';
 
-  // Mobile Touch Gestures
+  // Mobile Touch Gestures with real-time Trickplay preview
   const { gestureState, brightness, touchHandlers } = useTouchGestures({
     videoRef,
     containerRef,
@@ -83,6 +83,20 @@ export default function VideoTile({
     currentTime: videoRef.current?.currentTime || 0,
     onSeek: (target) => {
       if (videoRef.current) videoRef.current.currentTime = target;
+    },
+    onSeekPreview: (targetTime, percent) => {
+      setHoverScrubberTime(targetTime);
+      setHoverScrubberPercent(percent);
+      setIsWheelSeeking(true);
+      if (scrubberRef.current) {
+        setScrubberWidth(scrubberRef.current.getBoundingClientRect().width);
+      }
+    },
+    onSeekPreviewEnd: () => {
+      setTimeout(() => {
+        setHoverScrubberTime(null);
+        setIsWheelSeeking(false);
+      }, 600);
     },
     onTogglePlay: () => {
       togglePlay();
@@ -538,12 +552,12 @@ export default function VideoTile({
 
       {/* 
         Pinned Poster Floating PIP View:
-        - ENABLED BY DEFAULT
-        - ENLARGED BY 1.5x (w-36 sm:w-44 aspect-[2/3])
+        - Mobile: 1X compact standard size (w-20 xs:w-24)
+        - Desktop: 1.5X enlarged size (sm:w-44)
       */}
       {showPinnedPoster && coverUrl && (
         <div 
-          className={`absolute z-30 w-36 sm:w-44 aspect-[2/3] rounded-2xl overflow-hidden shadow-2xl border-2 border-cyan-400/60 bg-black/90 backdrop-blur-md animate-in zoom-in-95 duration-200 group/poster-pip cursor-pointer ${
+          className={`absolute z-30 w-20 xs:w-24 sm:w-44 aspect-[2/3] rounded-xl sm:rounded-2xl overflow-hidden shadow-2xl border sm:border-2 border-cyan-400/60 bg-black/90 backdrop-blur-md animate-in zoom-in-95 duration-200 group/poster-pip cursor-pointer ${
             isBottomRowIn4Window ? 'bottom-16 right-3' : 'top-3 right-3'
           }`}
           onClick={(e) => {

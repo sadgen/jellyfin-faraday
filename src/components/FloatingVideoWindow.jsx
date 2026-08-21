@@ -4,12 +4,13 @@ import { jellyfin } from '../api/jellyfinClient';
 import { getTrickplayStyle } from '../utils/trickplay';
 import { calculateSlotStyle } from '../utils/windowLayout';
 import { useExternalPlayer } from '../hooks/useExternalPlayer';
+import { useTouchGestures } from '../hooks/useTouchGestures';
 import TrickplayScrubberThumbnail from './TrickplayScrubberThumbnail';
 import InlineVrCanvas from './InlineVrCanvas';
 import { 
   Play, Pause, SkipForward, Volume2, VolumeX, Maximize, 
   X, ExternalLink, Film, Star, Eye, EyeOff, Image as ImageIcon,
-  Glasses, Trash2
+  Glasses, Trash2, FastForward, Sun, Zap
 } from 'lucide-react';
 
 export default function FloatingVideoWindow({
@@ -59,7 +60,7 @@ export default function FloatingVideoWindow({
   const [showPlayerMenu, setShowPlayerMenu] = useState(false);
   const [showPosterModal, setShowPosterModal] = useState(false);
 
-  // Pinned Poster PIP: ENABLED BY DEFAULT and enlarged 1.5x
+  // Pinned Poster PIP: ENABLED BY DEFAULT (1X on Mobile, 1.5X on Desktop)
   const [showPinnedPoster, setShowPinnedPoster] = useState(true);
 
   // INLINE VR Projection State
@@ -89,6 +90,38 @@ export default function FloatingVideoWindow({
   const hasCountedPlayRef = useRef(false);
 
   const { launchPlayer } = useExternalPlayer();
+
+  // Mobile Touch Gestures with real-time Trickplay preview
+  const { gestureState, brightness, touchHandlers } = useTouchGestures({
+    videoRef,
+    containerRef,
+    duration: rawDuration,
+    currentTime: videoRef.current?.currentTime || 0,
+    onSeek: (target) => {
+      if (videoRef.current) videoRef.current.currentTime = target;
+    },
+    onSeekPreview: (targetTime, percent) => {
+      setHoverScrubberTime(targetTime);
+      setHoverScrubberPercent(percent);
+      setIsWheelSeeking(true);
+      if (scrubberRef.current) {
+        setScrubberWidth(scrubberRef.current.getBoundingClientRect().width);
+      }
+    },
+    onSeekPreviewEnd: () => {
+      setTimeout(() => {
+        setHoverScrubberTime(null);
+        setIsWheelSeeking(false);
+      }, 600);
+    },
+    onTogglePlay: () => {
+      togglePlay();
+    },
+    normalSpeed: playbackSpeed,
+    onSpeedChange: (speed) => {
+      if (videoRef.current) videoRef.current.playbackRate = speed;
+    }
+  });
 
   // Load and play video when item changes + Report Playback to Jellyfin
   useEffect(() => {
@@ -614,7 +647,11 @@ export default function FloatingVideoWindow({
       </div>
 
       {/* Video Viewport (16:9) */}
-      <div className="relative w-full aspect-video bg-black flex items-center justify-center overflow-hidden">
+      <div 
+        className="relative w-full aspect-video bg-black flex items-center justify-center overflow-hidden touch-none"
+        style={{ filter: `brightness(${brightness})` }}
+        {...touchHandlers}
+      >
         {coverUrl && (
           <img
             src={coverUrl}
@@ -648,14 +685,27 @@ export default function FloatingVideoWindow({
           onClose={() => setIsVrActive(false)}
         />
 
+        {/* Mobile Touch Gesture HUD Overlay */}
+        {gestureState.type && (
+          <div className="absolute inset-0 z-30 flex items-center justify-center pointer-events-none animate-in fade-in zoom-in-95 duration-100">
+            <div className="flex flex-col items-center gap-1.5 bg-black/80 backdrop-blur-md px-3.5 py-2.5 rounded-2xl border border-white/10 shadow-2xl text-white">
+              {gestureState.type === 'seek' && <FastForward size={20} className="text-cyan-400 animate-pulse" />}
+              {gestureState.type === 'brightness' && <Sun size={20} className="text-amber-400" />}
+              {gestureState.type === 'volume' && <Volume2 size={20} className="text-cyan-400" />}
+              {gestureState.type === 'speed_boost' && <Zap size={20} className="text-amber-400 animate-bounce" />}
+              <span className="font-mono font-bold text-[11px]">{gestureState.text}</span>
+            </div>
+          </div>
+        )}
+
         {/* 
           Pinned Poster Floating PIP View:
-          - ENABLED BY DEFAULT
-          - ENLARGED BY 1.5x (w-32 sm:w-36 aspect-[2/3])
+          - Mobile: 1X compact standard size (w-20 xs:w-24)
+          - Desktop: 1.5X enlarged size (sm:w-36)
         */}
         {showPinnedPoster && coverUrl && (
           <div 
-            className="absolute top-2 right-2 z-30 w-32 sm:w-36 aspect-[2/3] rounded-xl overflow-hidden shadow-2xl border-2 border-cyan-400/60 bg-black/90 backdrop-blur-md animate-in zoom-in-95 duration-150 group/pip cursor-pointer"
+            className="absolute top-2 right-2 z-30 w-20 xs:w-24 sm:w-36 aspect-[2/3] rounded-xl overflow-hidden shadow-2xl border sm:border-2 border-cyan-400/60 bg-black/90 backdrop-blur-md animate-in zoom-in-95 duration-150 group/pip cursor-pointer"
             onClick={(e) => {
               e.stopPropagation();
               setShowPosterModal(true);
@@ -671,9 +721,9 @@ export default function FloatingVideoWindow({
               className="absolute top-1 right-1 p-1 rounded-full bg-black/80 text-white hover:bg-red-500 transition"
               title="隐藏海报"
             >
-              <X size={12} />
+              <X size={11} />
             </button>
-            <div className="absolute bottom-0 inset-x-0 bg-black/75 px-1.5 py-0.5 text-[9px] text-center text-cyan-300 font-medium truncate backdrop-blur-xs">
+            <div className="absolute bottom-0 inset-x-0 bg-black/75 px-1 py-0.5 text-[8px] sm:text-[9px] text-center text-cyan-300 font-medium truncate backdrop-blur-xs">
               {item?.Name}
             </div>
           </div>

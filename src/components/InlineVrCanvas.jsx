@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
-import { RotateCcw, Glasses, Compass, X } from 'lucide-react';
+import { RotateCcw, Glasses, Compass, X, Smartphone } from 'lucide-react';
 
 export const VR_MODES = [
   { id: '180_3d_sbs', label: '180° 3D (左右 SBS)' },
@@ -39,6 +39,7 @@ export default function InlineVrCanvas({
 
   const [vrMode, setVrMode] = useState(initialMode);
   const [fov, setFov] = useState(100);
+  const [isGyroActive, setIsGyroActive] = useState(false);
 
   // Setup Geometry based on VR mode
   const setupGeometry = useCallback((mode) => {
@@ -202,6 +203,42 @@ export default function InlineVrCanvas({
     };
   }, [isActive, setupGeometry, vrMode]);
 
+  // Gyroscope / DeviceOrientation Listener on Mobile
+  useEffect(() => {
+    if (!isGyroActive) return;
+
+    const handleDeviceOrientation = (e) => {
+      if (isUserInteractingRef.current) return;
+      if (e.alpha !== null && e.beta !== null && e.gamma !== null) {
+        // Orientation mapping: alpha is yaw (0-360), beta is pitch (-180 to 180)
+        lonRef.current = -e.alpha;
+        latRef.current = Math.max(-85, Math.min(85, e.beta - 90));
+      }
+    };
+
+    window.addEventListener('deviceorientation', handleDeviceOrientation, true);
+    return () => {
+      window.removeEventListener('deviceorientation', handleDeviceOrientation, true);
+    };
+  }, [isGyroActive]);
+
+  const toggleGyro = async () => {
+    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+      try {
+        const permission = await DeviceOrientationEvent.requestPermission();
+        if (permission === 'granted') {
+          setIsGyroActive(!isGyroActive);
+        } else {
+          alert('需要陀螺仪权限以支持手机体感全景转动');
+        }
+      } catch (err) {
+        console.warn('Gyro permission error:', err);
+      }
+    } else {
+      setIsGyroActive(!isGyroActive);
+    }
+  };
+
   // Pointer Drag to Look Around (Pitch & Yaw)
   const handlePointerDown = (e) => {
     isUserInteractingRef.current = true;
@@ -257,12 +294,12 @@ export default function InlineVrCanvas({
     <div className="absolute inset-0 z-20 flex flex-col bg-black overflow-hidden select-none">
       {/* Top Inline VR HUD inside this tile */}
       <div 
-        className="absolute top-2 inset-x-2 z-30 flex items-center justify-between pointer-events-auto"
+        className="absolute top-2 inset-x-2 z-30 flex items-center justify-between pointer-events-auto gap-1"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center gap-1.5 bg-black/80 backdrop-blur-md px-2 py-0.5 rounded-lg border border-cyan-500/40 text-[11px] font-bold text-cyan-300 shadow-md">
           <Glasses size={13} className="animate-pulse text-amber-400" />
-          <span>VR 模式</span>
+          <span className="hidden sm:inline">VR 模式</span>
         </div>
 
         <div className="flex items-center gap-1">
@@ -274,7 +311,7 @@ export default function InlineVrCanvas({
               setVrMode(mode);
               setupGeometry(mode);
             }}
-            className="px-2 py-0.5 rounded-lg bg-black/85 border border-cyan-400/50 text-cyan-300 text-[11px] font-medium focus:outline-none cursor-pointer"
+            className="px-2 py-0.5 rounded-lg bg-black/85 border border-cyan-400/50 text-cyan-300 text-[10px] sm:text-[11px] font-medium focus:outline-none cursor-pointer max-w-[130px] sm:max-w-none truncate"
           >
             {VR_MODES.map(m => (
               <option key={m.id} value={m.id} className="bg-slate-900 text-white">
@@ -282,6 +319,19 @@ export default function InlineVrCanvas({
               </option>
             ))}
           </select>
+
+          {/* Gyro Sensor Toggle (Mobile) */}
+          <button
+            onClick={toggleGyro}
+            className={`p-1 rounded-lg border transition ${
+              isGyroActive 
+                ? 'bg-emerald-500/40 border-emerald-400 text-emerald-300 animate-pulse' 
+                : 'bg-black/80 hover:bg-black border-white/20 text-gray-300 hover:text-emerald-300'
+            }`}
+            title="手机陀螺仪体感视角追踪"
+          >
+            <Smartphone size={12} />
+          </button>
 
           {/* Reset Orientation */}
           <button

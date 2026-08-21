@@ -3,7 +3,8 @@ import { jellyfin } from '../api/jellyfinClient';
 import { useExternalPlayer } from '../hooks/useExternalPlayer';
 import { 
   Play, Star, Eye, EyeOff, Edit3, Sparkles, 
-  Trash2, RefreshCw, ExternalLink, X, Film, Info
+  Trash2, RefreshCw, ExternalLink, X, Film, Info,
+  Glasses, Tv
 } from 'lucide-react';
 
 export default function MobileActionSheet({
@@ -11,6 +12,8 @@ export default function MobileActionSheet({
   item,
   onClose,
   onPlay,
+  onPlayVr,
+  onOpenFloating,
   onToggleFavorite,
   onTogglePlayed,
   onOpenMetadataEditor,
@@ -33,7 +36,7 @@ export default function MobileActionSheet({
     >
       {/* Bottom Sheet Drawer */}
       <div 
-        className="w-full bg-[#111622] rounded-t-3xl border-t border-white/10 p-5 pb-[max(1.5rem,env(safe-area-inset-bottom))] flex flex-col gap-4 text-xs shadow-2xl animate-in slide-in-from-bottom duration-200"
+        className="w-full bg-[#111622] rounded-t-3xl border-t border-white/10 p-5 pb-[max(1.5rem,env(safe-area-inset-bottom))] flex flex-col gap-4 text-xs shadow-2xl animate-in slide-in-from-bottom duration-200 max-h-[85vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Handle pill */}
@@ -63,14 +66,34 @@ export default function MobileActionSheet({
 
         {/* Action Buttons Grid */}
         <div className="grid grid-cols-2 gap-2 text-gray-200 font-medium">
-          {/* Main Play */}
+          {/* Main Play (Theater) */}
           <button
             onClick={() => { onPlay(item); onClose(); }}
-            className="col-span-2 py-3 rounded-2xl bg-jf-accent hover:bg-cyan-400 text-white font-bold flex items-center justify-center gap-2 shadow-lg shadow-cyan-500/25"
+            className="py-3 rounded-2xl bg-jf-accent hover:bg-cyan-400 text-white font-bold flex items-center justify-center gap-2 shadow-lg shadow-cyan-500/25"
           >
             <Play size={16} className="fill-white" />
             <span>影院播放</span>
           </button>
+
+          {/* VR Panorama Play */}
+          <button
+            onClick={() => { if (onPlayVr) onPlayVr(item); onClose(); }}
+            className="py-3 rounded-2xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/40 text-amber-300 font-bold flex items-center justify-center gap-2 shadow-lg shadow-amber-500/15"
+          >
+            <Glasses size={16} />
+            <span>🥽 VR 全景</span>
+          </button>
+
+          {/* Floating PIP Window */}
+          {onOpenFloating && (
+            <button
+              onClick={() => { onOpenFloating(item); onClose(); }}
+              className="col-span-2 p-3 rounded-xl bg-slate-800/80 hover:bg-slate-700 border border-cyan-500/30 text-cyan-300 flex items-center justify-center gap-2 font-bold shadow"
+            >
+              <Tv size={15} />
+              <span>开启悬浮播放窗 (3 窗模式)</span>
+            </button>
+          )}
 
           {/* Favorite */}
           <button
@@ -145,7 +168,7 @@ export default function MobileActionSheet({
             className="p-3 rounded-xl bg-red-950/40 border border-red-500/30 text-red-400 flex items-center gap-2.5"
           >
             <Trash2 size={15} />
-            <span>从磁盘删除</span>
+            <span>从磁盘彻底删除</span>
           </button>
         </div>
       </div>

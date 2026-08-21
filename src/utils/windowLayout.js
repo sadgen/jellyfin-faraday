@@ -1,34 +1,50 @@
 /**
  * Calculates the exact asymmetric 3-window layout from the Tampermonkey script:
- * - Slot 0: Large Master Window on the Right (~60-65% width)
- * - Slot 1: Small Sub Window on Top-Left (~35-40% width)
- * - Slot 2: Small Sub Window on Bottom-Left (~35-40% width, stacked under Slot 1)
+ * - Desktop:
+ *   - Slot 0: Large Master Window on the Right (~60-65% width)
+ *   - Slot 1: Small Sub Window on Top-Left (~35-40% width)
+ *   - Slot 2: Small Sub Window on Bottom-Left (~35-40% width, stacked under Slot 1)
+ * - Mobile / Tablet (< 768px / < 1024px):
+ *   - Fluid responsive floating card that fits mobile touch screen bounds with safe-area spacing
  */
 
 export function calculateSlotStyle(slotIndex) {
   if (typeof window === 'undefined') {
-    return { left: 20, top: 70, width: 340, height: 260 };
+    return { left: 16, top: 70, width: 340, height: 260 };
   }
 
   const padding = 12;
   const headerOffset = 64; // Top header navigation bar offset
   const bottomOffset = 60; // Bottom space
   const gap = 12;
-  
-  const screenW = Math.max(800, window.innerWidth - padding * 2);
-  const screenH = Math.max(500, window.innerHeight - headerOffset - bottomOffset);
   const uiH = 34 + 38; // Header (~34px) + Footer (~38px)
 
-  // Mobile / compact screens: responsive floating width
-  if (window.innerWidth < 1024) {
-    const w = Math.min(360, window.innerWidth - 32);
+  // Mobile Phones (< 768px)
+  if (window.innerWidth < 768) {
+    const w = Math.min(360, window.innerWidth - 24);
     const h = (w * 9 / 16) + uiH;
-    const left = Math.max(16, window.innerWidth - w - 16 - slotIndex * 20);
-    const top = headerOffset + 10 + slotIndex * 30;
-    return { left, top, width: w, height: h };
+    const left = Math.max(12, (window.innerWidth - w) / 2);
+    // Stack with slight offset for tabs or docked at bottom/top
+    const top = Math.min(
+      window.innerHeight - h - 70,
+      headerOffset + 10 + slotIndex * 35
+    );
+    return { left: Math.round(left), top: Math.round(top), width: Math.round(w), height: Math.round(h) };
   }
 
-  // Calculate small window max width so 2 stacked small windows fit in screenH:
+  // Tablets & Compact Screens (< 1024px)
+  if (window.innerWidth < 1024) {
+    const w = Math.min(380, window.innerWidth - 32);
+    const h = (w * 9 / 16) + uiH;
+    const left = Math.max(16, window.innerWidth - w - 16 - slotIndex * 24);
+    const top = headerOffset + 12 + slotIndex * 36;
+    return { left: Math.round(left), top: Math.round(top), width: Math.round(w), height: Math.round(h) };
+  }
+
+  const screenW = Math.max(800, window.innerWidth - padding * 2);
+  const screenH = Math.max(500, window.innerHeight - headerOffset - bottomOffset);
+
+  // Desktop: calculate small window max width so 2 stacked small windows fit in screenH:
   // 2 * (w_small * 9/16 + uiH) + gap <= screenH
   let max_w_small = (screenH - (uiH * 2) - gap) / (18 / 16);
   
@@ -65,8 +81,8 @@ export function calculateSlotStyle(slotIndex) {
   
   const p = positions[slotIndex % positions.length];
   return {
-    left: padding + p.left,
-    top: p.top,
+    left: Math.round(padding + p.left),
+    top: Math.round(p.top),
     width: Math.round(p.width),
     height: Math.round(p.height)
   };

@@ -553,6 +553,7 @@ export default function App() {
             }
           }}
           onUpdateItem={handleUpdateItem}
+          onDeleteItem={handleDeleteItem}
           onOpenVr={(item) => setVrPlayingItem(item)}
         />
 

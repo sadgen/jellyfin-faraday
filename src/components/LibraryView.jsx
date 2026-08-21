@@ -985,6 +985,8 @@ export default function LibraryView({
         item={actionSheetItem}
         onClose={() => setActionSheetItem(null)}
         onPlay={onPlaySingleItem}
+        onPlayVr={onPlayVr}
+        onOpenFloating={onPlaySingleItem}
         onToggleFavorite={handleToggleFavorite}
         onTogglePlayed={handleTogglePlayed}
         onOpenMetadataEditor={onOpenMetadataEditor}

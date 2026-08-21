@@ -5,10 +5,11 @@ import { getTrickplayStyle } from '../utils/trickplay';
 import { useExternalPlayer } from '../hooks/useExternalPlayer';
 import { useTouchGestures } from '../hooks/useTouchGestures';
 import TrickplayScrubberThumbnail from './TrickplayScrubberThumbnail';
+import InlineVrCanvas from './InlineVrCanvas';
 import { 
   Play, Pause, Volume2, VolumeX, Maximize, 
   Star, Eye, EyeOff, ExternalLink, X, Film, 
-  SkipForward, SkipBack, Sun, Zap, FastForward, Glasses
+  SkipForward, SkipBack, Sun, Zap, FastForward, Glasses, Trash2
 } from 'lucide-react';
 
 export default function VideoPlayerModal({
@@ -18,6 +19,7 @@ export default function VideoPlayerModal({
   onNext,
   onPrev,
   onUpdateItem,
+  onDeleteItem,
   onOpenVr
 }) {
   const videoRef = useRef(null);
@@ -32,6 +34,7 @@ export default function VideoPlayerModal({
   const [hasError, setHasError] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [showPlayerMenu, setShowPlayerMenu] = useState(false);
+  const [isVrActive, setIsVrActive] = useState(false);
 
   // Progress & Duration
   const [progress, setProgress] = useState(0);
@@ -51,6 +54,10 @@ export default function VideoPlayerModal({
   const [isWheelSeeking, setIsWheelSeeking] = useState(false);
   const wheelTimerRef = useRef(null);
   const wheelSeekingTimeRef = useRef(null);
+
+  // Playback reporting & PlayCount Tracking
+  const playReportTimerRef = useRef(null);
+  const hasCountedPlayRef = useRef(false);
 
   const { launchPlayer } = useExternalPlayer();
 
@@ -89,6 +96,8 @@ export default function VideoPlayerModal({
     setProgress(0);
     setHoverScrubberTime(null);
     setIsWheelSeeking(false);
+    setIsVrActive(false);
+    hasCountedPlayRef.current = false;
 
     const videoEl = videoRef.current;
     if (!videoEl) return;
@@ -97,6 +106,29 @@ export default function VideoPlayerModal({
       hlsRef.current.destroy();
       hlsRef.current = null;
     }
+
+    // Report playback start to Jellyfin
+    jellyfin.reportPlayback(item.Id, 0, false, 'Started');
+
+    // Periodic progress reporting (every 10s)
+    if (playReportTimerRef.current) clearInterval(playReportTimerRef.current);
+    playReportTimerRef.current = setInterval(() => {
+      if (videoEl && !videoEl.paused && videoEl.currentTime > 0) {
+        jellyfin.reportPlayback(item.Id, videoEl.currentTime, false, 'Progress');
+        
+        // Count playback if played for >= 10s
+        if (!hasCountedPlayRef.current && videoEl.currentTime >= 10) {
+          hasCountedPlayRef.current = true;
+          const nextCount = (item.UserData?.PlayCount || 0) + 1;
+          if (onUpdateItem) {
+            onUpdateItem({
+              ...item,
+              UserData: { ...item.UserData, PlayCount: nextCount }
+            });
+          }
+        }
+      }
+    }, 10000);
 
     const directStreamUrl = jellyfin.getStreamUrl(item.Id);
     const hlsUrl = jellyfin.getHlsUrl(item.Id);
@@ -165,6 +197,10 @@ export default function VideoPlayerModal({
     setupDirectPlay();
 
     return () => {
+      if (playReportTimerRef.current) clearInterval(playReportTimerRef.current);
+      if (videoEl && videoEl.currentTime > 0) {
+        jellyfin.reportPlayback(item.Id, videoEl.currentTime, true, 'Stopped');
+      }
       videoEl.removeEventListener('error', handleDirectError);
       if (hlsRef.current) {
         hlsRef.current.destroy();
@@ -175,7 +211,23 @@ export default function VideoPlayerModal({
     };
   }, [isOpen, item?.Id]);
 
-  // Mouse Wheel Fast-Forward (Down) / Rewind (Up) with Direct Scrubber Trickplay
+  // Video Ended -> increment play count and next
+  const handleEnded = () => {
+    if (!hasCountedPlayRef.current) {
+      hasCountedPlayRef.current = true;
+      const nextCount = (item.UserData?.PlayCount || 0) + 1;
+      if (onUpdateItem) {
+        onUpdateItem({
+          ...item,
+          UserData: { ...item.UserData, Played: true, PlayCount: nextCount }
+        });
+      }
+    }
+    jellyfin.reportPlayback(item.Id, videoRef.current?.duration || 0, true, 'Stopped');
+    if (onNext) onNext();
+  };
+
+  // Mouse Wheel Fast-Forward / Rewind
   const handleWheel = useCallback((e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -324,7 +376,55 @@ export default function VideoPlayerModal({
     }
   };
 
+  // Toggle Favorite
+  const handleToggleFavorite = async () => {
+    if (!item?.Id) return;
+    const isFav = !!item.UserData?.IsFavorite;
+    const nextFav = !isFav;
+    if (onUpdateItem) {
+      onUpdateItem({ ...item, UserData: { ...item.UserData, IsFavorite: nextFav } });
+    }
+    try {
+      await jellyfin.toggleFavorite(item.Id, nextFav);
+    } catch (err) {
+      console.error('Failed to toggle favorite:', err);
+    }
+  };
+
+  // Toggle Played Status
+  const handleTogglePlayed = async () => {
+    if (!item?.Id) return;
+    const isPlayed = !!item.UserData?.Played;
+    const nextPlayed = !isPlayed;
+    const playCount = nextPlayed ? (item.UserData?.PlayCount || 0) + 1 : Math.max(0, (item.UserData?.PlayCount || 1) - 1);
+    if (onUpdateItem) {
+      onUpdateItem({ ...item, UserData: { ...item.UserData, Played: nextPlayed, PlayCount: playCount } });
+    }
+    try {
+      await jellyfin.markPlayed(item.Id, nextPlayed);
+    } catch (err) {
+      console.error('Failed to toggle played status:', err);
+    }
+  };
+
+  // Delete Video from Disk
+  const handleDeleteVideo = async () => {
+    if (!item?.Id) return;
+    if (!confirm(`确定要从服务器和物理磁盘中永久删除「${item.Name}」吗？\n警告：这将从物理硬盘上永久删除该文件！`)) {
+      return;
+    }
+    try {
+      await jellyfin.deleteItem(item.Id);
+      if (onDeleteItem) onDeleteItem(item.Id);
+      onClose();
+    } catch (err) {
+      alert(err.message || '删除失败');
+    }
+  };
+
   const posterUrl = item?.Id ? (jellyfin.getImageUrl(item.Id, item.ImageTags?.Backdrop || item.ImageTags?.Primary, 'Backdrop', 800, 80) || jellyfin.getImageUrl(item.Id, item.ImageTags?.Primary, 'Primary', 800, 80)) : null;
+  const isFavorite = !!item?.UserData?.IsFavorite;
+  const playCount = item?.UserData?.PlayCount || 0;
 
   return (
     <div 
@@ -340,27 +440,32 @@ export default function VideoPlayerModal({
         {...touchHandlers}
       >
         {/* Header Bar */}
-        <div className="p-3.5 border-b border-white/5 flex items-center justify-between bg-black/60 text-xs z-30 pt-[max(0.75rem,env(safe-area-inset-top))] flex-shrink-0">
+        <div className="p-3 sm:p-3.5 border-b border-white/5 flex items-center justify-between bg-black/60 text-xs z-30 pt-[max(0.75rem,env(safe-area-inset-top))] flex-shrink-0">
           <div className="flex items-center gap-2.5 min-w-0 pr-2">
             <Film size={18} className="text-cyan-400 flex-shrink-0" />
             <span className="font-bold text-white text-sm truncate">{item?.Name}</span>
             {item?.ProductionYear && (
               <span className="text-gray-400 font-mono hidden sm:inline">({item.ProductionYear})</span>
             )}
+            <span className="hidden xs:flex items-center gap-1 font-mono text-[11px] text-cyan-300 bg-white/5 px-2 py-0.5 rounded-full">
+              <Eye size={11} className="text-cyan-400" />
+              <span>{playCount}</span>
+            </span>
           </div>
 
-          <div className="flex items-center gap-2">
-            {/* VR Mode Launcher */}
+          <div className="flex items-center gap-1.5 sm:gap-2">
+            {/* Inline VR Mode */}
             <button
-              onClick={() => {
-                onClose();
-                if (onOpenVr) onOpenVr(item);
-              }}
-              className="px-2.5 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/40 text-amber-300 font-bold transition flex items-center gap-1.5"
-              title="🥽 开启 VR 180° / 360° 全景播放"
+              onClick={() => setIsVrActive(!isVrActive)}
+              className={`px-2.5 py-1.5 rounded-lg border font-bold transition flex items-center gap-1.5 ${
+                isVrActive 
+                  ? 'bg-amber-500/40 border-amber-400 text-amber-300 animate-pulse' 
+                  : 'bg-amber-500/20 hover:bg-amber-500/30 border-amber-400/40 text-amber-300'
+              }`}
+              title="🥽 开启/退出 VR 180° / 360° 全景模式"
             >
               <Glasses size={14} />
-              <span>开启 VR</span>
+              <span className="hidden sm:inline">{isVrActive ? '退出 VR' : '开启 VR'}</span>
             </button>
 
             {/* External Player Menu */}
@@ -439,6 +544,7 @@ export default function VideoPlayerModal({
           <video
             ref={videoRef}
             playsInline
+            crossOrigin="anonymous"
             className="w-full h-full object-contain cursor-pointer z-10"
             onClick={togglePlay}
             onWaiting={() => setIsLoading(true)}
@@ -447,7 +553,15 @@ export default function VideoPlayerModal({
               setIsPlaying(true);
             }}
             onPause={() => setIsPlaying(false)}
+            onEnded={handleEnded}
             onTimeUpdate={handleTimeUpdate}
+          />
+
+          {/* INLINE VR WEBGL CANVAS */}
+          <InlineVrCanvas
+            videoRef={videoRef}
+            isActive={isVrActive}
+            onClose={() => setIsVrActive(false)}
           />
 
           {/* Touch Gesture HUD Overlay */}
@@ -487,7 +601,7 @@ export default function VideoPlayerModal({
         </div>
 
         {/* Player Controls & Scrubber */}
-        <div className="p-4 bg-slate-900/95 border-t border-white/5 flex flex-col gap-3 pb-[max(1.25rem,env(safe-area-inset-bottom))] z-30 flex-shrink-0">
+        <div className="p-3 sm:p-4 bg-slate-900/95 border-t border-white/5 flex flex-col gap-2.5 pb-[max(1.25rem,env(safe-area-inset-bottom))] z-30 flex-shrink-0">
           {/* Scrubber Container with Real-Time Mouse Drag */}
           <div className="relative w-full">
             <TrickplayScrubberThumbnail
@@ -515,13 +629,13 @@ export default function VideoPlayerModal({
           </div>
 
           {/* Controls Row */}
-          <div className="flex items-center justify-between text-xs text-gray-300">
-            <div className="flex items-center gap-2 sm:gap-3">
+          <div className="flex items-center justify-between text-xs text-gray-300 gap-1 flex-wrap sm:flex-nowrap">
+            <div className="flex items-center gap-1.5 sm:gap-2">
               <button
                 onClick={togglePlay}
-                className="p-2.5 rounded-xl bg-jf-accent hover:bg-cyan-400 text-white transition shadow-lg"
+                className="p-2 sm:p-2.5 rounded-xl bg-jf-accent hover:bg-cyan-400 text-white transition shadow-lg"
               >
-                {isPlaying ? <Pause size={16} /> : <Play size={16} className="ml-0.5" />}
+                {isPlaying ? <Pause size={15} /> : <Play size={15} className="ml-0.5" />}
               </button>
 
               {onPrev && (
@@ -530,7 +644,7 @@ export default function VideoPlayerModal({
                   className="p-2 rounded-xl bg-black/40 hover:bg-white/10 text-gray-300 transition"
                   title="上一个"
                 >
-                  <SkipBack size={15} />
+                  <SkipBack size={14} />
                 </button>
               )}
 
@@ -540,7 +654,7 @@ export default function VideoPlayerModal({
                   className="p-2 rounded-xl bg-black/40 hover:bg-white/10 text-gray-300 transition"
                   title="下一个"
                 >
-                  <SkipForward size={15} />
+                  <SkipForward size={14} />
                 </button>
               )}
 
@@ -548,17 +662,46 @@ export default function VideoPlayerModal({
                 onClick={toggleMute}
                 className="p-2 rounded-xl bg-black/40 hover:bg-white/10 text-gray-300 transition"
               >
-                {isMuted ? <VolumeX size={16} className="text-gray-400" /> : <Volume2 size={16} className="text-cyan-400" />}
+                {isMuted ? <VolumeX size={14} className="text-gray-400" /> : <Volume2 size={14} className="text-cyan-400" />}
               </button>
 
-              <span className="font-mono text-gray-400 text-xs">
+              <span className="font-mono text-gray-400 text-[11px] hidden xs:inline">
                 {currentTimeText} / {durationText}
               </span>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
+              {/* Favorite */}
+              <button
+                onClick={handleToggleFavorite}
+                className={`p-2 rounded-xl border transition ${
+                  isFavorite ? 'bg-amber-500/20 border-amber-500/40 text-amber-400' : 'bg-black/40 border-white/5 text-gray-300 hover:text-amber-400'
+                }`}
+                title={isFavorite ? '取消收藏' : '加入最爱'}
+              >
+                <Star size={14} className={isFavorite ? 'fill-amber-400' : ''} />
+              </button>
+
+              {/* Played */}
+              <button
+                onClick={handleTogglePlayed}
+                className="p-2 rounded-xl bg-black/40 border border-white/5 text-gray-300 hover:text-cyan-400 transition"
+                title={item?.UserData?.Played ? '标记未播' : '标记已播'}
+              >
+                {item?.UserData?.Played ? <EyeOff size={14} /> : <Eye size={14} />}
+              </button>
+
+              {/* Delete Video */}
+              <button
+                onClick={handleDeleteVideo}
+                className="p-2 rounded-xl bg-black/40 border border-white/5 text-gray-400 hover:text-red-400 transition"
+                title="从服务器和磁盘删除"
+              >
+                <Trash2 size={14} />
+              </button>
+
+              {/* Speed */}
               <div className="flex items-center bg-black/40 px-2 py-1 rounded-xl border border-white/5 gap-1">
-                <span className="text-gray-400 text-[11px] hidden sm:inline">倍速:</span>
                 <select
                   value={playbackSpeed}
                   onChange={(e) => {
@@ -566,7 +709,7 @@ export default function VideoPlayerModal({
                     setPlaybackSpeed(sp);
                     if (videoRef.current) videoRef.current.playbackRate = sp;
                   }}
-                  className="bg-transparent text-cyan-300 focus:outline-none cursor-pointer font-mono font-bold"
+                  className="bg-transparent text-cyan-300 focus:outline-none cursor-pointer font-mono font-bold text-[11px]"
                 >
                   <option value="0.5" className="bg-slate-900">0.5x</option>
                   <option value="1.0" className="bg-slate-900">1.0x</option>
@@ -574,16 +717,16 @@ export default function VideoPlayerModal({
                   <option value="1.5" className="bg-slate-900">1.5x</option>
                   <option value="2.0" className="bg-slate-900">2.0x</option>
                   <option value="2.5" className="bg-slate-900">2.5x</option>
-                  <option value="3.0" className="bg-slate-900">3.0x</option>
                 </select>
               </div>
 
+              {/* Fullscreen */}
               <button
                 onClick={toggleFullscreen}
                 className="p-2 rounded-xl bg-black/40 hover:bg-white/10 text-gray-300 transition"
                 title="全屏"
               >
-                <Maximize size={16} />
+                <Maximize size={15} />
               </button>
             </div>
           </div>

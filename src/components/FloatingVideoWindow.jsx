@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import Hls from 'hls.js';
 import { jellyfin } from '../api/jellyfinClient';
-import { getTrickplayStyle } from '../utils/trickplay';
 import { calculateSlotStyle } from '../utils/windowLayout';
 import { useExternalPlayer } from '../hooks/useExternalPlayer';
 import { useTouchGestures } from '../hooks/useTouchGestures';
@@ -520,7 +519,7 @@ export default function FloatingVideoWindow({
           <span className="font-bold text-white text-xs truncate max-w-[160px] sm:max-w-[220px]" title={item?.Name}>
             {item?.Name || '视频预览'}
           </span>
-          <span className="px-1.5 py-0.2 rounded bg-white/10 text-[10px] font-mono text-cyan-300 font-bold">
+          <span className="px-1.5 py-0.5 rounded bg-white/10 text-[10px] font-mono text-cyan-300 font-bold">
             {slotIndex === 0 ? '主窗' : `副窗 #${slotIndex}`}
           </span>
         </div>
@@ -657,7 +656,7 @@ export default function FloatingVideoWindow({
             src={coverUrl}
             alt=""
             className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-300 pointer-events-none ${
-              isLoading ? 'opacity-60 blur-xs' : 'opacity-0'
+              isLoading ? 'opacity-60 blur-sm' : 'opacity-0'
             }`}
           />
         )}

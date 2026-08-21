@@ -549,7 +549,7 @@ export default function VideoPlayerModal({
                 src={posterUrl} 
                 alt="Poster" 
                 className={`relative max-w-full max-h-full object-contain transition-opacity duration-500 ${
-                  isLoading ? 'opacity-70 blur-xs' : 'opacity-0'
+                  isLoading ? 'opacity-70 blur-sm' : 'opacity-0'
                 }`} 
               />
             </div>

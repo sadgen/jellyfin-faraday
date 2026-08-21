@@ -64,6 +64,7 @@ export default function App() {
   // Loading state
   const [isLoading, setIsLoading] = useState(false);
   const [errorText, setErrorText] = useState('');
+  const [lastSyncTime, setLastSyncTime] = useState(null);
 
   // Kanban Items Stream
   const [kanbanPool, setKanbanPool] = useState([]);
@@ -117,9 +118,19 @@ export default function App() {
     localStorage.setItem(STORAGE_KEY_FILTER, mode);
   };
 
+  // 竞态守卫与跨渲染引用（声明在 hydration effect 之前，供其内部读取）
+  const fetchRequestIdRef = useRef(0);
+  const userViewsRef = useRef(userViews);
+  const selectedViewIdRef = useRef(selectedViewId);
+  useEffect(() => { userViewsRef.current = userViews; }, [userViews]);
+  useEffect(() => { selectedViewIdRef.current = selectedViewId; }, [selectedViewId]);
+
   // 1. INSTANT LOCAL CACHE HYDRATION & USER VIEWS INITIALIZATION
+  // 仅在登录态变化时执行一次；视图/排序变化不重复触发全量拉取（防启动 3 次重复请求）
   useEffect(() => {
     if (!jellyfin.auth.isConfigured) return;
+
+    const savedViewId = localStorage.getItem(STORAGE_KEY_VIEW) || '';
 
     loadFullCache().then(cache => {
       if (cache.items && cache.items.length > 0) {
@@ -127,9 +138,10 @@ export default function App() {
         setMediaItems(sortedCached);
         setTotalRecordCount(cache.count || sortedCached.length);
       }
+      if (cache.lastSyncTime) setLastSyncTime(cache.lastSyncTime);
       if (cache.views && cache.views.length > 0) {
         setUserViews(cache.views);
-        if (!selectedViewId) {
+        if (!savedViewId && !selectedViewIdRef.current) {
           const firstId = cache.views[0]?.Id || 'all';
           setSelectedViewId(firstId);
           localStorage.setItem(STORAGE_KEY_VIEW, firstId);
@@ -140,7 +152,7 @@ export default function App() {
     jellyfin.getUserViews().then(views => {
       if (views && views.length > 0) {
         setUserViews(views);
-        if (!selectedViewId) {
+        if (!savedViewId && !selectedViewIdRef.current) {
           const firstId = views[0]?.Id || 'all';
           setSelectedViewId(firstId);
           localStorage.setItem(STORAGE_KEY_VIEW, firstId);
@@ -149,12 +161,19 @@ export default function App() {
     }).catch(err => {
       console.warn('Failed to fetch user views:', err);
     });
-  }, [isAuthenticated, selectedViewId, sortMethod]);
+  }, [isAuthenticated]);
 
   // 2. Query Media Items & Save to Local Cache
+  // 竞态守卫：递增请求序号，慢的旧响应后到时直接丢弃，防止旧视图数据覆盖新状态
+
   const fetchAllMedia = useCallback(async (viewId, search, status, sort, genre, year, letter, isBackground = false) => {
     if (!jellyfin.auth.isConfigured) return;
     if (!viewId) return;
+
+    const requestId = ++fetchRequestIdRef.current;
+    const isStale = () => requestId !== fetchRequestIdRef.current;
+    // 缓存指纹：仅当无任何筛选/搜索条件（全量未过滤视图）时才允许覆写全库缓存
+    const isUnfilteredQuery = !search && (!status || status === 'all') && !genre && !year && !letter;
 
     if (!isBackground) setIsLoading(true);
     setErrorText('');
@@ -171,6 +190,8 @@ export default function App() {
         startIndex: 0,
         limit: 150
       });
+
+      if (isStale()) return; // 已有更新的请求发出，丢弃本次响应
 
       const initialItems = firstPageData.Items || [];
       const total = firstPageData.TotalRecordCount || initialItems.length;
@@ -193,23 +214,28 @@ export default function App() {
           limit: 0
         });
 
+        if (isStale()) return;
+
         if (fullData.Items && fullData.Items.length > 0) {
           setMediaItems(fullData.Items);
           setTotalRecordCount(fullData.TotalRecordCount || fullData.Items.length);
-          saveFullCache(fullData.Items, userViews);
+          // 仅全量未筛选结果才写入全库缓存；筛选/搜索子集只更新内存状态
+          if (isUnfilteredQuery) {
+            saveFullCache(fullData.Items, userViewsRef.current);
+          }
         }
-      } else if (initialItems.length > 0) {
-        saveFullCache(initialItems, userViews);
+      } else if (initialItems.length > 0 && isUnfilteredQuery) {
+        saveFullCache(initialItems, userViewsRef.current);
       }
     } catch (err) {
       console.error('Failed to load media items:', err);
-      if (!isBackground) {
+      if (!isBackground && !isStale()) {
         setErrorText(err.message || '获取媒体列表失败');
       }
     } finally {
-      if (!isBackground) setIsLoading(false);
+      if (!isBackground && !isStale()) setIsLoading(false);
     }
-  }, [userViews]);
+  }, []);
 
   // Debounced search / filter trigger
   const searchTimeoutRef = useRef(null);
@@ -301,6 +327,46 @@ export default function App() {
     });
   }, []);
 
+  // 影院/VR Modal 上一个·下一个：合并查找域（mediaItems ∪ kanbanPool ∪ floatingWindows），
+  // 悬浮窗/看板池来源的条目不在 mediaItems 时也能定位相邻条目
+  const modalNavPool = useMemo(() => {
+    const seen = new Set();
+    const pool = [];
+    for (const it of [...mediaItems, ...kanbanPool, ...floatingWindows.map(w => w.item)]) {
+      if (it?.Id && !seen.has(it.Id)) {
+        seen.add(it.Id);
+        pool.push(it);
+      }
+    }
+    return pool;
+  }, [mediaItems, kanbanPool, floatingWindows]);
+
+  const navigateModalItem = useCallback((currentItem, direction) => {
+    if (!currentItem?.Id || modalNavPool.length === 0) return;
+    const idx = modalNavPool.findIndex(it => it.Id === currentItem.Id);
+    if (idx === -1) {
+      setModalPlayingItem(modalNavPool[0]);
+      return;
+    }
+    const nextIdx = idx + direction;
+    if (nextIdx >= 0 && nextIdx < modalNavPool.length) {
+      setModalPlayingItem(modalNavPool[nextIdx]);
+    }
+  }, [modalNavPool]);
+
+  const navigateVrItem = useCallback((currentItem, direction) => {
+    if (!currentItem?.Id || modalNavPool.length === 0) return;
+    const idx = modalNavPool.findIndex(it => it.Id === currentItem.Id);
+    if (idx === -1) {
+      setVrPlayingItem(modalNavPool[0]);
+      return;
+    }
+    const nextIdx = idx + direction;
+    if (nextIdx >= 0 && nextIdx < modalNavPool.length) {
+      setVrPlayingItem(modalNavPool[nextIdx]);
+    }
+  }, [modalNavPool]);
+
   // Open 3 random videos simultaneously (Tampermonkey 随机3窗)
   const handleOpenRandom3Windows = useCallback(() => {
     const pool = mediaItems.length > 0 ? mediaItems : kanbanPool;
@@ -309,7 +375,12 @@ export default function App() {
     const unplayed = pool.filter(it => !it.UserData?.Played);
     const candidatePool = unplayed.length >= 3 ? unplayed : pool;
 
-    const shuffled = [...candidatePool].sort(() => 0.5 - Math.random());
+    // Fisher-Yates 均匀洗牌（sort(() => 0.5 - Math.random()) 是有偏洗牌）
+    const shuffled = [...candidatePool];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
     const selected3 = shuffled.slice(0, 3);
 
     setFloatingWindows(
@@ -424,10 +495,16 @@ export default function App() {
   };
 
   const handleLogout = () => {
+    // 递增请求序号使所有在途 fetch 响应失效（登出后不再写入状态/缓存）
+    fetchRequestIdRef.current++;
     setIsAuthenticated(false);
     setMediaItems([]);
+    setTotalRecordCount(0);
     setUserViews([]);
+    setKanbanPool([]);
     setFloatingWindows([]);
+    localStorage.removeItem(STORAGE_KEY_VIEW);
+    setSelectedViewId('');
     setIsLoginModalOpen(true);
   };
 
@@ -476,6 +553,7 @@ export default function App() {
               }}
               onOpenRandom3Windows={handleOpenRandom3Windows}
               onPlaySingleItem={handlePlaySingleItem}
+              onOpenFloatingWindow={handleOpenFloatingWindow}
               onPlayModal={(item) => setModalPlayingItem(item)}
               onPlayVr={(item) => setVrPlayingItem(item)}
               onUpdateItem={handleUpdateItem}
@@ -540,18 +618,8 @@ export default function App() {
           isOpen={!!modalPlayingItem}
           item={modalPlayingItem}
           onClose={() => setModalPlayingItem(null)}
-          onNext={() => {
-            const idx = mediaItems.findIndex(it => it.Id === modalPlayingItem?.Id);
-            if (idx >= 0 && idx < mediaItems.length - 1) {
-              setModalPlayingItem(mediaItems[idx + 1]);
-            }
-          }}
-          onPrev={() => {
-            const idx = mediaItems.findIndex(it => it.Id === modalPlayingItem?.Id);
-            if (idx > 0) {
-              setModalPlayingItem(mediaItems[idx - 1]);
-            }
-          }}
+          onNext={() => navigateModalItem(modalPlayingItem, 1)}
+          onPrev={() => navigateModalItem(modalPlayingItem, -1)}
           onUpdateItem={handleUpdateItem}
           onDeleteItem={handleDeleteItem}
           onOpenVr={(item) => setVrPlayingItem(item)}
@@ -562,18 +630,8 @@ export default function App() {
           isOpen={!!vrPlayingItem}
           item={vrPlayingItem}
           onClose={() => setVrPlayingItem(null)}
-          onNext={() => {
-            const idx = mediaItems.findIndex(it => it.Id === vrPlayingItem?.Id);
-            if (idx >= 0 && idx < mediaItems.length - 1) {
-              setVrPlayingItem(mediaItems[idx + 1]);
-            }
-          }}
-          onPrev={() => {
-            const idx = mediaItems.findIndex(it => it.Id === vrPlayingItem?.Id);
-            if (idx > 0) {
-              setVrPlayingItem(mediaItems[idx - 1]);
-            }
-          }}
+          onNext={() => navigateVrItem(vrPlayingItem, 1)}
+          onPrev={() => navigateVrItem(vrPlayingItem, -1)}
         />
 
         {/* Login Modal */}
@@ -591,6 +649,7 @@ export default function App() {
           onRefreshLibrary={() => fetchAllMedia(selectedViewId, searchKeyword, statusFilter, sortMethod, selectedGenre, selectedYear, selectedLetter)}
           isRefreshing={isLoading}
           totalItemsCount={totalRecordCount}
+          lastSyncTime={lastSyncTime}
         />
 
         {/* Metadata Editor Modal */}

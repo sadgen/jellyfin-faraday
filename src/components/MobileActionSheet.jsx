@@ -44,7 +44,7 @@ export default function MobileActionSheet({
 
         {/* Item Header Banner */}
         <div className="flex items-center gap-3 border-b border-white/5 pb-3">
-          <div className="w-11 h-15 rounded-lg overflow-hidden bg-black/60 border border-white/10 flex-shrink-0">
+          <div className="w-11 h-[60px] rounded-lg overflow-hidden bg-black/60 border border-white/10 flex-shrink-0">
             {posterUrl ? (
               <img src={posterUrl} alt={item.Name} className="w-full h-full object-cover" />
             ) : (

@@ -130,6 +130,11 @@ export function useSessionQueue(items = [], filterMode = 'pure_random', activeTi
         consumedIdsSetRef.current.add(candidate.Id);
         break;
       }
+
+      // 与其他磁贴重复的候选不丢弃，回填队尾（池小时避免加速枯竭）
+      remainingQueueRef.current.push(candidate);
+      // 防御：整轮都是重复候选时退出（队列已转一圈）
+      if (remainingQueueRef.current.every(it => it?.Id === candidate.Id)) break;
     }
 
     // If queue is exhausted, refill it by re-shuffling the pool

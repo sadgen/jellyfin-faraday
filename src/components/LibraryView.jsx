@@ -169,7 +169,7 @@ function MediaCard({
         >
           {/* Upward arrow if positioned below */}
           {isNearTop && (
-            <div className="w-0 h-0 border-x-6 sm:border-x-8 border-x-transparent border-b-6 sm:border-b-8 border-b-cyan-400 mb-0.5" />
+            <div className="w-0 h-0 border-x-[6px] sm:border-x-8 border-x-transparent border-b-[6px] sm:border-b-8 border-b-cyan-400 mb-0.5" />
           )}
 
           {/* Frame: 190x107 on Mobile, 480x270 on Desktop */}
@@ -182,7 +182,7 @@ function MediaCard({
 
           {/* Downward arrow if positioned above */}
           {!isNearTop && (
-            <div className="w-0 h-0 border-x-6 sm:border-x-8 border-x-transparent border-t-6 sm:border-t-8 border-t-cyan-400 mt-0.5" />
+            <div className="w-0 h-0 border-x-[6px] sm:border-x-8 border-x-transparent border-t-[6px] sm:border-t-8 border-t-cyan-400 mt-0.5" />
           )}
         </div>
       )}
@@ -424,7 +424,7 @@ function MediaCard({
             {durationText && <span className="hidden sm:inline">• {durationText}</span>}
           </div>
           {item.OfficialRating && (
-            <span className="px-1 py-0.2 bg-white/10 rounded text-[9px] font-mono text-gray-300">
+            <span className="px-1 py-0.5 bg-white/10 rounded text-[9px] font-mono text-gray-300">
               {item.OfficialRating}
             </span>
           )}
@@ -466,7 +466,7 @@ function MediaListRow({
       className="group flex items-center justify-between p-2.5 px-3 sm:px-4 bg-slate-900/40 hover:bg-slate-800/80 border border-white/5 hover:border-cyan-500/40 rounded-xl transition cursor-pointer text-xs"
     >
       <div className="flex items-center gap-3 min-w-0 flex-1 pr-2">
-        <div className="relative w-8 h-12 sm:w-9 sm:h-13 rounded-lg overflow-hidden bg-black/60 border border-white/10 flex-shrink-0">
+        <div className="relative w-8 h-12 sm:w-9 sm:h-[52px] rounded-lg overflow-hidden bg-black/60 border border-white/10 flex-shrink-0">
           {posterUrl ? (
             <img src={posterUrl} alt={item.Name} className="w-full h-full object-cover" />
           ) : (
@@ -558,6 +558,7 @@ export default function LibraryView({
   onEnterKanban,
   onOpenRandom3Windows,
   onPlaySingleItem,
+  onOpenFloatingWindow,
   onPlayModal,
   onPlayVr,
   onUpdateItem,
@@ -596,11 +597,11 @@ export default function LibraryView({
 
   // Display items
   const displayItems = useMemo(() => {
-    if (activeSubTab === 'duplicates' || statusFilter === 'duplicates') {
+    if (activeSubTab === 'duplicates') {
       return items.filter(it => duplicateItemIds.has(it.Id));
     }
     return items;
-  }, [items, activeSubTab, statusFilter, duplicateItemIds]);
+  }, [items, activeSubTab, duplicateItemIds]);
 
   // Favorite toggle
   const handleToggleFavorite = async (item) => {
@@ -737,7 +738,7 @@ export default function LibraryView({
                   <Icon size={12} />
                   <span>{tab.label}</span>
                   {isDup && duplicateCount > 0 && (
-                    <span className="px-1 py-0.2 rounded-full bg-red-500 text-[9px] text-white">
+                    <span className="px-1 py-0.5 rounded-full bg-red-500 text-[9px] text-white">
                       {duplicateCount}
                     </span>
                   )}
@@ -846,7 +847,7 @@ export default function LibraryView({
         <div className="flex items-center justify-between gap-1 overflow-x-auto py-0.5 border-t border-white/5 text-[10px] font-mono text-gray-400">
           <button
             onClick={() => onSelectLetter('')}
-            className={`px-1 py-0.2 rounded hover:text-white transition flex-shrink-0 ${
+            className={`px-1 py-0.5 rounded hover:text-white transition flex-shrink-0 ${
               !selectedLetter ? 'bg-cyan-500/20 text-cyan-300 font-bold' : ''
             }`}
           >
@@ -856,7 +857,7 @@ export default function LibraryView({
             <button
               key={letter}
               onClick={() => onSelectLetter(selectedLetter === letter ? '' : letter)}
-              className={`px-1 py-0.2 rounded hover:text-white hover:bg-white/10 transition flex-shrink-0 ${
+              className={`px-1 py-0.5 rounded hover:text-white hover:bg-white/10 transition flex-shrink-0 ${
                 selectedLetter === letter ? 'bg-jf-accent text-white font-bold' : ''
               }`}
             >
@@ -1011,7 +1012,7 @@ export default function LibraryView({
         onClose={() => setActionSheetItem(null)}
         onPlay={onPlaySingleItem}
         onPlayVr={onPlayVr}
-        onOpenFloating={onPlaySingleItem}
+        onOpenFloating={onOpenFloatingWindow || onPlaySingleItem}
         onToggleFavorite={handleToggleFavorite}
         onTogglePlayed={handleTogglePlayed}
         onOpenMetadataEditor={onOpenMetadataEditor}

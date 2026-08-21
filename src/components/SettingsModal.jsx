@@ -1,5 +1,6 @@
 import React from 'react';
 import { jellyfin } from '../api/jellyfinClient';
+import { clearLibraryCache } from '../utils/mediaCache';
 import { Settings, Server, User, LogOut, RefreshCw, ShieldCheck, X, HardDrive, Clock, Trash2 } from 'lucide-react';
 
 export default function SettingsModal({
@@ -108,9 +109,12 @@ export default function SettingsModal({
 
           {/* Switch server / Logout */}
           <button
-            onClick={() => {
+            onClick={async () => {
               if (confirm('确定要清除本地缓存并退出登录吗？')) {
                 jellyfin.clearAuth();
+                // 清空 IndexedDB 媒体库缓存与 jf_* 本地键，防止换账号后冷启动泄露上一账号媒体库
+                await clearLibraryCache();
+                localStorage.removeItem('jf_last_selected_view');
                 if (onLogout) onLogout();
                 onClose();
               }

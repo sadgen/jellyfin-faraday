@@ -6,6 +6,10 @@ export default {
   ],
   darkMode: 'class',
   theme: {
+    // xs 断点：<420px 的紧凑手机场景（时间显示、播放数徽章等在此之下隐藏）
+    screens: {
+      xs: '420px'
+    },
     extend: {
       colors: {
         jf: {
@@ -23,5 +27,8 @@ export default {
       }
     },
   },
-  plugins: [],
+  plugins: [
+    // tailwindcss-animate：animate-in / fade-in / zoom-in-95 / slide-in-from-bottom 等入场动画类
+    require('tailwindcss-animate')
+  ],
 }

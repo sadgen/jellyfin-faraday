@@ -19,7 +19,7 @@ STAGED_FILES=$(git diff --cached --name-only | grep -v "scripts/pre-commit-check
 
 if [ -n "$STAGED_FILES" ]; then
   for pattern in "${SENSITIVE_PATTERNS[@]}"; do
-    MATCHES=$(git diff --cached $STAGED_FILES | grep -E "^\+[[:space:]]*.*$pattern" || true)
+    MATCHES=$(git diff --cached -- "$STAGED_FILES" | grep -E "^\+[[:space:]]*.*$pattern" || true)
     if [ -n "$MATCHES" ]; then
       echo -e "\033[31m[PRIVACY SECURITY ALERT] Detected potential secret/private domain pattern: '$pattern'\033[0m"
       echo "$MATCHES"

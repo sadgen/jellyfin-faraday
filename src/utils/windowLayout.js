@@ -25,9 +25,13 @@ export function calculateSlotStyle(slotIndex) {
     const h = (w * 9 / 16) + uiH;
     const left = Math.max(12, (window.innerWidth - w) / 2);
     // Stack with slight offset for tabs or docked at bottom/top
-    const top = Math.min(
-      window.innerHeight - h - 70,
-      headerOffset + 10 + slotIndex * 35
+    // Math.max 兜底：横屏小屏时 innerHeight - h - 70 可能为负，防止窗口顶出屏幕
+    const top = Math.max(
+      headerOffset,
+      Math.min(
+        window.innerHeight - h - 70,
+        headerOffset + 10 + slotIndex * 35
+      )
     );
     return { left: Math.round(left), top: Math.round(top), width: Math.round(w), height: Math.round(h) };
   }

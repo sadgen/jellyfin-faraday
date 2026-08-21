@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import Hls from 'hls.js';
 import { jellyfin } from '../api/jellyfinClient';
-import { getTrickplayStyle } from '../utils/trickplay';
 import { useExternalPlayer } from '../hooks/useExternalPlayer';
 import { useTouchGestures } from '../hooks/useTouchGestures';
 import TrickplayScrubberThumbnail from './TrickplayScrubberThumbnail';
@@ -504,7 +503,7 @@ export default function VideoTile({
             alt={item?.Name || 'Poster'}
             className={`relative max-w-full max-h-full object-contain transition-all duration-500 ${
               isLoading 
-                ? 'opacity-60 blur-xs scale-100' 
+                ? 'opacity-60 blur-sm scale-100' 
                 : !isPlaying 
                   ? 'opacity-80 scale-100' 
                   : 'opacity-0 scale-95'
@@ -677,13 +676,13 @@ export default function VideoTile({
 
             {/* PlayCount & Rating Badges */}
             <div className="hidden sm:flex items-center gap-1">
-              <span className="px-1.5 py-0.2 rounded bg-black/60 border border-white/10 text-[10px] font-mono text-cyan-300 flex items-center gap-0.5" title={`已播 ${playCount} 次`}>
+              <span className="px-1.5 py-0.5 rounded bg-black/60 border border-white/10 text-[10px] font-mono text-cyan-300 flex items-center gap-0.5" title={`已播 ${playCount} 次`}>
                 <Eye size={10} className="text-cyan-400" />
                 <span>{playCount}</span>
               </span>
 
               {item?.CommunityRating && (
-                <span className="px-1.5 py-0.2 rounded bg-black/60 border border-white/10 text-[10px] font-mono text-amber-300 flex items-center gap-0.5">
+                <span className="px-1.5 py-0.5 rounded bg-black/60 border border-white/10 text-[10px] font-mono text-amber-300 flex items-center gap-0.5">
                   <Star size={10} className="fill-amber-400 text-amber-400" />
                   <span>{item.CommunityRating.toFixed(1)}</span>
                 </span>

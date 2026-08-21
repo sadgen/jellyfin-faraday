@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import Hls from 'hls.js';
 import { jellyfin } from '../api/jellyfinClient';
@@ -6,8 +6,8 @@ import { getTrickplayStyle } from '../utils/trickplay';
 import TrickplayScrubberThumbnail from './TrickplayScrubberThumbnail';
 import { 
   X, Play, Pause, Volume2, VolumeX, Maximize, 
-  RotateCcw, Compass, Eye, Glasses, Sliders, 
-  FastForward, SkipBack, SkipForward, HelpCircle
+  RotateCcw, Glasses, 
+  FastForward, SkipBack, SkipForward
 } from 'lucide-react';
 
 const VR_MODES = [

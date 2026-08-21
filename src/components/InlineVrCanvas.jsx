@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
-import { RotateCcw, Glasses, Compass, X, Smartphone } from 'lucide-react';
+import { RotateCcw, Glasses, X, Smartphone } from 'lucide-react';
 
 export const VR_MODES = [
   { id: '180_3d_sbs', label: '180° 3D (左右 SBS)' },

@@ -33,7 +33,9 @@ export default function TrickplayScrubberThumbnail({
   const thumbHeight = Math.round(thumbWidth * 9 / 16);
 
   const rawX = (hoverPercent || 0) * cWidth;
-  const left = Math.max(thumbWidth / 2 + 4, Math.min(cWidth - thumbWidth / 2 - 4, rawX));
+  // 窄容器时 min/max 边界可能倒挂（cWidth < thumbWidth），先归一化再 clamp，防止气泡溢出进度条左侧
+  const halfThumb = Math.min(thumbWidth / 2 + 4, cWidth / 2);
+  const left = Math.max(halfThumb, Math.min(cWidth - halfThumb, rawX));
 
   const isBelow = position === 'below';
 
@@ -46,7 +48,7 @@ export default function TrickplayScrubberThumbnail({
     >
       {/* Upward pointer arrow when positioned below scrubber */}
       {isBelow && (
-        <div className="w-0 h-0 border-x-6 sm:border-x-8 border-x-transparent border-b-6 sm:border-b-8 border-b-cyan-400 mb-0.5" />
+        <div className="w-0 h-0 border-x-[6px] sm:border-x-8 border-x-transparent border-b-[6px] sm:border-b-8 border-b-cyan-400 mb-0.5" />
       )}
 
       {/* Thumbnail Window */}
@@ -68,7 +70,7 @@ export default function TrickplayScrubberThumbnail({
 
       {/* Downward pointer arrow when positioned above scrubber */}
       {!isBelow && (
-        <div className="w-0 h-0 border-x-6 sm:border-x-8 border-x-transparent border-t-6 sm:border-t-8 border-t-cyan-400 mt-0.5" />
+        <div className="w-0 h-0 border-x-[6px] sm:border-x-8 border-x-transparent border-t-[6px] sm:border-t-8 border-t-cyan-400 mt-0.5" />
       )}
     </div>
   );

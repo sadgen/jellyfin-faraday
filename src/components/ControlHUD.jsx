@@ -1,9 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState } from 'react';
 import { 
   Shuffle, Volume2, VolumeX, Settings, 
-  Sparkles, Star, TrendingDown, Clock, RefreshCw,
-  Gauge, LayoutGrid, Folder, ArrowLeft, Eye,
-  Maximize, Minimize, Sliders
+  Star, TrendingDown, Clock,
+  Gauge, ArrowLeft
 } from 'lucide-react';
 
 const FILTER_MODES = [
@@ -38,8 +37,8 @@ export default function ControlHUD({
 
   return (
     <>
-      {/* 1. TOP-LEFT FLOATING ACTION: Return to Media Library (Clean, Non-Obstructive) */}
-      <div className="fixed top-3 left-3 z-40 flex items-center gap-2">
+      {/* 1. TOP-LEFT FLOATING ACTION: Return to Media Library (OnePlus 12 Notch Safe) */}
+      <div className="fixed top-[max(0.75rem,env(safe-area-inset-top))] left-[max(0.75rem,env(safe-area-inset-left))] z-40 flex items-center gap-2">
         <button
           onClick={onOpenLibraryView}
           className="group flex items-center gap-2 px-3.5 py-2 rounded-2xl bg-black/60 hover:bg-slate-900/90 text-white backdrop-blur-md border border-white/15 hover:border-cyan-400 shadow-2xl transition transform hover:scale-[1.02] text-xs font-semibold"
@@ -60,48 +59,44 @@ export default function ControlHUD({
         </button>
       </div>
 
-      {/* 2. TOP-RIGHT FLOATING CONTROLS: Tile Layout, Mute, Speed, Settings */}
-      <div className="fixed top-3 right-3 z-40 flex items-center gap-1.5 text-xs text-gray-200">
-        
-        {/* Tile Count Selector (1, 2, 4 窗) */}
-        <div className="flex items-center bg-black/60 backdrop-blur-md rounded-2xl p-1 border border-white/15 shadow-2xl gap-0.5">
+      {/* 2. TOP-RIGHT FLOATING ACTION HUD (OnePlus 12 Notch & Corner Safe) */}
+      <div className="fixed top-[max(0.75rem,env(safe-area-inset-top))] right-[max(0.75rem,env(safe-area-inset-right))] z-40 flex items-center gap-2 text-xs">
+        {/* Tile Layout Selector */}
+        <div className="flex items-center bg-black/60 backdrop-blur-md border border-white/15 rounded-2xl p-1 shadow-2xl">
           {[1, 2, 4].map(count => (
             <button
               key={count}
               onClick={() => onTileCountChange(count)}
-              className={`px-2.5 py-1 rounded-xl font-mono text-xs font-bold transition-all ${
+              className={`px-2.5 py-1 rounded-xl font-bold font-mono transition ${
                 activeTileCount === count
-                  ? 'bg-jf-accent text-white shadow-lg shadow-cyan-500/30'
-                  : 'text-gray-400 hover:text-white hover:bg-white/10'
+                  ? 'bg-cyan-500 text-white shadow-md shadow-cyan-500/30'
+                  : 'text-gray-400 hover:text-white'
               }`}
-              title={`切换为 ${count} 视口`}
             >
               {count}窗
             </button>
           ))}
         </div>
 
-        {/* Filter Mode Dropdown */}
+        {/* Filter Mode Selector */}
         <div className="relative">
           <button
             onClick={() => setShowFilterMenu(!showFilterMenu)}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-2xl bg-black/60 hover:bg-slate-900/90 backdrop-blur-md border border-white/15 text-gray-300 hover:text-cyan-300 shadow-2xl transition"
-            title="选择随机播放筛选模式"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-2xl bg-black/60 hover:bg-slate-900/90 backdrop-blur-md border border-white/15 text-gray-200 shadow-2xl font-medium"
+            title="选择随机播放算法"
           >
-            <Sliders size={14} className="text-cyan-400" />
-            <span className="hidden md:inline font-medium">
-              {FILTER_MODES.find(m => m.id === filterMode)?.label || '随机模式'}
-            </span>
+            <Shuffle size={13} className="text-cyan-400" />
+            <span className="hidden sm:inline">{FILTER_MODES.find(m => m.id === filterMode)?.label || '随机模式'}</span>
           </button>
 
           {showFilterMenu && (
             <div 
-              className="absolute right-0 top-10 w-44 glass-panel rounded-2xl p-1.5 shadow-2xl z-50 text-xs flex flex-col gap-1 border border-white/15 animate-in fade-in zoom-in-95 duration-150"
+              className="absolute right-0 top-10 w-44 glass-panel rounded-2xl p-1 shadow-2xl z-50 text-xs flex flex-col gap-1 border border-white/15 animate-in fade-in zoom-in-95 duration-150"
               onClick={(e) => e.stopPropagation()}
             >
               {FILTER_MODES.map(mode => {
                 const Icon = mode.icon;
-                const isActive = filterMode === mode.id;
+                const isSelected = filterMode === mode.id;
                 return (
                   <button
                     key={mode.id}
@@ -109,14 +104,14 @@ export default function ControlHUD({
                       onFilterModeChange(mode.id);
                       setShowFilterMenu(false);
                     }}
-                    className={`w-full px-3 py-2 rounded-xl text-left flex items-center gap-2.5 transition ${
-                      isActive ? 'bg-cyan-500/20 text-cyan-300 font-bold border border-cyan-500/30' : 'text-gray-300 hover:bg-white/10'
+                    className={`flex items-center gap-2 px-2.5 py-2 rounded-xl text-left transition ${
+                      isSelected ? 'bg-cyan-500/20 text-cyan-300 font-bold' : 'hover:bg-white/10 text-gray-300'
                     }`}
                   >
-                    <Icon size={14} className={isActive ? 'text-cyan-400' : 'text-gray-400'} />
-                    <div className="flex flex-col min-w-0">
+                    <Icon size={14} className={isSelected ? 'text-cyan-400' : 'text-gray-400'} />
+                    <div className="flex flex-col">
                       <span>{mode.label}</span>
-                      <span className="text-[10px] text-gray-400 font-normal">{mode.desc}</span>
+                      <span className="text-[10px] text-gray-500 font-normal">{mode.desc}</span>
                     </div>
                   </button>
                 );

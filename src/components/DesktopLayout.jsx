@@ -75,6 +75,7 @@ export default function DesktopLayout({
                 item={item}
                 isGlobalMuted={isGlobalMuted}
                 playbackSpeed={playbackSpeed}
+                onPlaybackSpeedChange={onPlaybackSpeedChange}
                 onSkip={consumeNext}
                 onUpdateItem={updateItemInTiles}
                 onDeleteItem={onDeleteItem}

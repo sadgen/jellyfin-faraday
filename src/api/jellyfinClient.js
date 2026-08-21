@@ -122,7 +122,11 @@ export class JellyfinClient {
   }
 
   /**
-   * Connect using existing API Key / Token
+   * Connect using existing API Key / Token.
+   * 多用户安全选择（audit #20）：不再默认取 users[0]。
+   * - 单用户：直接落盘登录，返回 { status: 'connected', auth }
+   * - 多用户：返回 { status: 'select_user', users }（不写任何状态），
+   *   由 UI 展示用户列表，用户点选后调用 completeApiKeyLogin 完成登录
    */
   async connectWithApiKey(serverUrl, apiKey) {
     const cleanUrl = this.sanitizeServerUrl(serverUrl);
@@ -145,15 +149,29 @@ export class JellyfinClient {
       throw new Error('未在服务器上找到可用用户');
     }
 
-    const user = users[0];
+    if (users.length > 1) {
+      return {
+        status: 'select_user',
+        serverUrl: cleanUrl,
+        users: users.map(u => ({ Id: u.Id, Name: u.Name }))
+      };
+    }
+
+    const auth = this.completeApiKeyLogin(cleanUrl, apiKey, users[0]);
+    return { status: 'connected', auth };
+  }
+
+  /**
+   * 用指定用户完成 API Key 登录（第二阶段，落盘凭据）
+   */
+  completeApiKeyLogin(serverUrl, apiKey, user) {
     const authData = {
-      serverUrl: cleanUrl,
+      serverUrl,
       token: apiKey,
       userId: user.Id,
       username: user.Name,
       isConfigured: true
     };
-
     return this.saveAuth(authData);
   }
 

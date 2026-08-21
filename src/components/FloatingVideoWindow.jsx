@@ -9,7 +9,7 @@ import InlineVrCanvas from './InlineVrCanvas';
 import { 
   Play, Pause, SkipForward, Volume2, VolumeX, Maximize, 
   X, ExternalLink, Film, Star, Eye, EyeOff, Image as ImageIcon,
-  Glasses, Trash2, FastForward, Sun, Zap
+  Glasses, Trash2, FastForward, Sun, Zap, Gauge
 } from 'lucide-react';
 
 export default function FloatingVideoWindow({
@@ -118,6 +118,9 @@ export default function FloatingVideoWindow({
     },
     normalSpeed: playbackSpeed,
     onSpeedChange: (speed) => {
+      // 同步本地倍速状态（修复既有不一致：state 与元素脱节），
+      // 元素立即生效；下次换片时 setupDirectPlay 也会按该档位起播
+      setPlaybackSpeed(speed);
       if (videoRef.current) videoRef.current.playbackRate = speed;
     }
   });
@@ -686,12 +689,11 @@ export default function FloatingVideoWindow({
 
         {/* Mobile Touch Gesture HUD Overlay */}
         {gestureState.type && (
-          <div className="absolute inset-0 z-30 flex items-center justify-center pointer-events-none animate-in fade-in zoom-in-95 duration-100">
+          <div className={`absolute inset-0 z-30 flex items-center justify-center pointer-events-none animate-in fade-in zoom-in-95 duration-100 transition-opacity ${gestureState.fading ? 'opacity-0 duration-500' : 'opacity-100'}`}>
             <div className="flex flex-col items-center gap-1.5 bg-black/80 backdrop-blur-md px-3.5 py-2.5 rounded-2xl border border-white/10 shadow-2xl text-white">
               {gestureState.type === 'seek' && <FastForward size={20} className="text-cyan-400 animate-pulse" />}
               {gestureState.type === 'brightness' && <Sun size={20} className="text-amber-400" />}
-              {gestureState.type === 'volume' && <Volume2 size={20} className="text-cyan-400" />}
-              {gestureState.type === 'speed_boost' && <Zap size={20} className="text-amber-400 animate-bounce" />}
+              {(gestureState.type === 'speed_step' || gestureState.type === 'speed_boost') && <Gauge size={20} className="text-amber-400" />}
               <span className="font-mono font-bold text-[11px]">{gestureState.text}</span>
             </div>
           </div>

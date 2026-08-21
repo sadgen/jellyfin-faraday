@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { jellyfin } from '../api/jellyfinClient';
-import { Server, Lock, User, Key, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
+import { Server, Lock, User, Users, Key, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
 
 export default function LoginModal({ isOpen, onClose, onLoginSuccess }) {
   const [serverUrl, setServerUrl] = useState(jellyfin.auth.serverUrl || '');
@@ -12,6 +12,11 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }) {
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
+
+  // API Key 多用户选择状态（audit #20）：
+  // /Users 返回多个账号时先展示选择列表，点选后才完成登录
+  const [pendingApiKeyLogin, setPendingApiKeyLogin] = useState(null); // { serverUrl, apiKey }
+  const [selectableUsers, setSelectableUsers] = useState([]);
 
   if (!isOpen) return null;
 
@@ -37,7 +42,13 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }) {
         if (!apiKey.trim()) {
           throw new Error('请输入 API Key');
         }
-        await jellyfin.connectWithApiKey(serverUrl, apiKey);
+        const result = await jellyfin.connectWithApiKey(serverUrl, apiKey.trim());
+        if (result.status === 'select_user') {
+          setPendingApiKeyLogin({ serverUrl: result.serverUrl, apiKey: apiKey.trim() });
+          setSelectableUsers(result.users);
+          setIsLoading(false);
+          return; // 等待用户点选，不进入成功流程
+        }
       }
 
       setSuccessMsg('连接成功！');
@@ -51,6 +62,33 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }) {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleSelectApiUser = async (user) => {
+    if (!pendingApiKeyLogin) return;
+    setErrorMsg('');
+    setIsLoading(true);
+    try {
+      jellyfin.completeApiKeyLogin(pendingApiKeyLogin.serverUrl, pendingApiKeyLogin.apiKey, user);
+      setPendingApiKeyLogin(null);
+      setSelectableUsers([]);
+      setSuccessMsg(`已连接为 ${user.Name}！`);
+      setTimeout(() => {
+        if (onLoginSuccess) onLoginSuccess();
+        if (onClose) onClose();
+      }, 600);
+    } catch (err) {
+      console.error('Login error:', err);
+      setErrorMsg(err.message || '登录失败，请重试');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const cancelUserSelection = () => {
+    setPendingApiKeyLogin(null);
+    setSelectableUsers([]);
+    setErrorMsg('');
   };
 
   return (
@@ -92,7 +130,42 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }) {
           </button>
         </div>
 
-        {/* Form */}
+        {/* User Selection (API Key multi-user, audit #20) */}
+        {selectableUsers.length > 0 ? (
+          <div className="flex flex-col gap-3 text-xs">
+            <div className="flex items-center gap-2">
+              <Users size={15} className="text-cyan-400" />
+              <span className="text-gray-300 font-medium">该 API Key 可访问多个用户，请选择要使用的账号：</span>
+            </div>
+            <div className="flex flex-col gap-1.5 max-h-64 overflow-y-auto">
+              {selectableUsers.map(u => (
+                <button
+                  key={u.Id}
+                  type="button"
+                  disabled={isLoading}
+                  onClick={() => handleSelectApiUser(u)}
+                  className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-black/40 border border-white/10 text-left text-gray-200 hover:bg-cyan-500/10 hover:border-cyan-400/50 transition disabled:opacity-50"
+                >
+                  <div className="w-8 h-8 rounded-lg bg-jf-accent/20 border border-jf-accent/40 flex items-center justify-center text-cyan-400 flex-shrink-0">
+                    <User size={15} />
+                  </div>
+                  <span className="font-medium">{u.Name}</span>
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center justify-end gap-2 mt-1">
+              <button
+                type="button"
+                onClick={cancelUserSelection}
+                disabled={isLoading}
+                className="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-gray-300 transition disabled:opacity-50"
+              >
+                返回
+              </button>
+            </div>
+          </div>
+        ) : (
+        /* Form */
         <form onSubmit={handleSubmit} className="flex flex-col gap-4 text-xs">
           {/* Server URL */}
           <div className="flex flex-col gap-1.5">
@@ -203,6 +276,7 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }) {
             </button>
           </div>
         </form>
+        )}
 
         <div className="text-[11px] text-gray-500 border-t border-white/5 pt-3">
           🔒 隐私提示：服务器地址与访问令牌仅保存在当前浏览器的 localStorage 中，绝不向任何第三方上报。

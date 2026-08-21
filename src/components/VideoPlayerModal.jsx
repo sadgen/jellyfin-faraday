@@ -9,7 +9,7 @@ import InlineVrCanvas from './InlineVrCanvas';
 import { 
   Play, Pause, Volume2, VolumeX, Maximize, 
   Star, Eye, EyeOff, ExternalLink, X, Film, 
-  SkipForward, SkipBack, Sun, Zap, FastForward, Glasses, Trash2
+  SkipForward, SkipBack, Sun, Zap, FastForward, Glasses, Trash2, Gauge
 } from 'lucide-react';
 
 export default function VideoPlayerModal({
@@ -92,6 +92,7 @@ export default function VideoPlayerModal({
     normalSpeed: playbackSpeed,
     onSpeedChange: (speed) => {
       setPlaybackSpeed(speed);
+      if (videoRef.current) videoRef.current.playbackRate = speed;
     }
   });
 
@@ -580,12 +581,11 @@ export default function VideoPlayerModal({
 
           {/* Touch Gesture HUD Overlay */}
           {gestureState.type && (
-            <div className="absolute inset-0 z-30 flex items-center justify-center pointer-events-none animate-in fade-in zoom-in-95 duration-100">
+            <div className={`absolute inset-0 z-30 flex items-center justify-center pointer-events-none animate-in fade-in zoom-in-95 duration-100 transition-opacity ${gestureState.fading ? 'opacity-0 duration-500' : 'opacity-100'}`}>
               <div className="flex flex-col items-center gap-2 bg-black/80 backdrop-blur-md px-5 py-3.5 rounded-2xl border border-white/10 shadow-2xl text-white">
                 {gestureState.type === 'seek' && <FastForward size={28} className="text-cyan-400 animate-pulse" />}
                 {gestureState.type === 'brightness' && <Sun size={28} className="text-amber-400" />}
-                {gestureState.type === 'volume' && <Volume2 size={28} className="text-cyan-400" />}
-                {gestureState.type === 'speed_boost' && <Zap size={28} className="text-amber-400 animate-bounce" />}
+                {(gestureState.type === 'speed_step' || gestureState.type === 'speed_boost') && <Gauge size={28} className="text-amber-400" />}
                 
                 <span className="font-mono font-bold text-sm">{gestureState.text}</span>
               </div>

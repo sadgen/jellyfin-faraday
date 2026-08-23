@@ -4,10 +4,13 @@ import { AlertTriangle, Trash2, X } from 'lucide-react';
 export default function DeleteConfirmModal({
   isOpen,
   item,
+  itemsList = null,
   onConfirm,
   onClose
 }) {
-  if (!isOpen || !item) return null;
+  const targetItems = itemsList || (item ? (Array.isArray(item) ? item : [item]) : []);
+  if (!isOpen || targetItems.length === 0) return null;
+  const isMultiple = targetItems.length > 1;
 
   return (
     <div 
@@ -22,7 +25,7 @@ export default function DeleteConfirmModal({
         <div className="p-4 border-b border-red-500/20 bg-red-950/30 flex items-center justify-between">
           <div className="flex items-center gap-2 text-red-400 font-bold text-sm sm:text-base">
             <AlertTriangle size={18} className="text-red-400 animate-pulse" />
-            <span>永久删除确认</span>
+            <span>{isMultiple ? `批量永久删除确认 (${targetItems.length} 部)` : '永久删除确认'}</span>
           </div>
           <button
             onClick={onClose}
@@ -35,22 +38,31 @@ export default function DeleteConfirmModal({
         {/* Modal Body */}
         <div className="p-5 flex flex-col gap-3.5 text-xs sm:text-sm text-gray-300">
           <p>
-            确定要从 <span className="text-red-400 font-bold">物理磁盘</span> 和 Jellyfin 媒体库中永久删除以下媒体吗？
+            确定要从 <span className="text-red-400 font-bold">物理磁盘</span> 和 Jellyfin 媒体库中永久删除以下 {isMultiple ? <span className="text-red-400 font-bold">{targetItems.length} 部</span> : ''}媒体吗？
           </p>
 
-          <div className="p-3 rounded-xl bg-black/60 border border-white/10 flex flex-col gap-1 font-mono text-xs">
-            <div className="text-white font-bold truncate">
-              {item.Name}
-            </div>
-            {item.Path && (
-              <div className="text-gray-500 text-[11px] truncate" title={item.Path}>
-                {item.Path}
+          <div className="p-3 rounded-xl bg-black/60 border border-white/10 flex flex-col gap-1.5 font-mono text-xs max-h-48 overflow-y-auto">
+            {targetItems.slice(0, 10).map((it, idx) => (
+              <div key={it.Id || idx} className="flex flex-col border-b border-white/5 pb-1 last:border-b-0 last:pb-0">
+                <div className="text-white font-bold truncate">
+                  {idx + 1}. {it.Name}
+                </div>
+                {it.Path && (
+                  <div className="text-gray-500 text-[10px] truncate" title={it.Path}>
+                    {it.Path}
+                  </div>
+                )}
+              </div>
+            ))}
+            {targetItems.length > 10 && (
+              <div className="text-gray-400 text-center text-[11px] pt-1">
+                ... 还有 {targetItems.length - 10} 部影片未展开
               </div>
             )}
           </div>
 
           <div className="p-2.5 rounded-lg bg-red-950/40 border border-red-500/20 text-red-300 text-[11px]">
-            ⚠️ 警告：该操作将直接删除磁盘文件，无法通过回收站恢复！
+            ⚠️ 警告：该操作将直接删除磁盘物理文件，无法通过回收站恢复！
           </div>
         </div>
 
@@ -64,13 +76,13 @@ export default function DeleteConfirmModal({
           </button>
           <button
             onClick={() => {
-              onConfirm(item);
+              onConfirm(targetItems.length === 1 ? targetItems[0] : targetItems);
               onClose();
             }}
             className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-lg shadow-red-600/30"
           >
             <Trash2 size={13} />
-            <span>确认删除</span>
+            <span>确认永久删除 {isMultiple ? `(${targetItems.length} 部)` : ''}</span>
           </button>
         </div>
       </div>

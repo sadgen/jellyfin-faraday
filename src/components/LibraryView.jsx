@@ -62,6 +62,9 @@ const MediaCard = React.memo(function MediaCard({
   item,
   isDuplicate,
   viewLayout = 'poster',
+  isSelected = false,
+  isSelecting = false,
+  onToggleSelect,
   onPlay,
   onPlayModal,
   onPlayVr,
@@ -112,6 +115,60 @@ const MediaCard = React.memo(function MediaCard({
   };
 
   const rafIdRef = useRef(null);
+  const longPressTimerRef = useRef(null);
+  const isLongPressActiveRef = useRef(false);
+  const startPosRef = useRef({ x: 0, y: 0 });
+
+  const handlePointerDown = useCallback((e) => {
+    if (e.button !== undefined && e.button !== 0) return;
+    startPosRef.current = { x: e.clientX, y: e.clientY };
+    isLongPressActiveRef.current = false;
+    if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+    longPressTimerRef.current = setTimeout(() => {
+      isLongPressActiveRef.current = true;
+      if (onToggleSelect) {
+        onToggleSelect(item.Id);
+      }
+      try {
+        if (navigator.vibrate) navigator.vibrate(40);
+      } catch {
+        // ignore
+      }
+    }, 450);
+  }, [item.Id, onToggleSelect]);
+
+  const handlePointerMove = useCallback((e) => {
+    if (!longPressTimerRef.current) return;
+    const dx = Math.abs(e.clientX - startPosRef.current.x);
+    const dy = Math.abs(e.clientY - startPosRef.current.y);
+    if (dx > 10 || dy > 10) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  }, []);
+
+  const handlePointerUp = useCallback(() => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  }, []);
+
+  const handleCardClick = useCallback((e) => {
+    if (isLongPressActiveRef.current) {
+      isLongPressActiveRef.current = false;
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+    if (isSelecting) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (onToggleSelect) onToggleSelect(item.Id);
+      return;
+    }
+    onPlay(item, trickplayTime);
+  }, [isSelecting, item, onPlay, onToggleSelect, trickplayTime]);
 
   const handleCoverMouseMove = useCallback((e) => {
     const clientX = e.clientX;
@@ -174,12 +231,34 @@ const MediaCard = React.memo(function MediaCard({
         contentVisibility: 'auto',
         containIntrinsicSize: isBackdrop ? '260px 180px' : '200px 300px'
       }}
-      className={`group relative flex flex-col bg-slate-900/50 rounded-xl transition-transform duration-150 hover:-translate-y-1 select-none will-change-transform ${
-        isDuplicate 
-          ? 'border border-red-500/60 shadow-lg shadow-red-500/10' 
-          : 'border border-white/5 hover:border-cyan-500/40 hover:shadow-xl hover:shadow-cyan-500/10'
+      className={`group relative flex flex-col bg-slate-900/50 rounded-xl transition-all duration-150 select-none will-change-transform ${
+        isSelected
+          ? 'border-2 border-cyan-400 ring-2 ring-cyan-400/40 shadow-xl shadow-cyan-500/25 scale-[0.98]'
+          : isDuplicate 
+            ? 'border border-red-500/60 shadow-lg shadow-red-500/10 hover:-translate-y-1' 
+            : 'border border-white/5 hover:border-cyan-500/40 hover:shadow-xl hover:shadow-cyan-500/10 hover:-translate-y-1'
       }`}
     >
+      {/* Selection Checkbox Badge */}
+      {(isSelecting || isSelected) && (
+        <div 
+          onClick={(e) => {
+            e.stopPropagation();
+            if (onToggleSelect) onToggleSelect(item.Id);
+          }}
+          className="absolute top-2 left-2 z-30 cursor-pointer p-0.5"
+          title={isSelected ? '取消选中' : '选中'}
+        >
+          <div className={`w-5 h-5 rounded-full flex items-center justify-center transition-all ${
+            isSelected 
+              ? 'bg-cyan-400 text-slate-950 shadow-md shadow-cyan-400/50 scale-105' 
+              : 'bg-black/60 border-2 border-white/60 hover:border-white hover:bg-black/80'
+          }`}>
+            {isSelected && <Check size={13} className="stroke-[3]" />}
+          </div>
+        </div>
+      )}
+
       {/* 
         2X-Enlarged Floating Trickplay Preview Window (Poster Mode only)
         - Mobile: 320px-380px 16:9 (enlarged crisp view)
@@ -217,8 +296,14 @@ const MediaCard = React.memo(function MediaCard({
         className={`relative w-full bg-black rounded-t-xl overflow-hidden cursor-pointer flex items-center justify-center touch-pan-y ${
           isBackdrop ? 'aspect-video' : 'aspect-[2/3]'
         }`}
-        onClick={() => onPlay(item, trickplayTime)}
-        onMouseMove={handleCoverMouseMove}
+        onClick={handleCardClick}
+        onPointerDown={handlePointerDown}
+        onPointerMove={(e) => {
+          handlePointerMove(e);
+          handleCoverMouseMove(e);
+        }}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
         onTouchStart={handleCoverTouchMove}
         onTouchMove={handleCoverTouchMove}
         onTouchEnd={handleCoverTouchEnd}
@@ -465,6 +550,9 @@ const MediaCard = React.memo(function MediaCard({
 const MediaListRow = React.memo(function MediaListRow({
   item,
   isDuplicate,
+  isSelected = false,
+  isSelecting = false,
+  onToggleSelect,
   onPlay,
   onToggleFavorite,
   onTogglePlayed,
@@ -485,12 +573,95 @@ const MediaListRow = React.memo(function MediaListRow({
     return `${mins}分钟`;
   }, [item.RunTimeTicks]);
 
+  const longPressTimerRef = useRef(null);
+  const isLongPressActiveRef = useRef(false);
+  const startPosRef = useRef({ x: 0, y: 0 });
+
+  const handlePointerDown = useCallback((e) => {
+    if (e.button !== undefined && e.button !== 0) return;
+    startPosRef.current = { x: e.clientX, y: e.clientY };
+    isLongPressActiveRef.current = false;
+    if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+    longPressTimerRef.current = setTimeout(() => {
+      isLongPressActiveRef.current = true;
+      if (onToggleSelect) onToggleSelect(item.Id);
+      try {
+        if (navigator.vibrate) navigator.vibrate(40);
+      } catch {
+        // ignore
+      }
+    }, 450);
+  }, [item.Id, onToggleSelect]);
+
+  const handlePointerMove = useCallback((e) => {
+    if (!longPressTimerRef.current) return;
+    const dx = Math.abs(e.clientX - startPosRef.current.x);
+    const dy = Math.abs(e.clientY - startPosRef.current.y);
+    if (dx > 10 || dy > 10) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  }, []);
+
+  const handlePointerUp = useCallback(() => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  }, []);
+
+  const handleRowClick = useCallback((e) => {
+    if (isLongPressActiveRef.current) {
+      isLongPressActiveRef.current = false;
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+    if (isSelecting) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (onToggleSelect) onToggleSelect(item.Id);
+      return;
+    }
+    onPlay(item);
+  }, [isSelecting, item, onPlay, onToggleSelect]);
+
   return (
     <div 
-      onClick={() => onPlay(item)}
-      className="group flex items-center justify-between p-2.5 px-3 sm:px-4 bg-slate-900/40 hover:bg-slate-800/80 border border-white/5 hover:border-cyan-500/40 rounded-xl transition cursor-pointer text-xs"
+      onClick={handleRowClick}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerUp}
+      className={`group flex items-center justify-between p-2.5 px-3 sm:px-4 rounded-xl transition cursor-pointer text-xs select-none ${
+        isSelected
+          ? 'bg-cyan-950/40 border-2 border-cyan-400 shadow-md shadow-cyan-500/20'
+          : isDuplicate 
+            ? 'bg-slate-900/40 hover:bg-slate-800/80 border border-red-500/50' 
+            : 'bg-slate-900/40 hover:bg-slate-800/80 border border-white/5 hover:border-cyan-500/40'
+      }`}
     >
       <div className="flex items-center gap-3 min-w-0 flex-1 pr-2">
+        {/* Selection Checkbox */}
+        {(isSelecting || isSelected) && (
+          <div 
+            onClick={(e) => {
+              e.stopPropagation();
+              if (onToggleSelect) onToggleSelect(item.Id);
+            }}
+            className="flex-shrink-0 cursor-pointer"
+            title={isSelected ? '取消选中' : '选中'}
+          >
+            <div className={`w-5 h-5 rounded-full flex items-center justify-center transition-all ${
+              isSelected 
+                ? 'bg-cyan-400 text-slate-950 shadow-md shadow-cyan-400/50 scale-105' 
+                : 'bg-black/60 border-2 border-white/60 hover:border-white'
+            }`}>
+              {isSelected && <Check size={13} className="stroke-[3]" />}
+            </div>
+          </div>
+        )}
+
         <div className="relative w-8 h-12 sm:w-9 sm:h-[52px] rounded-lg overflow-hidden bg-black/60 border border-white/10 flex-shrink-0">
           {posterUrl ? (
             <img src={posterUrl} alt={item.Name} className="w-full h-full object-cover" />
@@ -597,6 +768,7 @@ export default function LibraryView({
   const [viewLayout, setViewLayout] = useState('poster');
   const [favoriteFilter, setFavoriteFilter] = useState('all');
   const [playCountFilter, setPlayCountFilter] = useState('all');
+  const [selectedItemIds, setSelectedItemIds] = useState(() => new Set());
   const [actionSheetItem, setActionSheetItem] = useState(null);
   const [deleteTargetItem, setDeleteTargetItem] = useState(null);
 
@@ -785,19 +957,94 @@ export default function LibraryView({
     }
   }, []);
 
+  // Multi-select management
+  const isSelecting = selectedItemIds.size > 0;
+
+  const handleToggleSelect = useCallback((itemId) => {
+    setSelectedItemIds(prev => {
+      const next = new Set(prev);
+      if (next.has(itemId)) {
+        next.delete(itemId);
+      } else {
+        next.add(itemId);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleClearSelection = useCallback(() => {
+    setSelectedItemIds(new Set());
+  }, []);
+
+  const isAllVisibleSelected = useMemo(() => {
+    if (displayItems.length === 0) return false;
+    return displayItems.every(it => selectedItemIds.has(it.Id));
+  }, [displayItems, selectedItemIds]);
+
+  const handleSelectAllVisible = useCallback(() => {
+    setSelectedItemIds(prev => {
+      const next = new Set(prev);
+      if (isAllVisibleSelected) {
+        displayItems.forEach(it => next.delete(it.Id));
+      } else {
+        displayItems.forEach(it => next.add(it.Id));
+      }
+      return next;
+    });
+  }, [displayItems, isAllVisibleSelected]);
+
+  const handleBatchFavorite = useCallback(async (isFav) => {
+    const ids = Array.from(selectedItemIds);
+    if (ids.length === 0) return;
+
+    // Optimistically update local items in UI
+    ids.forEach(id => {
+      const it = items.find(x => x.Id === id);
+      if (it && onUpdateItem) {
+        onUpdateItem({
+          ...it,
+          UserData: { ...it.UserData, IsFavorite: isFav }
+        });
+      }
+    });
+
+    try {
+      await Promise.allSettled(ids.map(id => jellyfin.toggleFavorite(id, isFav)));
+    } catch (err) {
+      console.error('Batch favorite error:', err);
+    }
+  }, [selectedItemIds, items, onUpdateItem]);
+
+  const handleOpenBatchDeleteModal = useCallback(() => {
+    const ids = selectedItemIds;
+    const targetItems = items.filter(x => ids.has(x.Id));
+    if (targetItems.length === 0) return;
+    setDeleteTargetItem(targetItems);
+  }, [selectedItemIds, items]);
+
   // Delete item: trigger custom modal
   const handleDelete = useCallback((item) => {
     setDeleteTargetItem(item);
   }, []);
 
-  const handleConfirmDelete = async (item) => {
+  const handleConfirmDelete = useCallback(async (target) => {
+    const list = Array.isArray(target) ? target : [target];
     try {
-      await jellyfin.deleteItem(item.Id);
-      if (onDeleteItem) onDeleteItem(item.Id);
+      const results = await Promise.allSettled(list.map(it => jellyfin.deleteItem(it.Id)));
+      list.forEach((it, idx) => {
+        if (results[idx].status === 'fulfilled' && onDeleteItem) {
+          onDeleteItem(it.Id);
+        }
+      });
+      setSelectedItemIds(prev => {
+        const next = new Set(prev);
+        list.forEach(it => next.delete(it.Id));
+        return next;
+      });
     } catch (err) {
       alert(err.message || '删除失败');
     }
-  };
+  }, [onDeleteItem]);
 
   return (
     <div className="w-full h-full flex flex-col bg-[#080b11] text-gray-100 overflow-hidden select-none">
@@ -1182,6 +1429,9 @@ export default function LibraryView({
                     key={item.Id}
                     item={item}
                     isDuplicate={duplicateItemIds.has(item.Id)}
+                    isSelected={selectedItemIds.has(item.Id)}
+                    isSelecting={isSelecting}
+                    onToggleSelect={handleToggleSelect}
                     onPlay={onPlaySingleItem}
                     onToggleFavorite={handleToggleFavorite}
                     onTogglePlayed={handleTogglePlayed}
@@ -1203,6 +1453,9 @@ export default function LibraryView({
                     item={item}
                     isDuplicate={duplicateItemIds.has(item.Id)}
                     viewLayout={viewLayout}
+                    isSelected={selectedItemIds.has(item.Id)}
+                    isSelecting={isSelecting}
+                    onToggleSelect={handleToggleSelect}
                     onPlay={onPlaySingleItem}
                     onPlayModal={onPlayModal}
                     onPlayVr={onPlayVr}
@@ -1220,6 +1473,67 @@ export default function LibraryView({
           </>
         )}
       </div>
+
+      {/* Floating Multi-Select Batch Action Bar */}
+      {selectedItemIds.size > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 sm:gap-3 px-4 py-2.5 rounded-2xl bg-slate-950/95 border border-cyan-500/50 shadow-2xl shadow-cyan-500/25 backdrop-blur-xl text-xs animate-in slide-in-from-bottom-5 duration-200 flex-wrap justify-center max-w-[95vw]">
+          
+          {/* Selected Count Indicator */}
+          <div className="flex items-center gap-2 pr-2 border-r border-white/10 font-bold text-white font-mono">
+            <span className="flex items-center justify-center w-5 h-5 rounded-full bg-cyan-400 text-slate-950 text-[11px] font-black">
+              {selectedItemIds.size}
+            </span>
+            <span>已选 {selectedItemIds.size} 部</span>
+          </div>
+
+          {/* Quick Select All */}
+          <button
+            onClick={handleSelectAllVisible}
+            className="px-2.5 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-gray-200 hover:text-white transition font-medium"
+          >
+            {isAllVisibleSelected ? '取消全选' : `全选当前 (${displayItems.length})`}
+          </button>
+
+          {/* Batch Add Favorites */}
+          <button
+            onClick={() => handleBatchFavorite(true)}
+            className="px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 font-bold flex items-center gap-1.5 transition shadow-sm"
+            title="将选中的所有媒体加入最爱"
+          >
+            <Star size={13} className="fill-amber-400 text-amber-400" />
+            <span>加最爱</span>
+          </button>
+
+          {/* Batch Remove Favorites */}
+          <button
+            onClick={() => handleBatchFavorite(false)}
+            className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/10 text-gray-300 hover:text-white font-medium flex items-center gap-1.5 transition"
+            title="将选中的所有媒体取消最爱"
+          >
+            <Star size={13} />
+            <span>取消最爱</span>
+          </button>
+
+          {/* Batch Delete */}
+          <button
+            onClick={handleOpenBatchDeleteModal}
+            className="px-3 py-1.5 rounded-xl bg-red-600/90 hover:bg-red-600 text-white font-bold flex items-center gap-1.5 transition shadow-lg shadow-red-600/30"
+            title="永久物理删除所有选中的媒体"
+          >
+            <Trash2 size={13} />
+            <span>删除 ({selectedItemIds.size})</span>
+          </button>
+
+          {/* Exit / Clear Selection */}
+          <button
+            onClick={handleClearSelection}
+            className="p-1.5 rounded-xl hover:bg-white/10 text-gray-400 hover:text-white transition ml-1"
+            title="退出多选模式"
+          >
+            <X size={15} />
+          </button>
+        </div>
+      )}
 
       {/* Mobile Action Sheet Drawer */}
       <MobileActionSheet
@@ -1241,6 +1555,7 @@ export default function LibraryView({
       <DeleteConfirmModal
         isOpen={!!deleteTargetItem}
         item={deleteTargetItem}
+        itemsList={Array.isArray(deleteTargetItem) ? deleteTargetItem : null}
         onConfirm={handleConfirmDelete}
         onClose={() => setDeleteTargetItem(null)}
       />

@@ -192,7 +192,7 @@ function MediaCard({
         className={`relative w-full bg-black rounded-t-xl overflow-hidden cursor-pointer flex items-center justify-center touch-pan-y ${
           isBackdrop ? 'aspect-video' : 'aspect-[2/3]'
         }`}
-        onClick={() => onPlay(item)}
+        onClick={() => onPlay(item, trickplayTime)}
         onMouseMove={handleCoverMouseMove}
         onTouchStart={handleCoverTouchMove}
         onTouchMove={handleCoverTouchMove}

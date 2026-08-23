@@ -122,8 +122,23 @@ export default function VideoPlayerModal({
       hlsRef.current = null;
     }
 
+    // Determine initial seek time: Trickplay click time > server resumeTicks > 0
+    const initialSeekTime = (item.startSecond !== undefined && item.startSecond !== null)
+      ? item.startSecond
+      : (item.UserData?.PlaybackPositionTicks ? item.UserData.PlaybackPositionTicks / 10000000 : 0);
+
+    const onLoadedMetadata = () => {
+      if (initialSeekTime > 0 && videoEl) {
+        videoEl.currentTime = initialSeekTime;
+      }
+    };
+    videoEl.addEventListener('loadedmetadata', onLoadedMetadata, { once: true });
+    if (initialSeekTime > 0 && videoEl.readyState >= 1) {
+      videoEl.currentTime = initialSeekTime;
+    }
+
     // Report playback start to Jellyfin
-    jellyfin.reportPlayback(item.Id, 0, false, 'Started');
+    jellyfin.reportPlayback(item.Id, initialSeekTime, false, 'Started');
 
     // Periodic progress reporting (every 10s)
     if (playReportTimerRef.current) clearInterval(playReportTimerRef.current);
@@ -160,6 +175,7 @@ export default function VideoPlayerModal({
         hls.attachMedia(videoEl);
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
           videoEl.playbackRate = playbackSpeed;
+          if (initialSeekTime > 0) videoEl.currentTime = initialSeekTime;
           videoEl.play().catch(() => {
             videoEl.muted = true;
             setIsMuted(true);

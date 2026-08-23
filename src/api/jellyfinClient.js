@@ -646,6 +646,44 @@ export class JellyfinClient {
   }
 
   /**
+   * Search Remote Subtitles from plugins (MeiamSub.Thunder, Shooter, OpenSubtitles, etc.)
+   */
+  async searchRemoteSubtitles(itemId, language = 'chi') {
+    if (!this.auth.isConfigured || !itemId) return [];
+    try {
+      const res = await fetch(`${this.auth.serverUrl}/Items/${itemId}/RemoteSearch/Subtitles/${language}`, {
+        headers: this.getAuthHeaders()
+      });
+      if (!res.ok) return [];
+      return await res.json();
+    } catch (err) {
+      console.warn('Failed to search remote subtitles:', err);
+      return [];
+    }
+  }
+
+  /**
+   * Download and attach Remote Subtitle to media item
+   */
+  async downloadRemoteSubtitle(itemId, subtitleId) {
+    if (!this.auth.isConfigured || !itemId || !subtitleId) return false;
+    const res = await fetch(`${this.auth.serverUrl}/Items/${itemId}/RemoteSearch/Subtitles/${subtitleId}`, {
+      method: 'POST',
+      headers: this.getAuthHeaders()
+    });
+    return res.ok;
+  }
+
+  /**
+   * Get Subtitle WebVTT Stream URL
+   */
+  getSubtitleTrackUrl(itemId, mediaSourceId, subtitleIndex) {
+    if (!this.auth.serverUrl || !itemId || subtitleIndex === undefined) return '';
+    const srcId = mediaSourceId || itemId;
+    return `${this.auth.serverUrl}/Videos/${itemId}/${srcId}/Subtitles/${subtitleIndex}/Stream.vtt?api_key=${this.auth.token}`;
+  }
+
+  /**
    * Trigger Jellyfin library rescan
    */
   async refreshLibrary() {

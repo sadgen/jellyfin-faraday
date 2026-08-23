@@ -281,13 +281,13 @@ export default function App() {
 
   // ==================== FLOATING 3-WINDOW PIP SYSTEM ====================
   // Open item in a floating slot (FIFO replacement with slot shifting if all 3 full)
-  const handleOpenFloatingWindow = useCallback((item) => {
+  const handleOpenFloatingWindow = useCallback((item, startSecond = null) => {
     if (!item?.Id) return;
     setFloatingWindows(prev => {
       // If already playing in one of the windows, bring it to front
       const existing = prev.find(w => w.item.Id === item.Id);
       if (existing) {
-        return prev.map(w => w.id === existing.id ? { ...w, timestamp: Date.now() } : w);
+        return prev.map(w => w.id === existing.id ? { ...w, startSecond, timestamp: Date.now() } : w);
       }
 
       if (prev.length < 3) {
@@ -299,6 +299,7 @@ export default function App() {
             id: `win-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
             slotIndex: targetSlot,
             item,
+            startSecond,
             timestamp: Date.now()
           }
         ];
@@ -321,6 +322,7 @@ export default function App() {
           id: `win-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
           slotIndex: 2,
           item,
+          startSecond,
           timestamp: Date.now()
         }
       ];
@@ -480,11 +482,11 @@ export default function App() {
     deleteItemFromCache(deletedId);
   }, []);
 
-  const handlePlaySingleItem = useCallback((item) => {
+  const handlePlaySingleItem = useCallback((item, startSecond = null) => {
     if (typeof window !== 'undefined' && window.innerWidth < 768) {
-      setModalPlayingItem(item);
+      setModalPlayingItem(startSecond !== null ? { ...item, startSecond } : item);
     } else {
-      handleOpenFloatingWindow(item);
+      handleOpenFloatingWindow(item, startSecond);
     }
   }, [handleOpenFloatingWindow]);
 

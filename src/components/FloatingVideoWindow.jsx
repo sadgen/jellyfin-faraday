@@ -6,10 +6,11 @@ import { useExternalPlayer } from '../hooks/useExternalPlayer';
 import { useTouchGestures } from '../hooks/useTouchGestures';
 import TrickplayScrubberThumbnail from './TrickplayScrubberThumbnail';
 import InlineVrCanvas from './InlineVrCanvas';
+import SubtitleModal from './SubtitleModal';
 import { 
   Play, Pause, SkipForward, Volume2, VolumeX, Maximize, 
   X, ExternalLink, Film, Star, Eye, EyeOff, Image as ImageIcon,
-  Glasses, Trash2, FastForward, Sun, Zap, Gauge
+  Glasses, Trash2, FastForward, Sun, Zap, Gauge, RefreshCw, Subtitles
 } from 'lucide-react';
 
 export default function FloatingVideoWindow({
@@ -58,6 +59,8 @@ export default function FloatingVideoWindow({
   const [hasError, setHasError] = useState(false);
   const [showPlayerMenu, setShowPlayerMenu] = useState(false);
   const [showPosterModal, setShowPosterModal] = useState(false);
+  const [showSubtitleModal, setShowSubtitleModal] = useState(false);
+  const [selectedSubtitleIndex, setSelectedSubtitleIndex] = useState(-1);
 
   // Pinned Poster PIP: ENABLED BY DEFAULT (1X on Mobile, 1.5X on Desktop)
   const [showPinnedPoster, setShowPinnedPoster] = useState(true);
@@ -125,6 +128,45 @@ export default function FloatingVideoWindow({
     }
   });
 
+  // Extract subtitle streams
+  const mediaSource = item?.MediaSources?.[0];
+  const mediaSourceId = mediaSource?.Id || item?.Id;
+  const subtitleStreams = useMemo(() => {
+    const streams = mediaSource?.MediaStreams || item?.MediaStreams || [];
+    return streams.filter(s => s.Type === 'Subtitle' && !['pgssub', 'dvdsub', 'dvbsub'].includes(s.Codec?.toLowerCase()));
+  }, [item, mediaSource]);
+
+  // Auto-detect default subtitle (or disable if hardsub flag in name)
+  useEffect(() => {
+    if (subtitleStreams.length > 0) {
+      const fileName = item?.Path || item?.Name || '';
+      const hasHardcodedSubs = /-(u?c)(?:[^a-z0-9]|$)/i.test(fileName);
+      if (hasHardcodedSubs) {
+        setSelectedSubtitleIndex(-1);
+      } else {
+        const defaultStream = subtitleStreams.find(s => s.IsDefault) || subtitleStreams[0];
+        if (defaultStream) {
+          setSelectedSubtitleIndex(defaultStream.Index);
+        }
+      }
+    }
+  }, [item?.Id, subtitleStreams]);
+
+  // Sync subtitle mode to video.textTracks
+  useEffect(() => {
+    const videoEl = videoRef.current;
+    if (!videoEl || !videoEl.textTracks) return;
+    for (let i = 0; i < videoEl.textTracks.length; i++) {
+      const track = videoEl.textTracks[i];
+      const trackIndex = parseInt(track.label?.match(/\d+$/)?.[0] || '-1', 10);
+      if (selectedSubtitleIndex !== -1 && (trackIndex === selectedSubtitleIndex || track.id === String(selectedSubtitleIndex))) {
+        track.mode = 'showing';
+      } else {
+        track.mode = 'hidden';
+      }
+    }
+  }, [selectedSubtitleIndex]);
+
   // Load and play video when item changes + Report Playback to Jellyfin
   useEffect(() => {
     if (!item?.Id) {
@@ -147,8 +189,23 @@ export default function FloatingVideoWindow({
       hlsRef.current = null;
     }
 
+    // Determine initial seek time: Trickplay click time > server resumeTicks > 0
+    const initialSeekTime = (windowData.startSecond !== undefined && windowData.startSecond !== null)
+      ? windowData.startSecond
+      : (item.UserData?.PlaybackPositionTicks ? item.UserData.PlaybackPositionTicks / 10000000 : 0);
+
+    const onLoadedMetadata = () => {
+      if (initialSeekTime > 0 && videoEl) {
+        videoEl.currentTime = initialSeekTime;
+      }
+    };
+    videoEl.addEventListener('loadedmetadata', onLoadedMetadata, { once: true });
+    if (initialSeekTime > 0 && videoEl.readyState >= 1) {
+      videoEl.currentTime = initialSeekTime;
+    }
+
     // Report playback start to Jellyfin
-    jellyfin.reportPlayback(item.Id, 0, false, 'Started');
+    jellyfin.reportPlayback(item.Id, initialSeekTime, false, 'Started');
 
     // Periodic progress reporting (every 10s)
     if (playReportTimerRef.current) clearInterval(playReportTimerRef.current);
@@ -196,6 +253,7 @@ export default function FloatingVideoWindow({
         hls.attachMedia(videoEl);
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
           videoEl.playbackRate = playbackSpeed;
+          if (initialSeekTime > 0) videoEl.currentTime = initialSeekTime;
           videoEl.play().catch(() => {
             videoEl.muted = true;
             setIsMuted(true);
@@ -209,6 +267,7 @@ export default function FloatingVideoWindow({
         });
       } else if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
         videoEl.src = hlsUrl;
+        if (initialSeekTime > 0) videoEl.currentTime = initialSeekTime;
         videoEl.play().catch(() => {});
       } else {
         setupDirectPlay();
@@ -228,6 +287,7 @@ export default function FloatingVideoWindow({
         jellyfin.reportPlayback(item.Id, videoEl.currentTime, true, 'Stopped');
       }
       videoEl.removeEventListener('error', handleDirectError);
+      videoEl.removeEventListener('loadedmetadata', onLoadedMetadata);
       if (hlsRef.current) {
         hlsRef.current.destroy();
         hlsRef.current = null;
@@ -235,7 +295,7 @@ export default function FloatingVideoWindow({
       videoEl.removeAttribute('src');
       videoEl.load();
     };
-  }, [item?.Id]);
+  }, [item?.Id, windowData.startSecond]);
 
   const formatTime = (seconds) => {
     if (!seconds || isNaN(seconds)) return '00:00';
@@ -470,12 +530,12 @@ export default function FloatingVideoWindow({
     }
   };
 
-  // Middle Click to Skip (Trigger Shift & Next Window Promotion)
+  // Middle Click to Close (Trigger Shift & Next Window Promotion)
   const handleAuxClick = (e) => {
     if (e.button === 1) {
       e.preventDefault();
       e.stopPropagation();
-      if (onSkip) onSkip(slotIndex);
+      if (onClose) onClose(slotIndex);
     }
   };
 
@@ -519,7 +579,7 @@ export default function FloatingVideoWindow({
       >
         <div className="flex items-center gap-1.5 min-w-0 pr-2">
           <span className={`w-2 h-2 rounded-full ${slotIndex === 0 ? 'bg-cyan-400 animate-pulse' : 'bg-amber-400'}`} />
-          <span className="font-bold text-white text-xs truncate max-w-[160px] sm:max-w-[220px]" title={item?.Name}>
+          <span className="font-bold text-white text-xs truncate max-w-[140px] sm:max-w-[200px]" title={item?.Name}>
             {item?.Name || '视频预览'}
           </span>
           <span className="px-1.5 py-0.5 rounded bg-white/10 text-[10px] font-mono text-cyan-300 font-bold">
@@ -528,6 +588,26 @@ export default function FloatingVideoWindow({
         </div>
 
         <div className="flex items-center gap-1">
+          {/* Subtitles & MeiamSub Download */}
+          <button
+            onClick={() => setShowSubtitleModal(true)}
+            className={`p-1 rounded transition ${
+              selectedSubtitleIndex !== -1 ? 'text-cyan-300 bg-cyan-500/20' : 'text-gray-400 hover:text-cyan-300'
+            }`}
+            title="字幕管理与在线下载 (迅雷/MeiamSub/射手)"
+          >
+            <Subtitles size={13} />
+          </button>
+
+          {/* Refresh / Reload Stream (to load newly downloaded subs) */}
+          <button
+            onClick={handleReloadStream}
+            className="p-1 rounded text-gray-400 hover:text-cyan-300 transition"
+            title="刷新流与媒体信息 (重新加载新下载字幕)"
+          >
+            <RefreshCw size={13} />
+          </button>
+
           {/* Poster PIP Toggle */}
           <button
             onClick={() => setShowPinnedPoster(!showPinnedPoster)}
@@ -632,7 +712,7 @@ export default function FloatingVideoWindow({
           <button
             onClick={() => onSkip && onSkip(slotIndex)}
             className="p-1 rounded hover:bg-white/10 text-gray-400 hover:text-cyan-300 transition"
-            title="换一个 (中键 / 下一个顶上来)"
+            title="换一个 (下一个顶上来)"
           >
             <SkipForward size={13} />
           </button>
@@ -641,7 +721,7 @@ export default function FloatingVideoWindow({
           <button
             onClick={() => onClose && onClose(slotIndex)}
             className="p-1 rounded hover:bg-red-500/20 text-gray-400 hover:text-red-400 transition"
-            title="关闭窗口 (下一个顶上来)"
+            title="关闭窗口 (中键 / 下一个顶上来)"
           >
             <X size={14} />
           </button>
@@ -678,7 +758,18 @@ export default function FloatingVideoWindow({
           onPause={() => setIsPlaying(false)}
           onEnded={handleEnded}
           onTimeUpdate={handleTimeUpdate}
-        />
+        >
+          {subtitleStreams.map(s => (
+            <track
+              key={s.Index}
+              kind="subtitles"
+              label={s.Title || s.Language || `Subtitle ${s.Index}`}
+              src={jellyfin.getSubtitleTrackUrl(item.Id, mediaSourceId, s.Index)}
+              srcLang={s.Language || 'zh'}
+              data-index={s.Index}
+            />
+          ))}
+        </video>
 
         {/* INLINE VR WEBGL CANVAS */}
         <InlineVrCanvas
@@ -852,6 +943,16 @@ export default function FloatingVideoWindow({
           </div>
         </div>
       )}
+
+      {/* Subtitles & Remote Download Modal */}
+      <SubtitleModal
+        isOpen={showSubtitleModal}
+        item={item}
+        currentSubtitleIndex={selectedSubtitleIndex}
+        onSelectSubtitle={(idx) => setSelectedSubtitleIndex(idx)}
+        onSubtitleDownloaded={handleReloadStream}
+        onClose={() => setShowSubtitleModal(false)}
+      />
     </div>
   );
 }

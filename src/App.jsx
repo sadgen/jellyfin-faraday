@@ -7,7 +7,6 @@ import {
   deleteItemFromCache 
 } from './utils/mediaCache';
 import { sortMediaItems } from './utils/mediaSorter';
-import DesktopLayout from './components/DesktopLayout';
 import LibraryView from './components/LibraryView';
 import FloatingWindowsContainer from './components/FloatingWindowsContainer';
 import LoginModal from './components/LoginModal';
@@ -20,14 +19,11 @@ import MobileNavBar from './components/MobileNavBar';
 import ErrorBoundary from './components/ErrorBoundary';
 import { Film, AlertCircle } from 'lucide-react';
 
-const STORAGE_KEY_TILES = 'jf_faraday_tile_count';
-const STORAGE_KEY_FILTER = 'jf_faraday_filter_mode';
 const STORAGE_KEY_VIEW = 'jf_last_selected_view';
 const STORAGE_KEY_SORT = 'jf_faraday_sort_method';
 
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(jellyfin.auth.isConfigured);
-  const [viewMode, setViewMode] = useState('library'); // 'library' | 'kanban'
   
   // Media items & libraries
   const [mediaItems, setMediaItems] = useState([]);
@@ -66,26 +62,34 @@ export default function App() {
   const [errorText, setErrorText] = useState('');
   const [lastSyncTime, setLastSyncTime] = useState(null);
 
-  // Kanban Items Stream
-  const [kanbanPool, setKanbanPool] = useState([]);
-
   // Floating 3-Window PIP Preview System (Tampermonkey Multi-Slot Replica)
   const [floatingWindows, setFloatingWindows] = useState([]);
 
-  // Preferences
-  const [activeTileCount, setActiveTileCount] = useState(() => {
-    const saved = localStorage.getItem(STORAGE_KEY_TILES);
-    const count = parseInt(saved, 10);
-    if ([1, 2, 4].includes(count)) return count;
-    return typeof window !== 'undefined' && window.innerWidth < 768 ? 1 : 2;
+  // Auto refill floating windows when a window is closed
+  const [autoRefillFloatingWindows, setAutoRefillFloatingWindows] = useState(() => {
+    return localStorage.getItem('jf_auto_refill_floating_windows') === 'true';
   });
+  const autoRefillFloatingWindowsRef = useRef(autoRefillFloatingWindows);
+  useEffect(() => {
+    autoRefillFloatingWindowsRef.current = autoRefillFloatingWindows;
+  }, [autoRefillFloatingWindows]);
 
-  const [filterMode, setFilterMode] = useState(() => {
-    return localStorage.getItem(STORAGE_KEY_FILTER) || 'pure_random';
-  });
+  const handleToggleAutoRefill = useCallback((checked) => {
+    setAutoRefillFloatingWindows(checked);
+    autoRefillFloatingWindowsRef.current = checked;
+    localStorage.setItem('jf_auto_refill_floating_windows', String(checked));
+  }, []);
 
-  const [isGlobalMuted, setIsGlobalMuted] = useState(true);
-  const [playbackSpeed, setPlaybackSpeed] = useState(1.0);
+  // Track current filtered items from LibraryView for auto-refill candidate picking
+  const currentFilteredItemsRef = useRef([]);
+  const handleFilteredItemsChange = useCallback((items) => {
+    currentFilteredItemsRef.current = items || [];
+  }, []);
+
+  const mediaItemsRef = useRef(mediaItems);
+  useEffect(() => {
+    mediaItemsRef.current = mediaItems;
+  }, [mediaItems]);
 
   // Modals
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(!jellyfin.auth.isConfigured);
@@ -94,7 +98,6 @@ export default function App() {
   const [identifyingItem, setIdentifyingItem] = useState(null);
   const [modalPlayingItem, setModalPlayingItem] = useState(null);
   const [vrPlayingItem, setVrPlayingItem] = useState(null);
-  const [initialKanbanItem, setInitialKanbanItem] = useState(null);
 
   // Change View & Persist
   const handleSelectView = (viewId) => {
@@ -106,16 +109,6 @@ export default function App() {
     setSortMethod(sort);
     localStorage.setItem(STORAGE_KEY_SORT, sort);
     setMediaItems(prev => sortMediaItems(prev, sort));
-  };
-
-  const handleTileCountChange = (count) => {
-    setActiveTileCount(count);
-    localStorage.setItem(STORAGE_KEY_TILES, count.toString());
-  };
-
-  const handleFilterModeChange = (mode) => {
-    setFilterMode(mode);
-    localStorage.setItem(STORAGE_KEY_FILTER, mode);
   };
 
   // 竞态守卫与跨渲染引用（声明在 hydration effect 之前，供其内部读取）
@@ -258,27 +251,6 @@ export default function App() {
     };
   }, [selectedViewId, searchKeyword, statusFilter, sortMethod, selectedGenre, selectedYear, selectedLetter, fetchAllMedia]);
 
-  // Load Random Pool for Kanban on Demand
-  const loadKanbanStream = useCallback(async () => {
-    if (!jellyfin.auth.isConfigured) return;
-    try {
-      const randomItems = await jellyfin.queryRandomBatch({
-        parentId: selectedViewId,
-        filterMode,
-        limit: 100
-      });
-      setKanbanPool(randomItems || []);
-    } catch (err) {
-      console.warn('Failed to load random stream for kanban:', err);
-    }
-  }, [selectedViewId, filterMode]);
-
-  useEffect(() => {
-    if (viewMode === 'kanban') {
-      loadKanbanStream();
-    }
-  }, [viewMode, loadKanbanStream]);
-
   // ==================== FLOATING 3-WINDOW PIP SYSTEM ====================
   // Open item in a floating slot (FIFO replacement with slot shifting if all 3 full)
   const handleOpenFloatingWindow = useCallback((item, startSecond = null) => {
@@ -329,19 +301,19 @@ export default function App() {
     });
   }, []);
 
-  // 影院/VR Modal 上一个·下一个：合并查找域（mediaItems ∪ kanbanPool ∪ floatingWindows），
-  // 悬浮窗/看板池来源的条目不在 mediaItems 时也能定位相邻条目
+  // 影院/VR Modal 上一个·下一个：合并查找域（mediaItems ∪ floatingWindows），
+  // 悬浮窗来源的条目不在 mediaItems 时也能定位相邻条目
   const modalNavPool = useMemo(() => {
     const seen = new Set();
     const pool = [];
-    for (const it of [...mediaItems, ...kanbanPool, ...floatingWindows.map(w => w.item)]) {
+    for (const it of [...mediaItems, ...floatingWindows.map(w => w.item)]) {
       if (it?.Id && !seen.has(it.Id)) {
         seen.add(it.Id);
         pool.push(it);
       }
     }
     return pool;
-  }, [mediaItems, kanbanPool, floatingWindows]);
+  }, [mediaItems, floatingWindows]);
 
   const navigateModalItem = useCallback((currentItem, direction) => {
     if (!currentItem?.Id || modalNavPool.length === 0) return;
@@ -369,15 +341,15 @@ export default function App() {
     }
   }, [modalNavPool]);
 
-  // Open 3 random videos simultaneously (Tampermonkey 随机3窗)
+  // Open 3 random videos simultaneously (from current filtered media pool)
   const handleOpenRandom3Windows = useCallback(() => {
-    const pool = mediaItems.length > 0 ? mediaItems : kanbanPool;
+    const pool = currentFilteredItemsRef.current.length > 0 ? currentFilteredItemsRef.current : mediaItems;
     if (pool.length === 0) return;
 
     const unplayed = pool.filter(it => !it.UserData?.Played);
     const candidatePool = unplayed.length >= 3 ? unplayed : pool;
 
-    // Fisher-Yates 均匀洗牌（sort(() => 0.5 - Math.random()) 是有偏洗牌）
+    // Fisher-Yates 均匀洗牌
     const shuffled = [...candidatePool];
     for (let i = shuffled.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
@@ -393,22 +365,50 @@ export default function App() {
         timestamp: Date.now() + idx
       }))
     );
-  }, [mediaItems, kanbanPool]);
+  }, [mediaItems]);
 
-  // Close floating window (removes window, subsequent windows shift forward / 下一个顶上来)
+  // Close floating window (removes window, subsequent windows shift forward; auto-refills if enabled)
   const handleCloseFloatingWindow = useCallback((closedSlotIndex) => {
     setFloatingWindows(prev => {
       const remaining = prev.filter(w => w.slotIndex !== closedSlotIndex);
-      return remaining.map(w => {
+      const shifted = remaining.map(w => {
         if (w.slotIndex > closedSlotIndex) {
           return { ...w, slotIndex: w.slotIndex - 1 };
         }
         return w;
       });
+
+      // Auto refill if enabled
+      if (autoRefillFloatingWindowsRef.current) {
+        const pool = currentFilteredItemsRef.current.length > 0 
+          ? currentFilteredItemsRef.current 
+          : mediaItemsRef.current;
+        if (pool.length > 0) {
+          const activeIds = new Set(shifted.map(w => w.item.Id));
+          const unplayed = pool.filter(it => !it.UserData?.Played && !activeIds.has(it.Id));
+          const candidatePool = unplayed.length > 0 ? unplayed : pool.filter(it => !activeIds.has(it.Id));
+          const randomItem = candidatePool[Math.floor(Math.random() * candidatePool.length)] || pool[0];
+
+          if (randomItem && !activeIds.has(randomItem.Id)) {
+            const tailSlot = shifted.length;
+            return [
+              ...shifted,
+              {
+                id: `win-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                slotIndex: tailSlot,
+                item: randomItem,
+                timestamp: Date.now()
+              }
+            ];
+          }
+        }
+      }
+
+      return shifted;
     });
   }, []);
 
-  // Skip video in floating window (destroys current window, shifts next windows forward / 下一个顶上来, and spawns new random item at tail slot)
+  // Skip video in floating window (destroys current window, shifts next windows forward, and spawns new random item from current filtered pool at tail slot)
   const handleSkipFloatingWindow = useCallback((skippedSlotIndex) => {
     setFloatingWindows(prev => {
       // 1. Remove current window and shift following windows forward
@@ -420,8 +420,10 @@ export default function App() {
         return w;
       });
 
-      // 2. Pick a new random unplayed video that is not already playing
-      const pool = mediaItems.length > 0 ? mediaItems : kanbanPool;
+      // 2. Pick a new random unplayed video from current filtered media pool
+      const pool = currentFilteredItemsRef.current.length > 0 
+        ? currentFilteredItemsRef.current 
+        : mediaItemsRef.current;
       if (pool.length === 0) return shifted;
 
       const activeIds = new Set(shifted.map(w => w.item.Id));
@@ -442,7 +444,7 @@ export default function App() {
         }
       ];
     });
-  }, [mediaItems, kanbanPool]);
+  }, []);
 
   const handleBringFloatingToFront = useCallback((winId) => {
     setFloatingWindows(prev => {
@@ -452,31 +454,15 @@ export default function App() {
     });
   }, []);
 
-  const activeScopeName = useMemo(() => {
-    let name = '全部媒体库';
-    if (selectedViewId && selectedViewId !== 'all') {
-      const view = userViews.find(v => v.Id === selectedViewId);
-      if (view) name = view.Name;
-    }
-    if (searchKeyword) name += ` • "${searchKeyword}"`;
-    if (selectedGenre) name += ` • ${selectedGenre}`;
-    if (selectedLetter) name += ` • 字母 ${selectedLetter}`;
-    if (statusFilter === 'favorites') name += ' • 最爱';
-    else if (statusFilter === 'unplayed') name += ' • 未看';
-    return name;
-  }, [selectedViewId, userViews, searchKeyword, selectedGenre, selectedLetter, statusFilter]);
-
   const handleUpdateItem = useCallback((updatedItem) => {
     if (!updatedItem?.Id) return;
     setMediaItems(prev => prev.map(item => item.Id === updatedItem.Id ? { ...item, ...updatedItem } : item));
-    setKanbanPool(prev => prev.map(item => item.Id === updatedItem.Id ? { ...item, ...updatedItem } : item));
     setFloatingWindows(prev => prev.map(w => w.item.Id === updatedItem.Id ? { ...w, item: { ...w.item, ...updatedItem } } : w));
     updateItemInCache(updatedItem);
   }, []);
 
   const handleDeleteItem = useCallback((deletedId) => {
     setMediaItems(prev => prev.filter(item => item.Id !== deletedId));
-    setKanbanPool(prev => prev.filter(item => item.Id !== deletedId));
     setFloatingWindows(prev => prev.filter(w => w.item.Id !== deletedId));
     setTotalRecordCount(prev => Math.max(0, prev - 1));
     deleteItemFromCache(deletedId);
@@ -503,7 +489,6 @@ export default function App() {
     setMediaItems([]);
     setTotalRecordCount(0);
     setUserViews([]);
-    setKanbanPool([]);
     setFloatingWindows([]);
     localStorage.removeItem(STORAGE_KEY_VIEW);
     setSelectedViewId('');
@@ -542,92 +527,63 @@ export default function App() {
           </div>
         )}
 
-        {/* Main View Area */}
+        {/* Main View Area: Unified Media Library */}
         <div className="flex-1 w-full h-full overflow-hidden">
-          {viewMode === 'library' ? (
-            <LibraryView
-              items={mediaItems}
-              totalRecordCount={totalRecordCount}
-              userViews={userViews}
-              selectedViewId={selectedViewId}
-              onSelectView={handleSelectView}
-              searchKeyword={searchKeyword}
-              onSearchChange={setSearchKeyword}
-              statusFilter={statusFilter}
-              onStatusFilterChange={setStatusFilter}
-              sortMethod={sortMethod}
-              onSortMethodChange={handleSortMethodChange}
-              selectedGenre={selectedGenre}
-              onSelectGenre={setSelectedGenre}
-              selectedYear={selectedYear}
-              onSelectYear={setSelectedYear}
-              selectedLetter={selectedLetter}
-              onSelectLetter={setSelectedLetter}
-              onEnterKanban={() => {
-                setInitialKanbanItem(null);
-                setViewMode('kanban');
-              }}
-              onOpenRandom3Windows={handleOpenRandom3Windows}
-              onPlaySingleItem={handlePlaySingleItem}
-              onOpenFloatingWindow={handleOpenFloatingWindow}
-              onPlayModal={(item) => setModalPlayingItem(item)}
-              onPlayVr={(item) => setVrPlayingItem(item)}
-              onUpdateItem={handleUpdateItem}
-              onDeleteItem={handleDeleteItem}
-              onOpenMetadataEditor={(item) => setEditingItem(item)}
-              onOpenIdentify={(item) => setIdentifyingItem(item)}
-              onRefreshLibrary={handleServerRefreshLibrary}
-              isRefreshing={isLoading}
-            />
-          ) : (
-            <DesktopLayout
-              items={kanbanPool.length > 0 ? kanbanPool : mediaItems}
-              activeTileCount={activeTileCount}
-              onTileCountChange={handleTileCountChange}
-              filterMode={filterMode}
-              onFilterModeChange={handleFilterModeChange}
-              isGlobalMuted={isGlobalMuted}
-              onToggleGlobalMute={() => setIsGlobalMuted(!isGlobalMuted)}
-              playbackSpeed={playbackSpeed}
-              onPlaybackSpeedChange={setPlaybackSpeed}
-              onOpenSettings={() => setIsSettingsModalOpen(true)}
-              onRefreshLibrary={loadKanbanStream}
-              isRefreshing={isLoading}
-              onOpenLibraryView={() => setViewMode('library')}
-              onOpenVr={(item) => setVrPlayingItem(item)}
-              onDeleteItem={handleDeleteItem}
-              activeScopeName={activeScopeName}
-              initialPlayingItem={initialKanbanItem}
-            />
-          )}
+          <LibraryView
+            items={mediaItems}
+            totalRecordCount={totalRecordCount}
+            userViews={userViews}
+            selectedViewId={selectedViewId}
+            onSelectView={handleSelectView}
+            searchKeyword={searchKeyword}
+            onSearchChange={setSearchKeyword}
+            statusFilter={statusFilter}
+            onStatusFilterChange={setStatusFilter}
+            sortMethod={sortMethod}
+            onSortMethodChange={handleSortMethodChange}
+            selectedGenre={selectedGenre}
+            onSelectGenre={setSelectedGenre}
+            selectedYear={selectedYear}
+            onSelectYear={setSelectedYear}
+            selectedLetter={selectedLetter}
+            onSelectLetter={setSelectedLetter}
+            autoRefillFloatingWindows={autoRefillFloatingWindows}
+            onToggleAutoRefill={handleToggleAutoRefill}
+            onFilteredItemsChange={handleFilteredItemsChange}
+            onOpenRandom3Windows={handleOpenRandom3Windows}
+            onPlaySingleItem={handlePlaySingleItem}
+            onOpenFloatingWindow={handleOpenFloatingWindow}
+            onPlayModal={(item) => setModalPlayingItem(item)}
+            onPlayVr={(item) => setVrPlayingItem(item)}
+            onUpdateItem={handleUpdateItem}
+            onDeleteItem={handleDeleteItem}
+            onOpenMetadataEditor={(item) => setEditingItem(item)}
+            onOpenIdentify={(item) => setIdentifyingItem(item)}
+            onRefreshLibrary={handleServerRefreshLibrary}
+            isRefreshing={isLoading}
+          />
         </div>
 
         {/* Floating 3-Window PIP Preview System */}
-        {viewMode === 'library' && (
-          <FloatingWindowsContainer
-            windows={floatingWindows}
-            onCloseWindow={handleCloseFloatingWindow}
-            onSkipWindow={handleSkipFloatingWindow}
-            onExpandWindow={(item) => setModalPlayingItem(item)}
-            onBringToFront={handleBringFloatingToFront}
-            onUpdateItem={handleUpdateItem}
-            onDeleteItem={handleDeleteItem}
-          />
-        )}
+        <FloatingWindowsContainer
+          windows={floatingWindows}
+          onCloseWindow={handleCloseFloatingWindow}
+          onSkipWindow={handleSkipFloatingWindow}
+          onExpandWindow={(item) => setModalPlayingItem(item)}
+          onBringToFront={handleBringFloatingToFront}
+          onUpdateItem={handleUpdateItem}
+          onDeleteItem={handleDeleteItem}
+        />
 
         {/* Mobile Bottom Navigation Bar */}
-        {viewMode === 'library' && (
-          <MobileNavBar
-            viewMode={viewMode}
-            onSwitchView={(mode) => setViewMode(mode)}
-            onOpenSearch={() => {
-              const searchInput = document.querySelector('input[type="text"]');
-              if (searchInput) searchInput.focus();
-            }}
-            onOpenSettings={() => setIsSettingsModalOpen(true)}
-            totalCount={totalRecordCount}
-          />
-        )}
+        <MobileNavBar
+          onOpenRandom3Windows={handleOpenRandom3Windows}
+          onOpenSearch={() => {
+            const searchInput = document.querySelector('input[type="text"]');
+            if (searchInput) searchInput.focus();
+          }}
+          onOpenSettings={() => setIsSettingsModalOpen(true)}
+        />
 
         {/* Full-Screen Theater Video Player Modal */}
         <VideoPlayerModal

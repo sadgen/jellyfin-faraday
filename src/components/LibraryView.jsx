@@ -6,7 +6,7 @@ import { useExternalPlayer } from '../hooks/useExternalPlayer';
 import MobileActionSheet from './MobileActionSheet';
 import DeleteConfirmModal from './DeleteConfirmModal';
 import { 
-  Play, Shuffle, Star, Eye, EyeOff, Search, 
+  Play, Star, Eye, EyeOff, Search, 
   Edit3, Sparkles, Trash2, Folder, Film, 
   ArrowUpDown, X, RefreshCw, Layers, LayoutGrid,
   Grid, List, MoreVertical, ExternalLink, Calendar,
@@ -171,12 +171,12 @@ function MediaCard({
       }`}
     >
       {/* 
-        2X-Enlarged Floating Trickplay Preview Window
+        2X-Enlarged Floating Trickplay Preview Window (Poster Mode only)
         - Mobile: 320px-380px 16:9 (enlarged crisp view)
         - Desktop: 480px-540px 16:9 (2X-2.5X enlarged HD view)
         Auto boundary: floats below card if near top, above card otherwise!
       */}
-      {tpStyle && (
+      {!isBackdrop && tpStyle && (
         <div 
           className={`absolute left-1/2 -translate-x-1/2 z-50 flex flex-col items-center pointer-events-none animate-in fade-in zoom-in-95 duration-100 ${
             isNearTop ? 'top-[calc(100%+8px)]' : 'bottom-[calc(100%+8px)]'
@@ -570,7 +570,8 @@ export default function LibraryView({
   onSelectYear,
   selectedLetter,
   onSelectLetter,
-  onEnterKanban,
+  autoRefillFloatingWindows = false,
+  onToggleAutoRefill,
   onOpenRandom3Windows,
   onPlaySingleItem,
   onOpenFloatingWindow,
@@ -581,16 +582,18 @@ export default function LibraryView({
   onOpenMetadataEditor,
   onOpenIdentify,
   onRefreshLibrary,
+  onFilteredItemsChange,
   isRefreshing
 }) {
   const [activeSubTab, setActiveSubTab] = useState('items');
   const [viewLayout, setViewLayout] = useState('poster');
+  const [playCountFilter, setPlayCountFilter] = useState('all');
   const [actionSheetItem, setActionSheetItem] = useState(null);
   const [deleteTargetItem, setDeleteTargetItem] = useState(null);
 
-  // Dynamic Poster Columns Slider State (Persisted)
-  const [gridColumns, setGridColumns] = useState(() => {
-    const saved = localStorage.getItem('jf_library_grid_cols');
+  // Dynamic Poster Columns Slider State (Persisted separately for Poster vs Backdrop)
+  const [gridColumnsPoster, setGridColumnsPoster] = useState(() => {
+    const saved = localStorage.getItem('jf_library_grid_cols_poster') || localStorage.getItem('jf_library_grid_cols');
     if (saved) {
       const num = parseInt(saved, 10);
       if (!isNaN(num) && num >= 1 && num <= 12) return num;
@@ -598,10 +601,26 @@ export default function LibraryView({
     return typeof window !== 'undefined' && window.innerWidth < 640 ? 3 : 6;
   });
 
+  const [gridColumnsBackdrop, setGridColumnsBackdrop] = useState(() => {
+    const saved = localStorage.getItem('jf_library_grid_cols_backdrop');
+    if (saved) {
+      const num = parseInt(saved, 10);
+      if (!isNaN(num) && num >= 1 && num <= 12) return num;
+    }
+    return typeof window !== 'undefined' && window.innerWidth < 640 ? 2 : 4;
+  });
+
+  const gridColumns = viewLayout === 'backdrop' ? gridColumnsBackdrop : gridColumnsPoster;
+
   const handleGridColumnsChange = (val) => {
     const num = parseInt(val, 10);
-    setGridColumns(num);
-    localStorage.setItem('jf_library_grid_cols', String(num));
+    if (viewLayout === 'backdrop') {
+      setGridColumnsBackdrop(num);
+      localStorage.setItem('jf_library_grid_cols_backdrop', String(num));
+    } else {
+      setGridColumnsPoster(num);
+      localStorage.setItem('jf_library_grid_cols_poster', String(num));
+    }
   };
   
   // Secondary metadata state
@@ -614,7 +633,7 @@ export default function LibraryView({
 
   useEffect(() => {
     setVisibleCount(80);
-  }, [selectedViewId, statusFilter, selectedGenre, selectedYear, selectedLetter, searchKeyword, activeSubTab]);
+  }, [selectedViewId, statusFilter, playCountFilter, selectedGenre, selectedYear, selectedLetter, searchKeyword, activeSubTab]);
 
   // Duplicate detection across current items
   const { duplicateItemIds, duplicateCount } = useMemo(() => {
@@ -644,13 +663,32 @@ export default function LibraryView({
     }
   }, [activeSubTab, selectedViewId]);
 
-  // Display items
+  // Display items with Play Count filter support
   const displayItems = useMemo(() => {
+    let result = items;
     if (activeSubTab === 'duplicates') {
-      return items.filter(it => duplicateItemIds.has(it.Id));
+      result = items.filter(it => duplicateItemIds.has(it.Id));
     }
-    return items;
-  }, [items, activeSubTab, duplicateItemIds]);
+
+    if (playCountFilter === 'play_0') {
+      result = result.filter(it => (it.UserData?.PlayCount || 0) === 0 && !it.UserData?.Played);
+    } else if (playCountFilter === 'play_1') {
+      result = result.filter(it => (it.UserData?.PlayCount || 0) === 1);
+    } else if (playCountFilter === 'play_lte_1') {
+      result = result.filter(it => (it.UserData?.PlayCount || 0) <= 1);
+    } else if (playCountFilter === 'play_gte_2') {
+      result = result.filter(it => (it.UserData?.PlayCount || 0) >= 2);
+    }
+
+    return result;
+  }, [items, activeSubTab, duplicateItemIds, playCountFilter]);
+
+  // Sync filtered items to parent container (for auto-refilling floating windows)
+  useEffect(() => {
+    if (onFilteredItemsChange) {
+      onFilteredItemsChange(displayItems);
+    }
+  }, [displayItems, onFilteredItemsChange]);
 
   const displayedSlice = useMemo(() => {
     return displayItems.slice(0, visibleCount);
@@ -759,6 +797,20 @@ export default function LibraryView({
           </div>
 
           <div className="flex items-center gap-2 flex-shrink-0">
+            {/* Auto Refill Floating Windows Checkbox */}
+            <label 
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-black/40 hover:bg-white/10 border border-white/10 text-xs text-gray-300 cursor-pointer select-none transition" 
+              title="勾选后，关闭某个悬浮播放窗口时将自动从当前筛选的媒体库中打开新窗口补充"
+            >
+              <input
+                type="checkbox"
+                checked={autoRefillFloatingWindows}
+                onChange={(e) => onToggleAutoRefill && onToggleAutoRefill(e.target.checked)}
+                className="w-3.5 h-3.5 accent-cyan-400 rounded cursor-pointer"
+              />
+              <span className="hidden xs:inline font-medium text-gray-200">自动补窗</span>
+            </label>
+
             {/* Tampermonkey 随机3窗 Launcher */}
             <button
               onClick={onOpenRandom3Windows}
@@ -767,17 +819,6 @@ export default function LibraryView({
             >
               <Tv size={13} className="text-amber-400" />
               <span>随机3窗</span>
-            </button>
-
-            {/* Kanban Mode Launcher */}
-            <button
-              onClick={onEnterKanban}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white text-xs font-bold shadow-lg shadow-cyan-500/25 transition transform hover:scale-[1.02]"
-              title="开启全屏随机多视口看板"
-            >
-              <Shuffle size={13} />
-              <span className="hidden sm:inline">随机看板</span>
-              <span className="font-mono text-[11px]">({totalRecordCount > 0 ? totalRecordCount : displayItems.length})</span>
             </button>
           </div>
         </div>
@@ -885,6 +926,7 @@ export default function LibraryView({
             )}
           </div>
 
+          {/* Status Filters */}
           <div className="flex items-center bg-black/40 p-0.5 rounded-xl border border-white/5 gap-0.5 overflow-x-auto">
             {BASE_STATUS_FILTERS.map(f => (
               <button
@@ -901,6 +943,24 @@ export default function LibraryView({
             ))}
           </div>
 
+          {/* Play Count Filter */}
+          <div className="flex items-center gap-1 bg-black/40 px-2 py-1 rounded-xl border border-white/5 text-gray-300 text-xs">
+            <Eye size={12} className="text-cyan-400" />
+            <select
+              value={playCountFilter}
+              onChange={(e) => setPlayCountFilter(e.target.value)}
+              className="bg-transparent text-gray-200 focus:outline-none cursor-pointer pr-1"
+              title="按播放次数筛选"
+            >
+              <option value="all" className="bg-slate-900 text-white">次数: 全部</option>
+              <option value="play_0" className="bg-slate-900 text-white">0 次 (未看)</option>
+              <option value="play_1" className="bg-slate-900 text-white">1 次</option>
+              <option value="play_lte_1" className="bg-slate-900 text-white">≤ 1 次 (0或1次)</option>
+              <option value="play_gte_2" className="bg-slate-900 text-white">≥ 2 次 (常看)</option>
+            </select>
+          </div>
+
+          {/* Sort Selector */}
           <div className="flex items-center gap-1 bg-black/40 px-2 py-1 rounded-xl border border-white/5 text-gray-300 text-xs">
             <ArrowUpDown size={12} className="text-cyan-400" />
             <select

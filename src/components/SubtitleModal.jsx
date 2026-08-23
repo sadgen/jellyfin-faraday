@@ -17,14 +17,21 @@ export default function SubtitleModal({
   const [selectedLanguage, setSelectedLanguage] = useState('chi');
   const [isSearching, setIsSearching] = useState(false);
   const [remoteSubtitles, setRemoteSubtitles] = useState([]);
-  const [downloadingId, setDownloadingId] = useState(null);
-  const [errorMsg, setErrorMsg] = useState('');
-  const [successMsg, setSuccessMsg] = useState('');
+  const [playbackData, setPlaybackData] = useState(null);
 
-  // Extract local subtitle streams
-  const mediaSource = item?.MediaSources?.[0];
-  const mediaStreams = mediaSource?.MediaStreams || item?.MediaStreams || [];
-  const localSubtitles = mediaStreams.filter(s => s.Type === 'Subtitle');
+  // Fetch full playback info with MediaSources & MediaStreams when opened
+  useEffect(() => {
+    if (isOpen && item?.Id) {
+      jellyfin.getItemPlaybackInfo(item.Id).then(data => {
+        if (data) setPlaybackData(data);
+      }).catch(() => {});
+    }
+  }, [isOpen, item?.Id]);
+
+  // Extract local subtitle streams (from fresh playbackData or item)
+  const mediaSource = playbackData?.MediaSources?.[0] || item?.MediaSources?.[0];
+  const mediaStreams = mediaSource?.MediaStreams || playbackData?.MediaStreams || item?.MediaStreams || [];
+  const localSubtitles = mediaStreams.filter(s => s.Type === 'Subtitle' && !['pgssub', 'dvdsub', 'dvbsub'].includes(s.Codec?.toLowerCase()));
 
   const handleSearchRemote = async (lang = selectedLanguage) => {
     if (!item?.Id) return;
@@ -58,9 +65,20 @@ export default function SubtitleModal({
     try {
       const ok = await jellyfin.downloadRemoteSubtitle(item.Id, sub.Id);
       if (ok) {
-        setSuccessMsg(`字幕「${sub.Name || '在线字幕'}」下载成功！正在重新加载视频...`);
+        setSuccessMsg(`字幕「${sub.Name || '在线字幕'}」下载成功！正在检索并应用字幕...`);
+        // Wait 900ms for Jellyfin server disk scanner
+        await new Promise(r => setTimeout(r, 900));
+        const updatedPlayback = await jellyfin.getItemPlaybackInfo(item.Id);
+        if (updatedPlayback) {
+          setPlaybackData(updatedPlayback);
+          const streams = updatedPlayback?.MediaSources?.[0]?.MediaStreams || updatedPlayback?.MediaStreams || [];
+          const newSubs = streams.filter(s => s.Type === 'Subtitle');
+          const targetSub = newSubs[newSubs.length - 1]; // Pick latest downloaded subtitle
+          const subIdx = targetSub ? targetSub.Index : 0;
+          if (onSelectSubtitle) onSelectSubtitle(subIdx);
+          if (onSubtitleDownloaded) onSubtitleDownloaded(updatedPlayback, subIdx);
+        }
         setTimeout(() => {
-          if (onSubtitleDownloaded) onSubtitleDownloaded();
           onClose();
         }, 1200);
       } else {

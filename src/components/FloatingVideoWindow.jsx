@@ -128,13 +128,27 @@ export default function FloatingVideoWindow({
     }
   });
 
+  const [playbackData, setPlaybackData] = useState(null);
+
+  // Fetch full playback info with MediaSources & MediaStreams when opened
+  useEffect(() => {
+    if (item?.Id) {
+      jellyfin.getItemPlaybackInfo(item.Id).then(info => {
+        if (info) {
+          setPlaybackData(info);
+          if (onUpdateItem) onUpdateItem(info);
+        }
+      }).catch(() => {});
+    }
+  }, [item?.Id]);
+
   // Extract subtitle streams
-  const mediaSource = item?.MediaSources?.[0];
+  const mediaSource = playbackData?.MediaSources?.[0] || item?.MediaSources?.[0];
   const mediaSourceId = mediaSource?.Id || item?.Id;
   const subtitleStreams = useMemo(() => {
-    const streams = mediaSource?.MediaStreams || item?.MediaStreams || [];
+    const streams = mediaSource?.MediaStreams || playbackData?.MediaStreams || item?.MediaStreams || [];
     return streams.filter(s => s.Type === 'Subtitle' && !['pgssub', 'dvdsub', 'dvbsub'].includes(s.Codec?.toLowerCase()));
-  }, [item, mediaSource]);
+  }, [item, playbackData, mediaSource]);
 
   // Auto-detect default subtitle (or disable if hardsub flag in name)
   useEffect(() => {
@@ -153,19 +167,23 @@ export default function FloatingVideoWindow({
   }, [item?.Id, subtitleStreams]);
 
   // Sync subtitle mode to video.textTracks
-  useEffect(() => {
+  const syncSubtitles = useCallback(() => {
     const videoEl = videoRef.current;
     if (!videoEl || !videoEl.textTracks) return;
     for (let i = 0; i < videoEl.textTracks.length; i++) {
       const track = videoEl.textTracks[i];
-      const trackIndex = parseInt(track.label?.match(/\d+$/)?.[0] || '-1', 10);
-      if (selectedSubtitleIndex !== -1 && (trackIndex === selectedSubtitleIndex || track.id === String(selectedSubtitleIndex))) {
+      const trackIndex = subtitleStreams[i]?.Index;
+      if (selectedSubtitleIndex !== -1 && trackIndex === selectedSubtitleIndex) {
         track.mode = 'showing';
       } else {
         track.mode = 'hidden';
       }
     }
-  }, [selectedSubtitleIndex]);
+  }, [selectedSubtitleIndex, subtitleStreams]);
+
+  useEffect(() => {
+    syncSubtitles();
+  }, [syncSubtitles]);
 
   // Load and play video when item changes + Report Playback to Jellyfin
   useEffect(() => {
@@ -298,14 +316,23 @@ export default function FloatingVideoWindow({
   }, [item?.Id, windowData.startSecond]);
 
   // Reload Video Stream & Metadata (to fetch newly downloaded subtitles)
-  const handleReloadStream = useCallback(async () => {
+  const handleReloadStream = useCallback(async (customPlaybackData = null, targetSubIdx = null) => {
     setIsLoading(true);
     const videoEl = videoRef.current;
     const currentPos = videoEl?.currentTime || 0;
     try {
-      const freshItem = await jellyfin.getItem(item.Id);
-      if (freshItem && onUpdateItem) {
-        onUpdateItem(freshItem);
+      const freshInfo = customPlaybackData || await jellyfin.getItemPlaybackInfo(item.Id);
+      if (freshInfo) {
+        setPlaybackData(freshInfo);
+        if (onUpdateItem) onUpdateItem(freshInfo);
+        const streams = freshInfo?.MediaSources?.[0]?.MediaStreams || freshInfo?.MediaStreams || [];
+        const newSubs = streams.filter(s => s.Type === 'Subtitle' && !['pgssub', 'dvdsub', 'dvbsub'].includes(s.Codec?.toLowerCase()));
+        if (targetSubIdx !== null && targetSubIdx !== undefined) {
+          setSelectedSubtitleIndex(targetSubIdx);
+        } else if (newSubs.length > 0 && selectedSubtitleIndex === -1) {
+          const def = newSubs.find(s => s.IsDefault) || newSubs[newSubs.length - 1];
+          if (def) setSelectedSubtitleIndex(def.Index);
+        }
       }
     } catch (e) {
       console.warn('Failed to reload item metadata:', e);
@@ -317,11 +344,12 @@ export default function FloatingVideoWindow({
       videoEl.addEventListener('loadedmetadata', () => {
         if (currentPos > 0) videoEl.currentTime = currentPos;
         videoEl.play().catch(() => {});
+        syncSubtitles();
       }, { once: true });
       videoEl.load();
     }
     setIsLoading(false);
-  }, [item?.Id, isMuted, playbackSpeed, onUpdateItem]);
+  }, [item?.Id, isMuted, playbackSpeed, onUpdateItem, selectedSubtitleIndex, syncSubtitles]);
 
   const formatTime = (seconds) => {
     if (!seconds || isNaN(seconds)) return '00:00';
@@ -780,19 +808,22 @@ export default function FloatingVideoWindow({
           onPlaying={() => {
             setIsLoading(false);
             setIsPlaying(true);
+            syncSubtitles();
           }}
+          onLoadedData={syncSubtitles}
           onPause={() => setIsPlaying(false)}
           onEnded={handleEnded}
           onTimeUpdate={handleTimeUpdate}
         >
           {subtitleStreams.map(s => (
             <track
-              key={s.Index}
+              key={`${item.Id}-${s.Index}`}
               kind="subtitles"
               label={s.Title || s.Language || `Subtitle ${s.Index}`}
               src={jellyfin.getSubtitleTrackUrl(item.Id, mediaSourceId, s.Index)}
               srcLang={s.Language || 'zh'}
               data-index={s.Index}
+              default={selectedSubtitleIndex === s.Index}
             />
           ))}
         </video>

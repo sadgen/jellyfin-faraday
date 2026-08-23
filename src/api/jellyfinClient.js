@@ -646,6 +646,38 @@ export class JellyfinClient {
   }
 
   /**
+   * Get full playback info including MediaSources and MediaStreams (Subtitles, Audio, Video)
+   */
+  async getItemPlaybackInfo(itemId) {
+    if (!this.auth.isConfigured || !itemId) return null;
+    try {
+      const res = await fetch(`${this.auth.serverUrl}/Items/${itemId}/PlaybackInfo?UserId=${this.auth.userId}`, {
+        method: 'POST',
+        headers: this.getAuthHeaders(),
+        body: JSON.stringify({
+          DeviceProfile: {
+            MaxStreamingBitrate: 140000000,
+            DirectPlayProfiles: [
+              { Container: 'mp4,mkv,webm,mov,avi', Type: 'Video' }
+            ],
+            SubtitleProfiles: [
+              { Format: 'vtt', Method: 'External' },
+              { Format: 'srt', Method: 'External' }
+            ]
+          }
+        })
+      });
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (err) {
+      console.warn('Failed to get playback info:', err);
+    }
+    // Fallback to getItemDetails
+    return await this.getItemDetails(itemId);
+  }
+
+  /**
    * Search Remote Subtitles from plugins (MeiamSub.Thunder, Shooter, OpenSubtitles, etc.)
    */
   async searchRemoteSubtitles(itemId, language = 'chi') {
@@ -663,15 +695,24 @@ export class JellyfinClient {
   }
 
   /**
-   * Download and attach Remote Subtitle to media item
+   * Download and attach Remote Subtitle to media item, then refresh item metadata
    */
   async downloadRemoteSubtitle(itemId, subtitleId) {
     if (!this.auth.isConfigured || !itemId || !subtitleId) return false;
-    const res = await fetch(`${this.auth.serverUrl}/Items/${itemId}/RemoteSearch/Subtitles/${subtitleId}`, {
-      method: 'POST',
-      headers: this.getAuthHeaders()
-    });
-    return res.ok;
+    try {
+      const res = await fetch(`${this.auth.serverUrl}/Items/${itemId}/RemoteSearch/Subtitles/${subtitleId}`, {
+        method: 'POST',
+        headers: this.getAuthHeaders()
+      });
+      if (!res.ok) return false;
+      
+      // Request Jellyfin to refresh metadata so the new subtitle file is immediately probed into MediaStreams
+      await this.refreshItemMetadata(itemId).catch(() => {});
+      return true;
+    } catch (err) {
+      console.warn('Failed to download subtitle:', err);
+      return false;
+    }
   }
 
   /**

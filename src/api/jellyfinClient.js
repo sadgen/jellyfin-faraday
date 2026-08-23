@@ -678,6 +678,24 @@ export class JellyfinClient {
   }
 
   /**
+   * Fetch additional parts / multi-part video segments (e.g. part1/part2/part3, CD1/CD2)
+   */
+  async getAdditionalParts(itemId) {
+    if (!this.auth.isConfigured || !itemId) return [];
+    try {
+      const res = await fetch(`${this.auth.serverUrl}/Videos/${itemId}/AdditionalParts?userId=${this.auth.userId}`, {
+        headers: this.getAuthHeaders()
+      });
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data.Items || [];
+    } catch (err) {
+      console.warn('Failed to fetch additional parts:', err);
+      return [];
+    }
+  }
+
+  /**
    * Search Remote Subtitles from plugins (MeiamSub.Thunder, Shooter, OpenSubtitles, etc.)
    */
   async searchRemoteSubtitles(itemId, language = 'chi') {

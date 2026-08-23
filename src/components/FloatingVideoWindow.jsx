@@ -32,24 +32,57 @@ export default function FloatingVideoWindow({
   // Initialize position and size using exact Tampermonkey slot formula
   const [layout, setLayout] = useState(() => calculateSlotStyle(slotIndex));
   const [isDragging, setIsDragging] = useState(false);
-  const dragStartRef = useRef({ mouseX: 0, mouseY: 0, posX: 0, posY: 0 });
+  const [isResizing, setIsResizing] = useState(false);
+  const isCustomPositionRef = useRef(false);
+  const prevSlotRef = useRef(slotIndex);
 
-  // Update layout when slotIndex changes (window promotion / shifting) or on resize
+  // Multi-part video list (e.g. Part 1, 2, 3 / CD1, CD2)
+  const [partsList, setPartsList] = useState(() => [{ Id: item?.Id, Name: item?.Name || 'Part 1' }]);
+  const [currentPartIndex, setCurrentPartIndex] = useState(0);
+
+  // Fetch additional video parts (slices / multi-part VR / multi-part episodes)
   useEffect(() => {
-    if (!isDragging) {
+    if (!item?.Id) return;
+    jellyfin.getAdditionalParts(item.Id).then(additional => {
+      if (additional && additional.length > 0) {
+        setPartsList([
+          { Id: item.Id, Name: item.Name || 'Part 1' },
+          ...additional.map((part, idx) => ({
+            Id: part.Id,
+            Name: part.Name || `Part ${idx + 2}`,
+            RunTimeTicks: part.RunTimeTicks,
+            MediaSources: part.MediaSources,
+            MediaStreams: part.MediaStreams
+          }))
+        ]);
+      } else {
+        setPartsList([{ Id: item.Id, Name: item.Name || 'Part 1' }]);
+      }
+      setCurrentPartIndex(0);
+    }).catch(() => {
+      setPartsList([{ Id: item.Id, Name: item.Name || 'Part 1' }]);
+      setCurrentPartIndex(0);
+    });
+  }, [item?.Id]);
+
+  // Update layout when slotIndex changes (window promotion / shifting)
+  useEffect(() => {
+    if (prevSlotRef.current !== slotIndex) {
+      prevSlotRef.current = slotIndex;
+      isCustomPositionRef.current = false;
       setLayout(calculateSlotStyle(slotIndex));
     }
-  }, [slotIndex, isDragging]);
+  }, [slotIndex]);
 
   useEffect(() => {
     const handleResize = () => {
-      if (!isDragging) {
+      if (!isCustomPositionRef.current) {
         setLayout(calculateSlotStyle(slotIndex));
       }
     };
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
-  }, [slotIndex, isDragging]);
+  }, [slotIndex]);
 
   // Playback state
   const [isPlaying, setIsPlaying] = useState(true);
@@ -185,9 +218,12 @@ export default function FloatingVideoWindow({
     syncSubtitles();
   }, [syncSubtitles]);
 
-  // Load and play video when item changes + Report Playback to Jellyfin
+  const currentPlayingPart = partsList[currentPartIndex] || item;
+  const currentPartId = currentPlayingPart?.Id || item?.Id;
+
+  // Load and play video when item/part changes + Report Playback to Jellyfin
   useEffect(() => {
-    if (!item?.Id) {
+    if (!currentPartId) {
       setIsLoading(false);
       return;
     }
@@ -210,7 +246,7 @@ export default function FloatingVideoWindow({
     // Determine initial seek time: Trickplay click time > server resumeTicks > 0
     const initialSeekTime = (windowData.startSecond !== undefined && windowData.startSecond !== null)
       ? windowData.startSecond
-      : (item.UserData?.PlaybackPositionTicks ? item.UserData.PlaybackPositionTicks / 10000000 : 0);
+      : (currentPlayingPart.UserData?.PlaybackPositionTicks ? currentPlayingPart.UserData.PlaybackPositionTicks / 10000000 : 0);
 
     const onLoadedMetadata = () => {
       if (initialSeekTime > 0 && videoEl) {
@@ -223,13 +259,13 @@ export default function FloatingVideoWindow({
     }
 
     // Report playback start to Jellyfin
-    jellyfin.reportPlayback(item.Id, initialSeekTime, false, 'Started');
+    jellyfin.reportPlayback(currentPartId, initialSeekTime, false, 'Started');
 
     // Periodic progress reporting (every 10s)
     if (playReportTimerRef.current) clearInterval(playReportTimerRef.current);
     playReportTimerRef.current = setInterval(() => {
       if (videoEl && !videoEl.paused && videoEl.currentTime > 0) {
-        jellyfin.reportPlayback(item.Id, videoEl.currentTime, false, 'Progress');
+        jellyfin.reportPlayback(currentPartId, videoEl.currentTime, false, 'Progress');
         
         // Count playback if played for >= 10s
         if (!hasCountedPlayRef.current && videoEl.currentTime >= 10) {
@@ -245,8 +281,8 @@ export default function FloatingVideoWindow({
       }
     }, 10000);
 
-    const directStreamUrl = jellyfin.getStreamUrl(item.Id);
-    const hlsUrl = jellyfin.getHlsUrl(item.Id);
+    const directStreamUrl = jellyfin.getStreamUrl(currentPartId);
+    const hlsUrl = jellyfin.getHlsUrl(currentPartId);
 
     const setupDirectPlay = () => {
       videoEl.src = directStreamUrl;
@@ -302,7 +338,7 @@ export default function FloatingVideoWindow({
     return () => {
       if (playReportTimerRef.current) clearInterval(playReportTimerRef.current);
       if (videoEl && videoEl.currentTime > 0) {
-        jellyfin.reportPlayback(item.Id, videoEl.currentTime, true, 'Stopped');
+        jellyfin.reportPlayback(currentPartId, videoEl.currentTime, true, 'Stopped');
       }
       videoEl.removeEventListener('error', handleDirectError);
       videoEl.removeEventListener('loadedmetadata', onLoadedMetadata);
@@ -313,7 +349,7 @@ export default function FloatingVideoWindow({
       videoEl.removeAttribute('src');
       videoEl.load();
     };
-  }, [item?.Id, windowData.startSecond]);
+  }, [currentPartId, windowData.startSecond]);
 
   // Reload Video Stream & Metadata (to fetch newly downloaded subtitles)
   const handleReloadStream = useCallback(async (customPlaybackData = null, targetSubIdx = null) => {
@@ -321,7 +357,7 @@ export default function FloatingVideoWindow({
     const videoEl = videoRef.current;
     const currentPos = videoEl?.currentTime || 0;
     try {
-      const freshInfo = customPlaybackData || await jellyfin.getItemPlaybackInfo(item.Id);
+      const freshInfo = customPlaybackData || await jellyfin.getItemPlaybackInfo(currentPartId);
       if (freshInfo) {
         setPlaybackData(freshInfo);
         if (onUpdateItem) onUpdateItem(freshInfo);
@@ -338,7 +374,7 @@ export default function FloatingVideoWindow({
       console.warn('Failed to reload item metadata:', e);
     }
     if (videoEl) {
-      videoEl.src = jellyfin.getStreamUrl(item.Id) + `&_r=${Date.now()}`;
+      videoEl.src = jellyfin.getStreamUrl(currentPartId) + `&_r=${Date.now()}`;
       videoEl.playbackRate = playbackSpeed;
       videoEl.muted = isMuted;
       videoEl.addEventListener('loadedmetadata', () => {
@@ -349,7 +385,7 @@ export default function FloatingVideoWindow({
       videoEl.load();
     }
     setIsLoading(false);
-  }, [item?.Id, isMuted, playbackSpeed, onUpdateItem, selectedSubtitleIndex, syncSubtitles]);
+  }, [currentPartId, isMuted, playbackSpeed, onUpdateItem, selectedSubtitleIndex, syncSubtitles]);
 
   const formatTime = (seconds) => {
     if (!seconds || isNaN(seconds)) return '00:00';
@@ -370,7 +406,7 @@ export default function FloatingVideoWindow({
     setDurationText(formatTime(video.duration));
   };
 
-  // Video Ended -> increment play count and skip (trigger promotion)
+  // Video Ended -> increment play count and play next part or skip (trigger promotion)
   const handleEnded = () => {
     if (!hasCountedPlayRef.current) {
       hasCountedPlayRef.current = true;
@@ -382,34 +418,82 @@ export default function FloatingVideoWindow({
         });
       }
     }
-    jellyfin.reportPlayback(item.Id, videoRef.current?.duration || 0, true, 'Stopped');
-    if (onSkip) onSkip(slotIndex);
+    jellyfin.reportPlayback(currentPartId, videoRef.current?.duration || 0, true, 'Stopped');
+    
+    // Multi-part check: if more parts exist in this video, play next part!
+    if (partsList.length > 1 && currentPartIndex < partsList.length - 1) {
+      setCurrentPartIndex(prev => prev + 1);
+    } else {
+      // No more parts, skip to next video (promote next windows forward)
+      if (onSkip) onSkip(slotIndex);
+    }
+  };
+
+  const handleSkipNext = () => {
+    if (partsList.length > 1 && currentPartIndex < partsList.length - 1) {
+      setCurrentPartIndex(prev => prev + 1);
+    } else {
+      if (onSkip) onSkip(slotIndex);
+    }
   };
 
   // Dragging the floating window
   const handleMouseDownHeader = (e) => {
     if (e.target.closest('button') || e.target.closest('select')) return;
+    if (e.button !== 0) return;
     e.preventDefault();
     if (onBringToFront) onBringToFront(id);
 
     setIsDragging(true);
-    dragStartRef.current = {
-      mouseX: e.clientX,
-      mouseY: e.clientY,
-      posX: layout.left,
-      posY: layout.top
-    };
+    isCustomPositionRef.current = true;
+    const startMouseX = e.clientX;
+    const startMouseY = e.clientY;
+    const startPosX = layout.left;
+    const startPosY = layout.top;
 
     const handleMouseMove = (moveEvent) => {
-      const dx = moveEvent.clientX - dragStartRef.current.mouseX;
-      const dy = moveEvent.clientY - dragStartRef.current.mouseY;
-      const newX = Math.max(0, Math.min(window.innerWidth - layout.width, dragStartRef.current.posX + dx));
-      const newY = Math.max(0, Math.min(window.innerHeight - 100, dragStartRef.current.posY + dy));
+      const dx = moveEvent.clientX - startMouseX;
+      const dy = moveEvent.clientY - startMouseY;
+      const newX = Math.max(10, Math.min(window.innerWidth - 100, startPosX + dx));
+      const newY = Math.max(10, Math.min(window.innerHeight - 60, startPosY + dy));
       setLayout(prev => ({ ...prev, left: newX, top: newY }));
     };
 
     const handleMouseUp = () => {
       setIsDragging(false);
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+  };
+
+  // Resizing the floating window via bottom-right handle
+  const handleMouseDownResize = (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (onBringToFront) onBringToFront(id);
+    setIsResizing(true);
+    isCustomPositionRef.current = true;
+
+    const startX = e.clientX;
+    const startW = layout.width;
+
+    const handleMouseMove = (moveEvent) => {
+      const dx = moveEvent.clientX - startX;
+      const minW = 260;
+      const maxW = Math.max(minW, window.innerWidth - 20);
+      const nextW = Math.max(minW, Math.min(maxW, startW + dx));
+      setLayout(prev => ({ ...prev, width: nextW }));
+      if (scrubberRef.current) {
+        setScrubberWidth(scrubberRef.current.getBoundingClientRect().width);
+      }
+    };
+
+    const handleMouseUp = () => {
+      setIsResizing(false);
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
@@ -612,7 +696,7 @@ export default function FloatingVideoWindow({
         top: `${layout.top}px`,
         width: `${layout.width}px`,
         zIndex: 50 + slotIndex,
-        transition: isDragging 
+        transition: (isDragging || isResizing)
           ? 'none' 
           : 'left 0.3s cubic-bezier(0.2, 0, 0, 1), top 0.3s cubic-bezier(0.2, 0, 0, 1), width 0.3s cubic-bezier(0.2, 0, 0, 1), height 0.3s cubic-bezier(0.2, 0, 0, 1), box-shadow 0.2s'
       }}
@@ -621,7 +705,7 @@ export default function FloatingVideoWindow({
           ? 'border-cyan-400/70 shadow-cyan-500/25' 
           : 'border-white/15 shadow-black/80'
       } ${
-        isDragging ? 'shadow-cyan-500/50 opacity-95 scale-[1.01]' : 'hover:border-cyan-400'
+        (isDragging || isResizing) ? 'shadow-cyan-500/50 opacity-95 scale-[1.01]' : 'hover:border-cyan-400'
       }`}
     >
       {/* Draggable Header */}
@@ -639,6 +723,26 @@ export default function FloatingVideoWindow({
           <span className="px-1.5 py-0.5 rounded bg-white/10 text-[10px] font-mono text-cyan-300 font-bold">
             {slotIndex === 0 ? '主窗' : `副窗 #${slotIndex}`}
           </span>
+          {/* Multi-part Video Part Selector */}
+          {partsList.length > 1 && (
+            <div 
+              className="flex items-center gap-1 bg-black/50 px-1.5 py-0.5 rounded border border-amber-500/40"
+              onMouseDown={(e) => e.stopPropagation()}
+            >
+              <span className="text-[10px] text-amber-400 font-bold">Part</span>
+              <select
+                value={currentPartIndex}
+                onChange={(e) => setCurrentPartIndex(Number(e.target.value))}
+                className="bg-transparent text-[10px] text-amber-300 font-bold outline-none cursor-pointer"
+              >
+                {partsList.map((p, idx) => (
+                  <option key={p.Id} value={idx} className="bg-slate-900 text-white">
+                    {idx + 1}/{partsList.length}: {p.Name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
 
         <div className="flex items-center gap-1">
@@ -762,11 +866,15 @@ export default function FloatingVideoWindow({
             <Maximize size={13} />
           </button>
 
-          {/* Skip next (closes this window & promotes next windows forward) */}
+          {/* Skip next / next part (promotes next part or promotes next windows forward) */}
           <button
-            onClick={() => onSkip && onSkip(slotIndex)}
+            onClick={handleSkipNext}
             className="p-1 rounded hover:bg-white/10 text-gray-400 hover:text-cyan-300 transition"
-            title="换一个 (下一个顶上来)"
+            title={
+              partsList.length > 1 && currentPartIndex < partsList.length - 1
+                ? `播放下一段 (Part ${currentPartIndex + 2}/${partsList.length})`
+                : '换一个 (下一个顶上来)'
+            }
           >
             <SkipForward size={13} />
           </button>
@@ -965,14 +1073,28 @@ export default function FloatingVideoWindow({
             </select>
 
             <button
-              onClick={() => onSkip && onSkip(slotIndex)}
+              onClick={handleSkipNext}
               className="px-2.5 py-0.5 rounded-lg bg-cyan-950 hover:bg-cyan-900 border border-cyan-500/40 text-cyan-300 text-[11px] font-medium transition flex items-center gap-1"
+              title={
+                partsList.length > 1 && currentPartIndex < partsList.length - 1
+                  ? `播放下一段切片 (Part ${currentPartIndex + 2}/${partsList.length})`
+                  : '换一个 (下一个顶上来)'
+              }
             >
               <SkipForward size={11} />
-              <span>切片</span>
+              <span>{partsList.length > 1 ? `切片 P${currentPartIndex + 1}/${partsList.length}` : '切片'}</span>
             </button>
           </div>
         </div>
+      </div>
+
+      {/* SE Corner Resizer Handle (Bottom-Right) */}
+      <div
+        onMouseDown={handleMouseDownResize}
+        className="absolute right-0 bottom-0 w-4 h-4 cursor-se-resize z-40 flex items-end justify-end p-0.5 group/resizer"
+        title="拖拽缩放窗口大小"
+      >
+        <div className="w-2.5 h-2.5 border-r-2 border-b-2 border-white/30 group-hover/resizer:border-cyan-400 transition-colors" />
       </div>
 
       {/* Full Poster Lightbox */}

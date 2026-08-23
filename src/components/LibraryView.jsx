@@ -307,7 +307,7 @@ const MediaCard = React.memo(function MediaCard({
             alt={item.Name}
             loading="lazy"
             className={`w-full h-full object-cover transition-opacity duration-200 ${
-              tpStyle ? 'opacity-0' : 'opacity-100'
+              isBackdrop && tpStyle ? 'opacity-0' : 'opacity-100'
             }`}
           />
         ) : (
@@ -316,21 +316,19 @@ const MediaCard = React.memo(function MediaCard({
           </div>
         )}
 
-        {/* INLINE TRICKPLAY (Both Backdrop and Poster Mode) */}
-        {tpStyle && (
+        {/* BACKDROP MODE: Inline inside 16:9 Card */}
+        {isBackdrop && tpStyle && (
           <div className="absolute inset-0 bg-black flex items-center justify-center overflow-hidden pointer-events-none">
             <div 
-              className={`w-full ${isBackdrop ? 'aspect-video' : 'h-full'} relative shadow-2xl bg-center bg-no-repeat`}
+              className="w-full aspect-video relative shadow-2xl bg-center bg-no-repeat"
               style={tpStyle}
             />
 
-            {isBackdrop && (
-              <div className="absolute bottom-2 left-2 z-30 pointer-events-none">
-                <div className="px-2 py-0.5 rounded-full bg-black/85 backdrop-blur-md border border-cyan-400/50 text-[10px] font-mono font-bold text-cyan-300 shadow-lg">
-                  {formatTime(trickplayTime)}
-                </div>
+            <div className="absolute bottom-2 left-2 z-30 pointer-events-none">
+              <div className="px-2 py-0.5 rounded-full bg-black/85 backdrop-blur-md border border-cyan-400/50 text-[10px] font-mono font-bold text-cyan-300 shadow-lg">
+                {formatTime(trickplayTime)}
               </div>
-            )}
+            </div>
           </div>
         )}
 

@@ -297,6 +297,32 @@ export default function FloatingVideoWindow({
     };
   }, [item?.Id, windowData.startSecond]);
 
+  // Reload Video Stream & Metadata (to fetch newly downloaded subtitles)
+  const handleReloadStream = useCallback(async () => {
+    setIsLoading(true);
+    const videoEl = videoRef.current;
+    const currentPos = videoEl?.currentTime || 0;
+    try {
+      const freshItem = await jellyfin.getItem(item.Id);
+      if (freshItem && onUpdateItem) {
+        onUpdateItem(freshItem);
+      }
+    } catch (e) {
+      console.warn('Failed to reload item metadata:', e);
+    }
+    if (videoEl) {
+      videoEl.src = jellyfin.getStreamUrl(item.Id) + `&_r=${Date.now()}`;
+      videoEl.playbackRate = playbackSpeed;
+      videoEl.muted = isMuted;
+      videoEl.addEventListener('loadedmetadata', () => {
+        if (currentPos > 0) videoEl.currentTime = currentPos;
+        videoEl.play().catch(() => {});
+      }, { once: true });
+      videoEl.load();
+    }
+    setIsLoading(false);
+  }, [item?.Id, isMuted, playbackSpeed, onUpdateItem]);
+
   const formatTime = (seconds) => {
     if (!seconds || isNaN(seconds)) return '00:00';
     const h = Math.floor(seconds / 3600);

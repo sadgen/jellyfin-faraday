@@ -8,7 +8,7 @@ export function normalizeMovieCode(title = '') {
   let clean = title.trim();
   
   // Remove brackets and common release tags like [4K], [中文字幕], -C, [UNCENSORED]
-  clean = clean.replace(/\[[^\]]*\]|\([^\)]*\)/g, ' ');
+  clean = clean.replace(/\[[^\]]*\]|\([^)]*\)/g, ' ');
   clean = clean.replace(/\b(4k|1080p|720p|hd|fhd|uhd|ch|uncensored|leak)\b/gi, ' ');
   
   // Match standard番号 format: ABC-123, FC2-PPV-123456, etc.

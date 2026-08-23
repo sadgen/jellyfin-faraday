@@ -35,6 +35,6 @@ credentials.json
 *.sw?
 
 # Temporary media / resources
-resources/
-test/
+/resources/
+/test/
 *.part

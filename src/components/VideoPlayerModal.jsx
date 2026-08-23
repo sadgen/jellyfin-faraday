@@ -6,6 +6,7 @@ import { useExternalPlayer } from '../hooks/useExternalPlayer';
 import { useTouchGestures } from '../hooks/useTouchGestures';
 import TrickplayScrubberThumbnail from './TrickplayScrubberThumbnail';
 import InlineVrCanvas from './InlineVrCanvas';
+import DeleteConfirmModal from './DeleteConfirmModal';
 import { detectVrVideo } from '../utils/vrDetector';
 import { 
   Play, Pause, Volume2, VolumeX, Maximize, 
@@ -35,6 +36,7 @@ export default function VideoPlayerModal({
   const [hasError, setHasError] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [showPlayerMenu, setShowPlayerMenu] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [isVrActive, setIsVrActive] = useState(false);
   const [detectedVrMode, setDetectedVrMode] = useState('180_3d_sbs');
 
@@ -98,6 +100,23 @@ export default function VideoPlayerModal({
     }
   });
 
+  const playbackSpeedRef = useRef(playbackSpeed);
+  playbackSpeedRef.current = playbackSpeed;
+  const isMutedRef = useRef(isMuted);
+  isMutedRef.current = isMuted;
+  const itemRef = useRef(item);
+  itemRef.current = item;
+  const onUpdateItemRef = useRef(onUpdateItem);
+  onUpdateItemRef.current = onUpdateItem;
+
+  // Cleanup timers on component unmount
+  useEffect(() => {
+    return () => {
+      if (wheelTimerRef.current) clearTimeout(wheelTimerRef.current);
+      if (playReportTimerRef.current) clearInterval(playReportTimerRef.current);
+    };
+  }, []);
+
   useEffect(() => {
     if (!isOpen || !item?.Id) {
       if (hlsRef.current) {
@@ -113,6 +132,10 @@ export default function VideoPlayerModal({
     setProgress(0);
     setHoverScrubberTime(null);
     setIsWheelSeeking(false);
+
+    const videoEl = videoRef.current;
+    if (!videoEl) return;
+
     // Auto-detect VR Video format (pure 2D vs 3D-to-2D vs true VR)
     const initialVr = detectVrVideo(item, videoEl);
     if (initialVr.isVr) {
@@ -123,9 +146,6 @@ export default function VideoPlayerModal({
     }
 
     hasCountedPlayRef.current = false;
-
-    const videoEl = videoRef.current;
-    if (!videoEl) return;
 
     if (hlsRef.current) {
       hlsRef.current.destroy();
@@ -165,11 +185,12 @@ export default function VideoPlayerModal({
         // Count playback if played for >= 10s
         if (!hasCountedPlayRef.current && videoEl.currentTime >= 10) {
           hasCountedPlayRef.current = true;
-          const nextCount = (item.UserData?.PlayCount || 0) + 1;
-          if (onUpdateItem) {
-            onUpdateItem({
-              ...item,
-              UserData: { ...item.UserData, PlayCount: nextCount }
+          const currentItem = itemRef.current;
+          const nextCount = (currentItem?.UserData?.PlayCount || 0) + 1;
+          if (onUpdateItemRef.current && currentItem) {
+            onUpdateItemRef.current({
+              ...currentItem,
+              UserData: { ...currentItem.UserData, PlayCount: nextCount }
             });
           }
         }
@@ -190,7 +211,7 @@ export default function VideoPlayerModal({
         hls.loadSource(hlsUrl);
         hls.attachMedia(videoEl);
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
-          videoEl.playbackRate = playbackSpeed;
+          videoEl.playbackRate = playbackSpeedRef.current;
           if (initialSeekTime > 0) videoEl.currentTime = initialSeekTime;
           videoEl.play().catch(() => {
             videoEl.muted = true;
@@ -200,18 +221,8 @@ export default function VideoPlayerModal({
         });
         hls.on(Hls.Events.ERROR, (_, data) => {
           if (data.fatal) {
-            switch (data.type) {
-              case Hls.ErrorTypes.NETWORK_ERROR:
-                hls.startLoad();
-                break;
-              case Hls.ErrorTypes.MEDIA_ERROR:
-                hls.recoverMediaError();
-                break;
-              default:
-                setHasError(true);
-                setErrorMessage('视频解码失败 (格式或转码不支持)');
-                break;
-            }
+            setHasError(true);
+            setErrorMessage('视频加载失败，请重试');
           }
         });
       } else if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
@@ -229,8 +240,8 @@ export default function VideoPlayerModal({
 
     const setupDirectPlay = () => {
       videoEl.src = directStreamUrl;
-      videoEl.playbackRate = playbackSpeed;
-      videoEl.muted = isMuted;
+      videoEl.playbackRate = playbackSpeedRef.current;
+      videoEl.muted = isMutedRef.current;
       videoEl.play().catch(() => {
         videoEl.muted = true;
         setIsMuted(true);
@@ -249,6 +260,7 @@ export default function VideoPlayerModal({
         jellyfin.reportPlayback(item.Id, videoEl.currentTime, true, 'Stopped');
       }
       videoEl.removeEventListener('error', handleDirectError);
+      videoEl.removeEventListener('loadedmetadata', onLoadedMetadata);
       if (hlsRef.current) {
         hlsRef.current.destroy();
         hlsRef.current = null;
@@ -454,12 +466,13 @@ export default function VideoPlayerModal({
     }
   };
 
-  // Delete Video from Disk
-  const handleDeleteVideo = async () => {
+  // Delete Video from Disk (custom modal)
+  const handleDeleteVideo = () => {
+    setShowDeleteModal(true);
+  };
+
+  const handleConfirmDelete = async () => {
     if (!item?.Id) return;
-    if (!confirm(`确定要从服务器和物理磁盘中永久删除「${item.Name}」吗？\n警告：这将从物理硬盘上永久删除该文件！`)) {
-      return;
-    }
     try {
       await jellyfin.deleteItem(item.Id);
       if (onDeleteItem) onDeleteItem(item.Id);
@@ -779,6 +792,14 @@ export default function VideoPlayerModal({
           </div>
         </div>
       </div>
+
+      {/* Custom Safe Delete Modal */}
+      <DeleteConfirmModal
+        isOpen={showDeleteModal}
+        item={item}
+        onConfirm={handleConfirmDelete}
+        onClose={() => setShowDeleteModal(false)}
+      />
     </div>
   );
 }

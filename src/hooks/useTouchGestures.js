@@ -6,6 +6,13 @@ import { useState, useRef, useEffect, useCallback } from 'react';
  */
 export const SPEED_OPTIONS = [1.0, 1.25, 1.5, 2.0, 2.5, 3.0];
 
+function formatSec(seconds) {
+  if (!seconds || isNaN(seconds)) return '00:00';
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+}
+
 /**
  * Mobile Video Player Touch Gestures Hook
  * Supports:
@@ -260,13 +267,6 @@ export function useTouchGestures({
       setGestureState({ type: null, value: 0, text: '', fading: false });
     }
   }, [gestureState, onSeek, onSeekPreviewEnd, onSpeedChange, videoRef, scheduleGestureFade]);
-
-  function formatSec(seconds) {
-    if (!seconds || isNaN(seconds)) return '00:00';
-    const m = Math.floor(seconds / 60);
-    const s = Math.floor(seconds % 60);
-    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-  }
 
   return {
     gestureState,

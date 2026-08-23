@@ -11,31 +11,26 @@ export function useExternalPlayer() {
     const streamUrl = jellyfin.getStreamUrl(item.Id);
     if (!streamUrl) return;
 
-    let targetUri = '';
+    let targetUri;
 
     switch (playerType) {
       case 'mpv':
-        // MPV URL scheme (mpv:// or mpv://<stream-url>)
-        targetUri = `mpv://${streamUrl}`;
+        targetUri = `mpv://${encodeURIComponent(streamUrl)}`;
         break;
 
       case 'potplayer':
-        // PotPlayer URL scheme (potplayer://<stream-url>)
-        targetUri = `potplayer://${streamUrl}`;
+        targetUri = `potplayer://${encodeURIComponent(streamUrl)}`;
         break;
 
       case 'vlc':
-        // VLC URL scheme (vlc://<stream-url>)
-        targetUri = `vlc://${streamUrl}`;
+        targetUri = `vlc://${encodeURIComponent(streamUrl)}`;
         break;
 
       case 'iina':
-        // IINA (macOS) URL scheme (iina://weblink?url=<encoded-url>)
         targetUri = `iina://weblink?url=${encodeURIComponent(streamUrl)}`;
         break;
 
       default:
-        // Direct stream in new tab / download
         window.open(streamUrl, '_blank');
         return;
     }

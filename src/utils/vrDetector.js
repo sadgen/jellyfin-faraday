@@ -22,8 +22,8 @@ export function detectVrVideo(item, videoElement = null) {
   // e.g. "VR", "VR180", "180_SBS", "360_SBS", "180TB", "360TB", "180LR", "360LR", "Fisheye180", "VRG", "[VR]", "(VR)", "-VR.", "_VR."
   const isExplicitVrKeyword = 
     /(?:^|[^a-z0-9])(vr180|vr360|180_?sbs|360_?sbs|180_?tb|360_?tb|180_?lr|360_?lr|fisheye180|fisheye|vr-?video|vrg)(?:[^a-z0-9]|$)/i.test(combinedText) ||
-    /[-_\[(]vr[-_\]\.\s]/i.test(name) ||
-    /[-_\[(]vr[-_\]\.\s]/i.test(path) ||
+    /[-_[(]vr[-_\]\s.]/i.test(name) ||
+    /[-_[(]vr[-_\]\s.]/i.test(path) ||
     /[/\\]vr[/\\]/i.test(path) ||
     /[/\\]vr/i.test(path);
 

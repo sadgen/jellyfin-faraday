@@ -10,7 +10,7 @@ export class JellyfinClient {
     this.auth = this.loadStoredAuth();
     this.deviceId = this.getOrCreateDeviceId();
     this.clientName = 'JellyfinFaraday';
-    this.clientVersion = '0.2.0';
+    this.clientVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.2.0';
     this.deviceName = 'Web Browser';
   }
 
@@ -625,7 +625,7 @@ export class JellyfinClient {
   async reportPlayback(itemId, positionSec = 0, isPaused = false, type = 'Progress') {
     if (!this.auth.isConfigured || !itemId) return false;
     const endpoint = type === 'Started' ? '' : `/${type}`;
-    const url = `${this.auth.serverUrl}/Sessions/Playing${endpoint}?api_key=${this.auth.token}`;
+    const url = `${this.auth.serverUrl}/Sessions/Playing${endpoint}`;
     const body = {
       ItemId: itemId,
       PositionTicks: Math.floor(positionSec * 10000000),

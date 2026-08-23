@@ -220,6 +220,23 @@ export default function FloatingVideoWindow({
     syncSubtitles();
   }, [syncSubtitles]);
 
+  const playbackSpeedRef = useRef(playbackSpeed);
+  playbackSpeedRef.current = playbackSpeed;
+  const isMutedRef = useRef(isMuted);
+  isMutedRef.current = isMuted;
+  const itemRef = useRef(item);
+  itemRef.current = item;
+  const onUpdateItemRef = useRef(onUpdateItem);
+  onUpdateItemRef.current = onUpdateItem;
+
+  // Cleanup timers on component unmount
+  useEffect(() => {
+    return () => {
+      if (wheelTimerRef.current) clearTimeout(wheelTimerRef.current);
+      if (playReportTimerRef.current) clearInterval(playReportTimerRef.current);
+    };
+  }, []);
+
   const currentPlayingPart = partsList[currentPartIndex] || item;
   const currentPartId = currentPlayingPart?.Id || item?.Id;
 
@@ -287,11 +304,12 @@ export default function FloatingVideoWindow({
         // Count playback if played for >= 10s
         if (!hasCountedPlayRef.current && videoEl.currentTime >= 10) {
           hasCountedPlayRef.current = true;
-          const nextCount = (item.UserData?.PlayCount || 0) + 1;
-          if (onUpdateItem) {
-            onUpdateItem({
-              ...item,
-              UserData: { ...item.UserData, PlayCount: nextCount }
+          const currentItem = itemRef.current;
+          const nextCount = (currentItem?.UserData?.PlayCount || 0) + 1;
+          if (onUpdateItemRef.current && currentItem) {
+            onUpdateItemRef.current({
+              ...currentItem,
+              UserData: { ...currentItem.UserData, PlayCount: nextCount }
             });
           }
         }
@@ -303,8 +321,8 @@ export default function FloatingVideoWindow({
 
     const setupDirectPlay = () => {
       videoEl.src = directStreamUrl;
-      videoEl.playbackRate = playbackSpeed;
-      videoEl.muted = isMuted;
+      videoEl.playbackRate = playbackSpeedRef.current;
+      videoEl.muted = isMutedRef.current;
       videoEl.play().catch(() => {
         videoEl.muted = true;
         setIsMuted(true);

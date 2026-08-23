@@ -69,7 +69,7 @@ export default function InlineVrCanvas({
         geometry.scale(-1, 1, 1);
         break;
 
-      case '180_3d_sbs':
+      case '180_3d_sbs': {
         // 180 SBS 3D: Map left eye half to front 180 dome
         geometry = new THREE.SphereGeometry(radius, 64, 32, -Math.PI / 2, Math.PI, 0, Math.PI);
         geometry.scale(-1, 1, 1);
@@ -79,8 +79,9 @@ export default function InlineVrCanvas({
         }
         uvs180.needsUpdate = true;
         break;
+      }
 
-      case '360_3d_sbs':
+      case '360_3d_sbs': {
         // 360 SBS 3D: Map left eye half to full 360 sphere
         geometry = new THREE.SphereGeometry(radius, 64, 32);
         geometry.scale(-1, 1, 1);
@@ -90,8 +91,9 @@ export default function InlineVrCanvas({
         }
         uvs360.needsUpdate = true;
         break;
+      }
 
-      case '360_3d_tb':
+      case '360_3d_tb': {
         // 360 Top-Bottom 3D: Map top half to full 360 sphere
         geometry = new THREE.SphereGeometry(radius, 64, 32);
         geometry.scale(-1, 1, 1);
@@ -101,6 +103,7 @@ export default function InlineVrCanvas({
         }
         uvsTb.needsUpdate = true;
         break;
+      }
 
       case 'plane_cinema':
         // Curved Virtual Cinema Screen

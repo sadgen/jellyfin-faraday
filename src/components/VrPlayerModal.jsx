@@ -2,12 +2,11 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import Hls from 'hls.js';
 import { jellyfin } from '../api/jellyfinClient';
-import { getTrickplayStyle } from '../utils/trickplay';
 import TrickplayScrubberThumbnail from './TrickplayScrubberThumbnail';
 import { 
-  X, Play, Pause, Volume2, VolumeX, Maximize, 
+  X, Play, Pause, Volume2, VolumeX, 
   RotateCcw, Glasses, 
-  FastForward, SkipBack, SkipForward
+  SkipBack, SkipForward, Compass
 } from 'lucide-react';
 
 const VR_MODES = [
@@ -23,23 +22,24 @@ export default function VrPlayerModal({
   isOpen,
   item,
   onClose,
-  onNext,
-  onPrev
+  initialMode = '180_3d_sbs',
+  onUpdateItem,
+  onPrev,
+  onNext
 }) {
   const containerRef = useRef(null);
   const videoRef = useRef(null);
   const hlsRef = useRef(null);
   const scrubberRef = useRef(null);
-
-  // Three.js scene refs
   const sceneRef = useRef(null);
   const cameraRef = useRef(null);
   const rendererRef = useRef(null);
   const meshRef = useRef(null);
   const textureRef = useRef(null);
   const animFrameRef = useRef(null);
+  const playReportTimerRef = useRef(null);
+  const hasCountedPlayRef = useRef(false);
 
-  // VR Camera Rotation & Interaction State
   const isUserInteractingRef = useRef(false);
   const onPointerDownPointerXRef = useRef(0);
   const onPointerDownPointerYRef = useRef(0);
@@ -51,12 +51,7 @@ export default function VrPlayerModal({
   const thetaRef = useRef(0);
   const fovRef = useRef(100);
 
-  // VR Config State
-  const [vrMode, setVrMode] = useState('180_3d_sbs');
-  const [fov, setFov] = useState(100);
-  const [isStereoView, setIsStereoView] = useState(false); // Split screen for mobile VR headset
-
-  // Video State
+  const [vrMode, setVrMode] = useState(initialMode);
   const [isPlaying, setIsPlaying] = useState(true);
   const [isMuted, setIsMuted] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState(1.0);
@@ -64,18 +59,17 @@ export default function VrPlayerModal({
   const [progress, setProgress] = useState(0);
   const [currentTimeText, setCurrentTimeText] = useState('00:00');
   const [durationText, setDurationText] = useState('00:00');
-  const [rawDuration, setRawDuration] = useState(0);
-
-  // Trickplay Hover State
+  const [_rawDuration, setRawDuration] = useState(0);
+  const [fov, setFov] = useState(100);
   const [hoverScrubberTime, setHoverScrubberTime] = useState(null);
   const [hoverScrubberPercent, setHoverScrubberPercent] = useState(0);
   const [scrubberWidth, setScrubberWidth] = useState(600);
   const isDraggingScrubberRef = useRef(false);
 
-  // Re-build geometry and UV mapping based on VR mode
+  // Setup Mesh Geometry based on VR Mode
   const setupGeometry = useCallback((mode) => {
     const scene = sceneRef.current;
-    if (!scene || !textureRef.current) return;
+    if (!scene) return;
 
     if (meshRef.current) {
       scene.remove(meshRef.current);
@@ -88,13 +82,14 @@ export default function VrPlayerModal({
     const radius = 500;
 
     switch (mode) {
-      case '180_2d':
+      case '180_2d': {
         // 180 Hemisphere
         geometry = new THREE.SphereGeometry(radius, 64, 32, -Math.PI / 2, Math.PI, 0, Math.PI);
         geometry.scale(-1, 1, 1);
         break;
+      }
 
-      case '180_3d_sbs':
+      case '180_3d_sbs': {
         // 180 SBS 3D: Map left half of texture to front 180 dome
         geometry = new THREE.SphereGeometry(radius, 64, 32, -Math.PI / 2, Math.PI, 0, Math.PI);
         geometry.scale(-1, 1, 1);
@@ -105,8 +100,9 @@ export default function VrPlayerModal({
         }
         uvs180.needsUpdate = true;
         break;
+      }
 
-      case '360_3d_sbs':
+      case '360_3d_sbs': {
         // 360 SBS 3D: Map left half to full 360 sphere
         geometry = new THREE.SphereGeometry(radius, 64, 32);
         geometry.scale(-1, 1, 1);
@@ -116,8 +112,9 @@ export default function VrPlayerModal({
         }
         uvs360.needsUpdate = true;
         break;
+      }
 
-      case '360_3d_tb':
+      case '360_3d_tb': {
         // 360 Top-Bottom 3D: Map top half to full 360 sphere
         geometry = new THREE.SphereGeometry(radius, 64, 32);
         geometry.scale(-1, 1, 1);
@@ -127,19 +124,22 @@ export default function VrPlayerModal({
         }
         uvsTb.needsUpdate = true;
         break;
+      }
 
-      case 'plane_cinema':
+      case 'plane_cinema': {
         // Curved Virtual Cinema Screen
         geometry = new THREE.CylinderGeometry(radius * 0.8, radius * 0.8, radius * 0.9, 48, 1, true, -Math.PI / 3, (2 * Math.PI) / 3);
         geometry.scale(-1, 1, 1);
         break;
+      }
 
       case '360_2d':
-      default:
+      default: {
         // Full 360 Equirectangular Sphere
         geometry = new THREE.SphereGeometry(radius, 64, 32);
         geometry.scale(-1, 1, 1);
         break;
+      }
     }
 
     const material = new THREE.MeshBasicMaterial({
@@ -234,11 +234,28 @@ export default function VrPlayerModal({
     };
   }, [isOpen, setupGeometry, vrMode]);
 
+  const playbackSpeedRef = useRef(playbackSpeed);
+  playbackSpeedRef.current = playbackSpeed;
+  const isMutedRef = useRef(isMuted);
+  isMutedRef.current = isMuted;
+  const itemRef = useRef(item);
+  itemRef.current = item;
+  const onUpdateItemRef = useRef(onUpdateItem);
+  onUpdateItemRef.current = onUpdateItem;
+
+  // Cleanup timers on component unmount
+  useEffect(() => {
+    return () => {
+      if (playReportTimerRef.current) clearInterval(playReportTimerRef.current);
+    };
+  }, []);
+
   // Load video stream (Direct / HLS)
   useEffect(() => {
     if (!isOpen || !item?.Id || !videoRef.current) return;
 
     setIsLoading(true);
+    hasCountedPlayRef.current = false;
     const videoEl = videoRef.current;
 
     if (hlsRef.current) {
@@ -246,13 +263,37 @@ export default function VrPlayerModal({
       hlsRef.current = null;
     }
 
+    // Report playback start to Jellyfin
+    jellyfin.reportPlayback(item.Id, 0, false, 'Started');
+
+    // Periodic progress reporting (every 10s)
+    if (playReportTimerRef.current) clearInterval(playReportTimerRef.current);
+    playReportTimerRef.current = setInterval(() => {
+      if (videoEl && !videoEl.paused && videoEl.currentTime > 0) {
+        jellyfin.reportPlayback(item.Id, videoEl.currentTime, false, 'Progress');
+        
+        // Count playback if played for >= 10s
+        if (!hasCountedPlayRef.current && videoEl.currentTime >= 10) {
+          hasCountedPlayRef.current = true;
+          const currentItem = itemRef.current;
+          const nextCount = (currentItem?.UserData?.PlayCount || 0) + 1;
+          if (onUpdateItemRef.current && currentItem) {
+            onUpdateItemRef.current({
+              ...currentItem,
+              UserData: { ...currentItem.UserData, PlayCount: nextCount }
+            });
+          }
+        }
+      }
+    }, 10000);
+
     const directUrl = jellyfin.getStreamUrl(item.Id);
     const hlsUrl = jellyfin.getHlsUrl(item.Id);
 
     const setupDirect = () => {
       videoEl.src = directUrl;
-      videoEl.muted = isMuted;
-      videoEl.playbackRate = playbackSpeed;
+      videoEl.muted = isMutedRef.current;
+      videoEl.playbackRate = playbackSpeedRef.current;
       videoEl.play().catch(() => {
         videoEl.muted = true;
         setIsMuted(true);
@@ -267,6 +308,8 @@ export default function VrPlayerModal({
         hls.loadSource(hlsUrl);
         hls.attachMedia(videoEl);
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          videoEl.muted = isMutedRef.current;
+          videoEl.playbackRate = playbackSpeedRef.current;
           videoEl.play().catch(() => {
             videoEl.muted = true;
             setIsMuted(true);
@@ -282,6 +325,10 @@ export default function VrPlayerModal({
     setupDirect();
 
     return () => {
+      if (playReportTimerRef.current) clearInterval(playReportTimerRef.current);
+      if (videoEl && videoEl.currentTime > 0) {
+        jellyfin.reportPlayback(item.Id, videoEl.currentTime, true, 'Stopped');
+      }
       videoEl.removeEventListener('error', setupHls);
       if (hlsRef.current) {
         hlsRef.current.destroy();

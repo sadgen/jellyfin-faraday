@@ -126,6 +126,23 @@ export default function VideoTile({
     }
   }, [playbackSpeed]);
 
+  const playbackSpeedRef = useRef(playbackSpeed);
+  playbackSpeedRef.current = playbackSpeed;
+  const isTileMutedRef = useRef(isTileMuted);
+  isTileMutedRef.current = isTileMuted;
+  const itemRef = useRef(item);
+  itemRef.current = item;
+  const onUpdateItemRef = useRef(onUpdateItem);
+  onUpdateItemRef.current = onUpdateItem;
+
+  // Cleanup timers on component unmount
+  useEffect(() => {
+    return () => {
+      if (wheelTimerRef.current) clearTimeout(wheelTimerRef.current);
+      if (playReportTimerRef.current) clearInterval(playReportTimerRef.current);
+    };
+  }, []);
+
   // Load and play video when item changes + Report Playback to Jellyfin
   useEffect(() => {
     if (!item?.Id) {
@@ -180,11 +197,12 @@ export default function VideoTile({
         // Count playback if played for >= 10s
         if (!hasCountedPlayRef.current && videoEl.currentTime >= 10) {
           hasCountedPlayRef.current = true;
-          const nextCount = (item.UserData?.PlayCount || 0) + 1;
-          if (onUpdateItem) {
-            onUpdateItem({
-              ...item,
-              UserData: { ...item.UserData, PlayCount: nextCount }
+          const currentItem = itemRef.current;
+          const nextCount = (currentItem?.UserData?.PlayCount || 0) + 1;
+          if (onUpdateItemRef.current && currentItem) {
+            onUpdateItemRef.current({
+              ...currentItem,
+              UserData: { ...currentItem.UserData, PlayCount: nextCount }
             });
           }
         }
@@ -196,8 +214,8 @@ export default function VideoTile({
 
     const setupDirectPlay = () => {
       videoEl.src = directStreamUrl;
-      videoEl.playbackRate = playbackSpeed;
-      videoEl.muted = isTileMuted;
+      videoEl.playbackRate = playbackSpeedRef.current;
+      videoEl.muted = isTileMutedRef.current;
       videoEl.play().catch(() => {
         videoEl.muted = true;
         setIsTileMuted(true);
@@ -216,7 +234,7 @@ export default function VideoTile({
         hls.loadSource(hlsUrl);
         hls.attachMedia(videoEl);
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
-          videoEl.playbackRate = playbackSpeed;
+          videoEl.playbackRate = playbackSpeedRef.current;
           videoEl.play().catch(() => {
             videoEl.muted = true;
             setIsTileMuted(true);
@@ -226,7 +244,7 @@ export default function VideoTile({
         hls.on(Hls.Events.ERROR, (_, data) => {
           if (data.fatal) {
             setHasError(true);
-            setErrorMessage('视频解码或转码失败');
+            setErrorMessage('视频加载失败，请重试');
           }
         });
       } else if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
@@ -250,6 +268,7 @@ export default function VideoTile({
         jellyfin.reportPlayback(item.Id, videoEl.currentTime, true, 'Stopped');
       }
       videoEl.removeEventListener('error', handleDirectError);
+      videoEl.removeEventListener('loadedmetadata', onLoadedMetadata);
       if (hlsRef.current) {
         hlsRef.current.destroy();
         hlsRef.current = null;

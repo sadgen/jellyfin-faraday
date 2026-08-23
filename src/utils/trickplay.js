@@ -88,6 +88,15 @@ export function getTrickplayInfo(item) {
   };
 }
 
+const spriteCache = new Set();
+
+export function preloadTrickplaySprite(imageUrl) {
+  if (!imageUrl || typeof Image === 'undefined' || spriteCache.has(imageUrl)) return;
+  spriteCache.add(imageUrl);
+  const img = new Image();
+  img.src = imageUrl;
+}
+
 /**
  * Calculate sprite URL and CSS background coordinates for a given playback time in seconds
  */
@@ -104,6 +113,8 @@ export function getTrickplayStyle(item, timeInSeconds) {
   const spriteIdx = isSprite ? Math.floor(totalTiles / tilesPerSheet) : totalTiles;
 
   const imageUrl = `${jellyfin.auth.serverUrl}/Videos/${targetId}/Trickplay/${tp.width}/${spriteIdx}.jpg?ApiKey=${jellyfin.auth.token}&MediaSourceId=${targetId}`;
+
+  preloadTrickplaySprite(imageUrl);
 
   if (isSprite) {
     const tileIdx = totalTiles % tilesPerSheet;

@@ -4,6 +4,7 @@ import { getTrickplayStyle } from '../utils/trickplay';
 import { detectDuplicateMedia } from '../utils/duplicateChecker';
 import { useExternalPlayer } from '../hooks/useExternalPlayer';
 import MobileActionSheet from './MobileActionSheet';
+import DeleteConfirmModal from './DeleteConfirmModal';
 import { 
   Play, Shuffle, Star, Eye, EyeOff, Search, 
   Edit3, Sparkles, Trash2, Folder, Film, 
@@ -104,14 +105,23 @@ function MediaCard({
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
+  const rafIdRef = useRef(null);
+
   const handleCoverMouseMove = useCallback((e) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    if (!rect.width) return;
-    const percent = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    setHoverPercent(percent);
-    setTrickplayTime(durationSec * percent);
-    // Auto-detect boundary: if card top is less than 300px from viewport top, display below!
-    setIsNearTop(rect.top < 300);
+    const clientX = e.clientX;
+    const currentTarget = e.currentTarget;
+    if (rafIdRef.current) return;
+    rafIdRef.current = requestAnimationFrame(() => {
+      rafIdRef.current = null;
+      if (!currentTarget) return;
+      const rect = currentTarget.getBoundingClientRect();
+      if (!rect.width) return;
+      const percent = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+      setHoverPercent(percent);
+      setTrickplayTime(durationSec * percent);
+      // Auto-detect boundary: if card top is less than 300px from viewport top, display below!
+      setIsNearTop(rect.top < 300);
+    });
   }, [durationSec]);
 
   // Touch tracking for mobile devices (trickplay follows finger)
@@ -134,6 +144,10 @@ function MediaCard({
   }, []);
 
   const handleCoverMouseLeave = useCallback(() => {
+    if (rafIdRef.current) {
+      cancelAnimationFrame(rafIdRef.current);
+      rafIdRef.current = null;
+    }
     setIsHovered(false);
     setShowContextMenu(false);
     setTrickplayTime(null);
@@ -572,6 +586,7 @@ export default function LibraryView({
   const [activeSubTab, setActiveSubTab] = useState('items');
   const [viewLayout, setViewLayout] = useState('poster');
   const [actionSheetItem, setActionSheetItem] = useState(null);
+  const [deleteTargetItem, setDeleteTargetItem] = useState(null);
 
   // Dynamic Poster Columns Slider State (Persisted)
   const [gridColumns, setGridColumns] = useState(() => {
@@ -594,21 +609,38 @@ export default function LibraryView({
   const [personsList, setPersonsList] = useState([]);
   const [collectionsList, setCollectionsList] = useState([]);
 
+  // Progressive Lazy Loading (80 initial + 60 on scroll)
+  const [visibleCount, setVisibleCount] = useState(80);
+
+  useEffect(() => {
+    setVisibleCount(80);
+  }, [selectedViewId, statusFilter, selectedGenre, selectedYear, selectedLetter, searchKeyword, activeSubTab]);
+
   // Duplicate detection across current items
   const { duplicateItemIds, duplicateCount } = useMemo(() => {
     return detectDuplicateMedia(items);
   }, [items]);
 
-  // Load sub-tab data on demand
+  const subTabReqIdRef = useRef(0);
+
+  // Load sub-tab data on demand with race-condition guard
   useEffect(() => {
-    if (!jellyfin.auth.isConfigured) return;
+    if (!jellyfin.auth.isConfigured || !selectedViewId) return;
+
+    const reqId = ++subTabReqIdRef.current;
 
     if (activeSubTab === 'genres') {
-      jellyfin.getGenres(selectedViewId).then(list => setGenresList(list || []));
+      jellyfin.getGenres(selectedViewId).then(list => {
+        if (reqId === subTabReqIdRef.current) setGenresList(list || []);
+      });
     } else if (activeSubTab === 'persons') {
-      jellyfin.getPersons(selectedViewId).then(list => setPersonsList(list || []));
+      jellyfin.getPersons(selectedViewId).then(list => {
+        if (reqId === subTabReqIdRef.current) setPersonsList(list || []);
+      });
     } else if (activeSubTab === 'collections') {
-      jellyfin.getCollections(selectedViewId).then(list => setCollectionsList(list || []));
+      jellyfin.getCollections(selectedViewId).then(list => {
+        if (reqId === subTabReqIdRef.current) setCollectionsList(list || []);
+      });
     }
   }, [activeSubTab, selectedViewId]);
 
@@ -619,6 +651,17 @@ export default function LibraryView({
     }
     return items;
   }, [items, activeSubTab, duplicateItemIds]);
+
+  const displayedSlice = useMemo(() => {
+    return displayItems.slice(0, visibleCount);
+  }, [displayItems, visibleCount]);
+
+  const handleScroll = useCallback((e) => {
+    const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
+    if (scrollHeight - scrollTop - clientHeight < 800) {
+      setVisibleCount(prev => (prev < displayItems.length ? Math.min(displayItems.length, prev + 60) : prev));
+    }
+  }, [displayItems.length]);
 
   // Favorite toggle
   const handleToggleFavorite = async (item) => {
@@ -663,9 +706,12 @@ export default function LibraryView({
     }
   };
 
-  // Delete item
-  const handleDelete = async (item) => {
-    if (!confirm(`确定要从媒体库和磁盘中永久删除「${item.Name}」吗？`)) return;
+  // Delete item: trigger custom modal
+  const handleDelete = (item) => {
+    setDeleteTargetItem(item);
+  };
+
+  const handleConfirmDelete = async (item) => {
     try {
       await jellyfin.deleteItem(item.Id);
       if (onDeleteItem) onDeleteItem(item.Id);
@@ -905,8 +951,11 @@ export default function LibraryView({
         </div>
       </div>
 
-      {/* Main Content Viewport */}
-      <div className="flex-1 overflow-y-auto p-3 sm:p-5 pb-24 md:pb-20">
+      {/* Main Content Viewport with Infinite Progressive Loading */}
+      <div 
+        onScroll={handleScroll}
+        className="flex-1 overflow-y-auto p-3 sm:p-5 pb-24 md:pb-20"
+      >
         {/* SUB-VIEW 1: Genres */}
         {activeSubTab === 'genres' && (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2.5 sm:gap-3">
@@ -1000,7 +1049,7 @@ export default function LibraryView({
               </div>
             ) : viewLayout === 'list' ? (
               <div className="flex flex-col gap-2">
-                {displayItems.map(item => (
+                {displayedSlice.map(item => (
                   <MediaListRow
                     key={item.Id}
                     item={item}
@@ -1020,7 +1069,7 @@ export default function LibraryView({
                   gridTemplateColumns: `repeat(${gridColumns}, minmax(0, 1fr))`
                 }}
               >
-                {displayItems.map(item => (
+                {displayedSlice.map(item => (
                   <MediaCard
                     key={item.Id}
                     item={item}
@@ -1058,6 +1107,14 @@ export default function LibraryView({
         onOpenIdentify={onOpenIdentify}
         onRefreshMetadata={handleRefreshMetadata}
         onDelete={handleDelete}
+      />
+
+      {/* Custom Safe Delete Modal */}
+      <DeleteConfirmModal
+        isOpen={!!deleteTargetItem}
+        item={deleteTargetItem}
+        onConfirm={handleConfirmDelete}
+        onClose={() => setDeleteTargetItem(null)}
       />
     </div>
   );

@@ -17,6 +17,7 @@ function shuffleArray(array) {
  */
 export function useSessionQueue(items = [], filterMode = 'pure_random', activeTileCount = 2, initialItem = null) {
   const [displayedItems, setDisplayedItems] = useState([]);
+  const [remainingCount, setRemainingCount] = useState(0);
   const displayedItemsRef = useRef([]);
 
   const remainingQueueRef = useRef([]);
@@ -34,7 +35,7 @@ export function useSessionQueue(items = [], filterMode = 'pure_random', activeTi
         pool = items.filter(item => item.UserData?.IsFavorite);
         return shuffleArray(pool);
 
-      case 'least_played_random':
+      case 'least_played_random': {
         const playCountMap = new Map();
         items.forEach(item => {
           const count = item.UserData?.PlayCount || 0;
@@ -46,10 +47,12 @@ export function useSessionQueue(items = [], filterMode = 'pure_random', activeTi
           pool = pool.concat(shuffleArray(playCountMap.get(cnt)));
         });
         return pool;
+      }
 
-      case 'latest_random':
+      case 'latest_random': {
         const sortedByDate = [...items].sort((a, b) => new Date(b.DateCreated) - new Date(a.DateCreated));
         return shuffleArray(sortedByDate.slice(0, Math.max(50, activeTileCount * 10)));
+      }
 
       case 'pure_random':
       default:
@@ -101,6 +104,7 @@ export function useSessionQueue(items = [], filterMode = 'pure_random', activeTi
     const initialIds = new Set(initialTiles.map(it => it?.Id).filter(Boolean));
     const remaining = filteredPool.filter(it => !initialIds.has(it.Id));
     remainingQueueRef.current = remaining;
+    setRemainingCount(remaining.length);
 
     consumedIdsSetRef.current = initialIds;
   }, [filteredPool, activeTileCount, initialItem]);
@@ -152,6 +156,8 @@ export function useSessionQueue(items = [], filterMode = 'pure_random', activeTi
       }
     }
 
+    setRemainingCount(remainingQueueRef.current.length);
+
     if (nextItem) {
       setDisplayedItems(prev => {
         const next = [...prev];
@@ -178,7 +184,7 @@ export function useSessionQueue(items = [], filterMode = 'pure_random', activeTi
 
   return {
     displayedItems,
-    remainingCount: remainingQueueRef.current.length,
+    remainingCount,
     totalCount: filteredPool.length,
     consumeNext,
     reshuffleAll,

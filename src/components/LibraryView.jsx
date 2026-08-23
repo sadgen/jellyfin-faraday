@@ -9,7 +9,8 @@ import {
   Edit3, Sparkles, Trash2, Folder, Film, 
   ArrowUpDown, X, RefreshCw, Layers, LayoutGrid,
   Grid, List, MoreVertical, ExternalLink, Calendar,
-  Users, Tag, Check, ChevronRight, Tv, Glasses
+  Users, Tag, Check, ChevronRight, Tv, Glasses,
+  SlidersHorizontal
 } from 'lucide-react';
 
 const ALPHABET = ['#', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'];
@@ -571,6 +572,22 @@ export default function LibraryView({
   const [activeSubTab, setActiveSubTab] = useState('items');
   const [viewLayout, setViewLayout] = useState('poster');
   const [actionSheetItem, setActionSheetItem] = useState(null);
+
+  // Dynamic Poster Columns Slider State (Persisted)
+  const [gridColumns, setGridColumns] = useState(() => {
+    const saved = localStorage.getItem('jf_library_grid_cols');
+    if (saved) {
+      const num = parseInt(saved, 10);
+      if (!isNaN(num) && num >= 1 && num <= 12) return num;
+    }
+    return typeof window !== 'undefined' && window.innerWidth < 640 ? 3 : 6;
+  });
+
+  const handleGridColumnsChange = (val) => {
+    const num = parseInt(val, 10);
+    setGridColumns(num);
+    localStorage.setItem('jf_library_grid_cols', String(num));
+  };
   
   // Secondary metadata state
   const [genresList, setGenresList] = useState([]);
@@ -746,6 +763,26 @@ export default function LibraryView({
               );
             })}
           </div>
+
+          {/* Poster Size / Columns Slider */}
+          {viewLayout !== 'list' && (
+            <div className="flex items-center gap-1.5 bg-black/50 px-2 py-1 rounded-xl border border-white/10 text-xs text-gray-300 flex-shrink-0">
+              <SlidersHorizontal size={12} className="text-cyan-400 flex-shrink-0" />
+              <input
+                type="range"
+                min={1}
+                max={12}
+                step={1}
+                value={gridColumns}
+                onChange={(e) => handleGridColumnsChange(e.target.value)}
+                className="w-14 sm:w-20 accent-cyan-400 h-1.5 bg-white/20 rounded-lg cursor-pointer appearance-none"
+                title={`拖拽滑块调整每行海报大小与列数 (当前: ${gridColumns} 列)`}
+              />
+              <span className="text-[10px] font-mono text-cyan-300 font-bold min-w-[24px] text-right">
+                {gridColumns}列
+              </span>
+            </div>
+          )}
 
           {/* View Layout Switcher */}
           <div className="flex items-center bg-black/50 p-0.5 rounded-xl border border-white/10 gap-0.5 flex-shrink-0">
@@ -977,11 +1014,12 @@ export default function LibraryView({
                 ))}
               </div>
             ) : (
-              <div className={`grid gap-2.5 sm:gap-3.5 ${
-                viewLayout === 'backdrop'
-                  ? 'grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5'
-                  : 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8'
-              }`}>
+              <div 
+                className="grid gap-2.5 sm:gap-3.5"
+                style={{
+                  gridTemplateColumns: `repeat(${gridColumns}, minmax(0, 1fr))`
+                }}
+              >
                 {displayItems.map(item => (
                   <MediaCard
                     key={item.Id}

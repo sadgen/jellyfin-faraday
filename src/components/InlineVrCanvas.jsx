@@ -41,6 +41,12 @@ export default function InlineVrCanvas({
   const [fov, setFov] = useState(100);
   const [isGyroActive, setIsGyroActive] = useState(false);
 
+  useEffect(() => {
+    if (initialMode) {
+      setVrMode(initialMode);
+    }
+  }, [initialMode]);
+
   // Setup Geometry based on VR mode
   const setupGeometry = useCallback((mode) => {
     const scene = sceneRef.current;

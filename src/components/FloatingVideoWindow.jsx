@@ -7,6 +7,7 @@ import { useTouchGestures } from '../hooks/useTouchGestures';
 import TrickplayScrubberThumbnail from './TrickplayScrubberThumbnail';
 import InlineVrCanvas from './InlineVrCanvas';
 import SubtitleModal from './SubtitleModal';
+import { detectVrVideo } from '../utils/vrDetector';
 import { 
   Play, Pause, SkipForward, Volume2, VolumeX, Maximize, 
   X, ExternalLink, Film, Star, Eye, EyeOff, Image as ImageIcon,
@@ -98,8 +99,9 @@ export default function FloatingVideoWindow({
   // Pinned Poster PIP: ENABLED BY DEFAULT (1X on Mobile, 1.5X on Desktop)
   const [showPinnedPoster, setShowPinnedPoster] = useState(true);
 
-  // INLINE VR Projection State
+  // INLINE VR Projection State (Auto-detected on load)
   const [isVrActive, setIsVrActive] = useState(false);
+  const [detectedVrMode, setDetectedVrMode] = useState('180_3d_sbs');
 
   // Progress & Duration
   const [progress, setProgress] = useState(0);
@@ -248,9 +250,24 @@ export default function FloatingVideoWindow({
       ? windowData.startSecond
       : (currentPlayingPart.UserData?.PlaybackPositionTicks ? currentPlayingPart.UserData.PlaybackPositionTicks / 10000000 : 0);
 
+    // Auto-detect VR Video format (pure 2D vs 3D-to-2D vs true VR)
+    const initialVr = detectVrVideo(currentPlayingPart, videoEl);
+    if (initialVr.isVr) {
+      setIsVrActive(true);
+      setDetectedVrMode(initialVr.mode);
+    } else {
+      setIsVrActive(false);
+    }
+
     const onLoadedMetadata = () => {
       if (initialSeekTime > 0 && videoEl) {
         videoEl.currentTime = initialSeekTime;
+      }
+      // Re-verify with decoded video dimensions
+      const vrCheck = detectVrVideo(currentPlayingPart, videoEl);
+      if (vrCheck.isVr) {
+        setIsVrActive(true);
+        setDetectedVrMode(vrCheck.mode);
       }
     };
     videoEl.addEventListener('loadedmetadata', onLoadedMetadata, { once: true });
@@ -941,6 +958,7 @@ export default function FloatingVideoWindow({
           videoRef={videoRef}
           isActive={isVrActive}
           onClose={() => setIsVrActive(false)}
+          initialMode={detectedVrMode}
         />
 
         {/* Mobile Touch Gesture HUD Overlay */}

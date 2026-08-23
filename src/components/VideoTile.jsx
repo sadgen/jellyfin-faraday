@@ -5,6 +5,7 @@ import { useExternalPlayer } from '../hooks/useExternalPlayer';
 import { useTouchGestures } from '../hooks/useTouchGestures';
 import TrickplayScrubberThumbnail from './TrickplayScrubberThumbnail';
 import InlineVrCanvas from './InlineVrCanvas';
+import { detectVrVideo } from '../utils/vrDetector';
 import { 
   Play, Pause, SkipForward, Volume2, VolumeX, Maximize, 
   Star, Eye, EyeOff, ExternalLink, Zap, Image as ImageIcon,
@@ -39,8 +40,9 @@ export default function VideoTile({
   // Pinned Poster PIP: ENABLED BY DEFAULT and enlarged 1.5x
   const [showPinnedPoster, setShowPinnedPoster] = useState(true);
   
-  // INLINE VR Projection State
+  // INLINE VR Projection State (Auto-detected)
   const [isVrActive, setIsVrActive] = useState(false);
+  const [detectedVrMode, setDetectedVrMode] = useState('180_3d_sbs');
   
   // Progress & Duration
   const [progress, setProgress] = useState(0);
@@ -141,6 +143,25 @@ export default function VideoTile({
 
     const videoEl = videoRef.current;
     if (!videoEl) return;
+
+    // Auto-detect VR Video format (pure 2D vs 3D-to-2D vs true VR)
+    const initialVr = detectVrVideo(item, videoEl);
+    if (initialVr.isVr) {
+      setIsVrActive(true);
+      setDetectedVrMode(initialVr.mode);
+    } else {
+      setIsVrActive(false);
+    }
+
+    const onLoadedMetadata = () => {
+      // Re-verify with decoded video dimensions
+      const vrCheck = detectVrVideo(item, videoEl);
+      if (vrCheck.isVr) {
+        setIsVrActive(true);
+        setDetectedVrMode(vrCheck.mode);
+      }
+    };
+    videoEl.addEventListener('loadedmetadata', onLoadedMetadata, { once: true });
 
     if (hlsRef.current) {
       hlsRef.current.destroy();
@@ -535,6 +556,7 @@ export default function VideoTile({
         videoRef={videoRef}
         isActive={isVrActive}
         onClose={() => setIsVrActive(false)}
+        initialMode={detectedVrMode}
       />
 
       {/* Mobile Touch Gesture HUD Overlay */}

@@ -6,6 +6,7 @@ import { useExternalPlayer } from '../hooks/useExternalPlayer';
 import { useTouchGestures } from '../hooks/useTouchGestures';
 import TrickplayScrubberThumbnail from './TrickplayScrubberThumbnail';
 import InlineVrCanvas from './InlineVrCanvas';
+import { detectVrVideo } from '../utils/vrDetector';
 import { 
   Play, Pause, Volume2, VolumeX, Maximize, 
   Star, Eye, EyeOff, ExternalLink, X, Film, 
@@ -35,6 +36,7 @@ export default function VideoPlayerModal({
   const [errorMessage, setErrorMessage] = useState('');
   const [showPlayerMenu, setShowPlayerMenu] = useState(false);
   const [isVrActive, setIsVrActive] = useState(false);
+  const [detectedVrMode, setDetectedVrMode] = useState('180_3d_sbs');
 
   // Progress & Duration
   const [progress, setProgress] = useState(0);
@@ -111,7 +113,15 @@ export default function VideoPlayerModal({
     setProgress(0);
     setHoverScrubberTime(null);
     setIsWheelSeeking(false);
-    setIsVrActive(false);
+    // Auto-detect VR Video format (pure 2D vs 3D-to-2D vs true VR)
+    const initialVr = detectVrVideo(item, videoEl);
+    if (initialVr.isVr) {
+      setIsVrActive(true);
+      setDetectedVrMode(initialVr.mode);
+    } else {
+      setIsVrActive(false);
+    }
+
     hasCountedPlayRef.current = false;
 
     const videoEl = videoRef.current;
@@ -130,6 +140,12 @@ export default function VideoPlayerModal({
     const onLoadedMetadata = () => {
       if (initialSeekTime > 0 && videoEl) {
         videoEl.currentTime = initialSeekTime;
+      }
+      // Re-verify with decoded video dimensions
+      const vrCheck = detectVrVideo(item, videoEl);
+      if (vrCheck.isVr) {
+        setIsVrActive(true);
+        setDetectedVrMode(vrCheck.mode);
       }
     };
     videoEl.addEventListener('loadedmetadata', onLoadedMetadata, { once: true });
@@ -593,6 +609,7 @@ export default function VideoPlayerModal({
             videoRef={videoRef}
             isActive={isVrActive}
             onClose={() => setIsVrActive(false)}
+            initialMode={detectedVrMode}
           />
 
           {/* Touch Gesture HUD Overlay */}

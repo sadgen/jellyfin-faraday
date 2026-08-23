@@ -23,15 +23,19 @@ const SUB_TABS = [
   { id: 'duplicates', label: '查重清理', icon: Layers }
 ];
 
-const BASE_STATUS_FILTERS = [
+const STATUS_OPTIONS = [
   { id: 'all', label: '全部' },
   { id: 'unplayed', label: '👀 未播完' },
-  { id: 'played', label: '✅ 已播' },
-  { id: 'favorites', label: '⭐ 最爱' },
-  { id: 'play_0', label: '0次' },
-  { id: 'play_1', label: '1次' },
-  { id: 'play_lte_1', label: '≤1次' },
-  { id: 'play_gte_2', label: '≥2次' }
+  { id: 'played', label: '✅ 已播' }
+];
+
+const PLAY_COUNT_OPTIONS = [
+  { id: 'play_0', label: '0次', title: '未播放过 (0次)' },
+  { id: 'play_1', label: '1次', title: '播放过1次' },
+  { id: 'play_lte_1', label: '≤1次', title: '0次或1次' },
+  { id: 'play_2_5', label: '2-5次', title: '播放 2 至 5 次' },
+  { id: 'play_5_10', label: '5-10次', title: '播放 5 至 10 次' },
+  { id: 'play_gte_10', label: '10+次', title: '播放 10 次以上' }
 ];
 
 const SORT_OPTIONS = [
@@ -54,7 +58,7 @@ const SORT_OPTIONS = [
  * - In Poster mode (2:3): Pops up a 480x270 2X-enlarged Trickplay preview
  * - Auto-detects top viewport boundary: pops below card if near top, pops above otherwise!
  */
-function MediaCard({
+const MediaCard = React.memo(function MediaCard({
   item,
   isDuplicate,
   viewLayout = 'poster',
@@ -165,8 +169,12 @@ function MediaCard({
     <div
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={handleCoverMouseLeave}
-      style={{ zIndex: (isHovered || tpStyle) ? 100 : 1 }}
-      className={`group relative flex flex-col bg-slate-900/50 rounded-xl transition-all duration-300 transform hover:-translate-y-1 select-none ${
+      style={{
+        zIndex: (isHovered || tpStyle) ? 100 : 1,
+        contentVisibility: 'auto',
+        containIntrinsicSize: isBackdrop ? '260px 180px' : '200px 300px'
+      }}
+      className={`group relative flex flex-col bg-slate-900/50 rounded-xl transition-transform duration-150 hover:-translate-y-1 select-none will-change-transform ${
         isDuplicate 
           ? 'border border-red-500/60 shadow-lg shadow-red-500/10' 
           : 'border border-white/5 hover:border-cyan-500/40 hover:shadow-xl hover:shadow-cyan-500/10'
@@ -449,12 +457,12 @@ function MediaCard({
       </div>
     </div>
   );
-}
+});
 
 /**
  * Detailed List Row View
  */
-function MediaListRow({
+const MediaListRow = React.memo(function MediaListRow({
   item,
   isDuplicate,
   onPlay,
@@ -552,7 +560,7 @@ function MediaListRow({
       </div>
     </div>
   );
-}
+});
 
 export default function LibraryView({
   items = [],
@@ -587,6 +595,8 @@ export default function LibraryView({
 }) {
   const [activeSubTab, setActiveSubTab] = useState('items');
   const [viewLayout, setViewLayout] = useState('poster');
+  const [favoriteFilter, setFavoriteFilter] = useState('all');
+  const [playCountFilter, setPlayCountFilter] = useState('all');
   const [actionSheetItem, setActionSheetItem] = useState(null);
   const [deleteTargetItem, setDeleteTargetItem] = useState(null);
 
@@ -632,7 +642,7 @@ export default function LibraryView({
 
   useEffect(() => {
     setVisibleCount(80);
-  }, [selectedViewId, statusFilter, selectedGenre, selectedYear, searchKeyword, activeSubTab]);
+  }, [selectedViewId, statusFilter, favoriteFilter, playCountFilter, selectedGenre, selectedYear, searchKeyword, activeSubTab]);
 
   // Duplicate detection across current items
   const { duplicateItemIds, duplicateCount } = useMemo(() => {
@@ -669,18 +679,43 @@ export default function LibraryView({
       result = items.filter(it => duplicateItemIds.has(it.Id));
     }
 
-    if (statusFilter === 'play_0') {
+    // 1. Playback status filter (unplayed vs played)
+    if (statusFilter === 'unplayed') {
+      result = result.filter(it => !it.UserData?.Played);
+    } else if (statusFilter === 'played') {
+      result = result.filter(it => !!it.UserData?.Played);
+    }
+
+    // 2. Favorites filter (favorite vs not_favorite)
+    if (favoriteFilter === 'favorite') {
+      result = result.filter(it => !!it.UserData?.IsFavorite);
+    } else if (favoriteFilter === 'not_favorite') {
+      result = result.filter(it => !it.UserData?.IsFavorite);
+    }
+
+    // 3. Play count filter (mutually exclusive)
+    if (playCountFilter === 'play_0') {
       result = result.filter(it => (it.UserData?.PlayCount || 0) === 0 && !it.UserData?.Played);
-    } else if (statusFilter === 'play_1') {
+    } else if (playCountFilter === 'play_1') {
       result = result.filter(it => (it.UserData?.PlayCount || 0) === 1);
-    } else if (statusFilter === 'play_lte_1') {
+    } else if (playCountFilter === 'play_lte_1') {
       result = result.filter(it => (it.UserData?.PlayCount || 0) <= 1);
-    } else if (statusFilter === 'play_gte_2') {
-      result = result.filter(it => (it.UserData?.PlayCount || 0) >= 2);
+    } else if (playCountFilter === 'play_2_5') {
+      result = result.filter(it => {
+        const count = it.UserData?.PlayCount || 0;
+        return count >= 2 && count <= 5;
+      });
+    } else if (playCountFilter === 'play_5_10') {
+      result = result.filter(it => {
+        const count = it.UserData?.PlayCount || 0;
+        return count >= 5 && count <= 10;
+      });
+    } else if (playCountFilter === 'play_gte_10') {
+      result = result.filter(it => (it.UserData?.PlayCount || 0) >= 10);
     }
 
     return result;
-  }, [items, activeSubTab, duplicateItemIds, statusFilter]);
+  }, [items, activeSubTab, duplicateItemIds, statusFilter, favoriteFilter, playCountFilter]);
 
   // Sync filtered items to parent container (for auto-refilling floating windows)
   useEffect(() => {
@@ -693,15 +728,22 @@ export default function LibraryView({
     return displayItems.slice(0, visibleCount);
   }, [displayItems, visibleCount]);
 
+  const scrollRafRef = useRef(null);
   const handleScroll = useCallback((e) => {
-    const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
-    if (scrollHeight - scrollTop - clientHeight < 800) {
-      setVisibleCount(prev => (prev < displayItems.length ? Math.min(displayItems.length, prev + 60) : prev));
-    }
+    const target = e.currentTarget;
+    if (scrollRafRef.current) return;
+    scrollRafRef.current = requestAnimationFrame(() => {
+      scrollRafRef.current = null;
+      if (!target) return;
+      const { scrollTop, scrollHeight, clientHeight } = target;
+      if (scrollHeight - scrollTop - clientHeight < 1000) {
+        setVisibleCount(prev => (prev < displayItems.length ? Math.min(displayItems.length, prev + 60) : prev));
+      }
+    });
   }, [displayItems.length]);
 
   // Favorite toggle
-  const handleToggleFavorite = async (item) => {
+  const handleToggleFavorite = useCallback(async (item) => {
     const nextFav = !item.UserData?.IsFavorite;
     if (onUpdateItem) {
       onUpdateItem({
@@ -714,10 +756,10 @@ export default function LibraryView({
     } catch (err) {
       console.error('Failed to toggle favorite:', err);
     }
-  };
+  }, [onUpdateItem]);
 
   // Played toggle
-  const handleTogglePlayed = async (item) => {
+  const handleTogglePlayed = useCallback(async (item) => {
     const nextPlayed = !item.UserData?.Played;
     const playCount = nextPlayed ? (item.UserData?.PlayCount || 0) + 1 : Math.max(0, (item.UserData?.PlayCount || 1) - 1);
     if (onUpdateItem) {
@@ -731,22 +773,22 @@ export default function LibraryView({
     } catch (err) {
       console.error('Failed to toggle played:', err);
     }
-  };
+  }, [onUpdateItem]);
 
   // Refresh metadata
-  const handleRefreshMetadata = async (item) => {
+  const handleRefreshMetadata = useCallback(async (item) => {
     try {
       await jellyfin.refreshItemMetadata(item.Id);
       alert(`已向 Jellyfin 发送刷新「${item.Name}」元数据请求`);
     } catch (err) {
       alert('刷新失败: ' + err.message);
     }
-  };
+  }, []);
 
   // Delete item: trigger custom modal
-  const handleDelete = (item) => {
+  const handleDelete = useCallback((item) => {
     setDeleteTargetItem(item);
-  };
+  }, []);
 
   const handleConfirmDelete = async (item) => {
     try {
@@ -925,21 +967,79 @@ export default function LibraryView({
             )}
           </div>
 
-          {/* Status & Play Count Filter Buttons */}
-          <div className="flex items-center bg-black/40 p-0.5 rounded-xl border border-white/5 gap-0.5 overflow-x-auto min-w-0 flex-1 sm:flex-initial">
-            {BASE_STATUS_FILTERS.map(f => (
+          {/* Filter Bar with Status, Favorites and Play Count */}
+          <div className="flex items-center bg-black/40 p-0.5 rounded-xl border border-white/5 gap-1 overflow-x-auto min-w-0 flex-1 sm:flex-initial">
+            {/* Status (Mutually Exclusive: 全部 / 未播完 / 已播) */}
+            <div className="flex items-center gap-0.5">
+              {STATUS_OPTIONS.map(f => {
+                const active = (statusFilter || 'all') === f.id;
+                return (
+                  <button
+                    key={f.id}
+                    onClick={() => onStatusFilterChange(active && f.id !== 'all' ? 'all' : f.id)}
+                    className={`px-2 py-1 rounded-lg transition flex-shrink-0 text-xs ${
+                      active
+                        ? 'bg-slate-700 text-cyan-300 font-medium shadow'
+                        : 'text-gray-400 hover:text-white'
+                    }`}
+                  >
+                    {f.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="h-3.5 w-px bg-white/10 mx-0.5 flex-shrink-0" />
+
+            {/* Favorites Filter (Mutually Exclusive Pair: 最爱 / 非最爱) */}
+            <div className="flex items-center gap-0.5">
               <button
-                key={f.id}
-                onClick={() => onStatusFilterChange(f.id)}
-                className={`px-2 py-1 rounded-lg transition flex-shrink-0 text-xs ${
-                  statusFilter === f.id
+                onClick={() => setFavoriteFilter(prev => prev === 'favorite' ? 'all' : 'favorite')}
+                className={`px-2 py-1 rounded-lg transition flex-shrink-0 text-xs flex items-center gap-1 ${
+                  favoriteFilter === 'favorite'
+                    ? 'bg-amber-500/25 border border-amber-500/40 text-amber-300 font-medium shadow'
+                    : 'text-gray-400 hover:text-amber-300'
+                }`}
+                title="只看最爱视频 (可与状态及播放次数叠加筛选)"
+              >
+                <Star size={11} className={favoriteFilter === 'favorite' ? 'fill-amber-400 text-amber-400' : ''} />
+                <span>最爱</span>
+              </button>
+              <button
+                onClick={() => setFavoriteFilter(prev => prev === 'not_favorite' ? 'all' : 'not_favorite')}
+                className={`px-2 py-1 rounded-lg transition flex-shrink-0 text-xs flex items-center gap-1 ${
+                  favoriteFilter === 'not_favorite'
                     ? 'bg-slate-700 text-cyan-300 font-medium shadow'
                     : 'text-gray-400 hover:text-white'
                 }`}
+                title="只看非最爱视频 (可与状态及播放次数叠加筛选)"
               >
-                {f.label}
+                <span>非最爱</span>
               </button>
-            ))}
+            </div>
+
+            <div className="h-3.5 w-px bg-white/10 mx-0.5 flex-shrink-0" />
+
+            {/* Play Count Filter (Mutually Exclusive: 0次 / 1次 / ≤1次 / 2-5次 / 5-10次 / 10+次) */}
+            <div className="flex items-center gap-0.5">
+              {PLAY_COUNT_OPTIONS.map(opt => {
+                const active = playCountFilter === opt.id;
+                return (
+                  <button
+                    key={opt.id}
+                    onClick={() => setPlayCountFilter(active ? 'all' : opt.id)}
+                    className={`px-2 py-1 rounded-lg transition flex-shrink-0 text-xs ${
+                      active
+                        ? 'bg-slate-700 text-cyan-300 font-medium shadow'
+                        : 'text-gray-400 hover:text-white'
+                    }`}
+                    title={opt.title}
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           {/* Filtered Total Count Badge */}

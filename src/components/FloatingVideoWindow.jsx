@@ -730,7 +730,7 @@ export default function FloatingVideoWindow({
         left: `${layout.left}px`,
         top: `${layout.top}px`,
         width: `${layout.width}px`,
-        zIndex: 50 + slotIndex,
+        zIndex: hoverScrubberTime !== null ? 999 : (isDragging || isResizing ? 500 : 50 + (slotIndex === 1 ? 5 : (slotIndex === 0 ? 1 : 0))),
         transition: (isDragging || isResizing)
           ? 'none' 
           : 'left 0.3s cubic-bezier(0.2, 0, 0, 1), top 0.3s cubic-bezier(0.2, 0, 0, 1), width 0.3s cubic-bezier(0.2, 0, 0, 1), height 0.3s cubic-bezier(0.2, 0, 0, 1), box-shadow 0.2s'
@@ -1051,7 +1051,7 @@ export default function FloatingVideoWindow({
             hoverTime={hoverScrubberTime}
             hoverPercent={hoverScrubberPercent}
             containerWidth={scrubberWidth}
-            position="below"
+            position={slotIndex === 1 ? 'below' : 'above'}
           />
 
           <div

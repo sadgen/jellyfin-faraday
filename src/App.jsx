@@ -648,6 +648,7 @@ export default function App() {
           onClose={() => setVrPlayingItem(null)}
           onNext={() => navigateVrItem(vrPlayingItem, 1)}
           onPrev={() => navigateVrItem(vrPlayingItem, -1)}
+          onUpdateItem={handleUpdateItem}
         />
 
         {/* Login Modal */}

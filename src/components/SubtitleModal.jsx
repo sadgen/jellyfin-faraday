@@ -17,6 +17,9 @@ export default function SubtitleModal({
   const [selectedLanguage, setSelectedLanguage] = useState('chi');
   const [isSearching, setIsSearching] = useState(false);
   const [remoteSubtitles, setRemoteSubtitles] = useState([]);
+  const [downloadingId, setDownloadingId] = useState(null);
+  const [errorMsg, setErrorMsg] = useState('');
+  const [successMsg, setSuccessMsg] = useState('');
   const [playbackData, setPlaybackData] = useState(null);
 
   // Fetch full playback info with MediaSources & MediaStreams when opened

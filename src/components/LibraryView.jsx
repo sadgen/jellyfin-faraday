@@ -942,6 +942,15 @@ export default function LibraryView({
             ))}
           </div>
 
+          {/* Filtered Total Count Badge */}
+          <div 
+            className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-cyan-950/40 border border-cyan-500/30 text-cyan-300 text-xs font-mono font-bold flex-shrink-0"
+            title={`当前筛选条件下的视频总数: ${displayItems.length} 部`}
+          >
+            <Film size={12} className="text-cyan-400 flex-shrink-0" />
+            <span>共 {displayItems.length} 部</span>
+          </div>
+
           {/* Sort Selector */}
           <div className="flex items-center gap-1 bg-black/40 px-2 py-1 rounded-xl border border-white/5 text-gray-300 text-xs">
             <ArrowUpDown size={12} className="text-cyan-400" />

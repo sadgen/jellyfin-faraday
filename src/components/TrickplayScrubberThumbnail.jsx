@@ -32,10 +32,8 @@ export default function TrickplayScrubberThumbnail({
   const thumbWidth = isMobile ? 180 : Math.min(380, Math.max(260, cWidth * 0.75));
   const thumbHeight = Math.round(thumbWidth * 9 / 16);
 
-  const rawX = (hoverPercent || 0) * cWidth;
-  // 窄容器时 min/max 边界可能倒挂（cWidth < thumbWidth），先归一化再 clamp，防止气泡溢出进度条左侧
-  const halfThumb = Math.min(thumbWidth / 2 + 4, cWidth / 2);
-  const left = Math.max(halfThumb, Math.min(cWidth - halfThumb, rawX));
+  // Directly follow hoverPercent (0% to 100%) so the pointer aligns precisely with cursor/finger at extreme ends (0px to 100%), allowing the thumbnail to naturally protrude outside the frame
+  const left = Math.max(0, Math.min(cWidth, (hoverPercent || 0) * cWidth));
 
   const isBelow = position === 'below';
 

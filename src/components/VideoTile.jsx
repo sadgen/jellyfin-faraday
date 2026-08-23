@@ -487,9 +487,7 @@ export default function VideoTile({
         setIsHovered(false);
         setShowPlayerMenu(false);
       }}
-      className={`relative w-full h-full bg-black rounded-xl border border-slate-800/80 shadow-2xl flex flex-col justify-center items-center select-none touch-none ${
-        is4Window ? 'overflow-visible' : 'overflow-hidden'
-      }`}
+      className="relative w-full h-full bg-black rounded-xl border border-slate-800/80 shadow-2xl flex flex-col justify-center items-center select-none touch-none overflow-visible"
       style={{ filter: `brightness(${brightness})`, zIndex: isHovered || isWheelSeeking ? 40 : 10 }}
       {...touchHandlers}
     >
@@ -652,7 +650,7 @@ export default function VideoTile({
             onMouseLeave={handleScrubberMouseLeave}
           >
             <div 
-              className="absolute top-0 left-0 bottom-0 bg-cyan-400 rounded-full transition-all duration-75 relative"
+              className="absolute top-0 left-0 bottom-0 bg-cyan-400 shadow-sm shadow-cyan-400/50 rounded-full transition-all duration-75 relative"
               style={{ width: `${progress}%` }}
             >
               <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 rounded-full bg-white shadow-md shadow-black scale-0 group-hover/bar:scale-100 transition-transform" />

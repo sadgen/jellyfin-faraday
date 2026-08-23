@@ -770,7 +770,7 @@ export default function FloatingVideoWindow({
             onMouseLeave={handleScrubberMouseLeave}
           >
             <div
-              className="absolute top-0 left-0 bottom-0 bg-cyan-400 rounded-full transition-all duration-75"
+              className="absolute top-0 left-0 bottom-0 bg-cyan-400 shadow-sm shadow-cyan-400/50 rounded-full transition-all duration-75"
               style={{ width: `${progress}%` }}
             />
           </div>

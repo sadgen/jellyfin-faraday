@@ -25,11 +25,11 @@ export default function TrickplayScrubberThumbnail({
 
   if (!item || hoverTime === null) return null;
 
-  // On Mobile: 1X compact standard size (180px x 101px)
-  // On Desktop: 2X enlarged size (380px x 214px)
+  // On Mobile: enlarged size (240px - 280px)
+  // On Desktop: 2X enlarged size (360px - 420px)
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 640;
   const cWidth = containerWidth || 400;
-  const thumbWidth = isMobile ? 180 : Math.min(380, Math.max(260, cWidth * 0.75));
+  const thumbWidth = isMobile ? Math.min(280, Math.max(200, cWidth * 0.85)) : Math.min(420, Math.max(280, cWidth * 0.75));
   const thumbHeight = Math.round(thumbWidth * 9 / 16);
 
   // Directly follow hoverPercent (0% to 100%) so the pointer aligns precisely with cursor/finger at extreme ends (0px to 100%), allowing the thumbnail to naturally protrude outside the frame

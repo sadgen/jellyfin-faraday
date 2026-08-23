@@ -171,12 +171,12 @@ function MediaCard({
       }`}
     >
       {/* 
-        POSTER MODE: Floating Trickplay Preview Window
-        - Mobile (< 640px): 1X compact standard size (190px x 107px 16:9)
-        - Desktop (>= 640px): 2X enlarged preview (480px x 270px 16:9)
+        2X-Enlarged Floating Trickplay Preview Window
+        - Mobile: 320px-380px 16:9 (enlarged crisp view)
+        - Desktop: 480px-540px 16:9 (2X-2.5X enlarged HD view)
         Auto boundary: floats below card if near top, above card otherwise!
       */}
-      {!isBackdrop && tpStyle && (
+      {tpStyle && (
         <div 
           className={`absolute left-1/2 -translate-x-1/2 z-50 flex flex-col items-center pointer-events-none animate-in fade-in zoom-in-95 duration-100 ${
             isNearTop ? 'top-[calc(100%+8px)]' : 'bottom-[calc(100%+8px)]'
@@ -184,20 +184,20 @@ function MediaCard({
         >
           {/* Upward arrow if positioned below */}
           {isNearTop && (
-            <div className="w-0 h-0 border-x-[6px] sm:border-x-8 border-x-transparent border-b-[6px] sm:border-b-8 border-b-cyan-400 mb-0.5" />
+            <div className="w-0 h-0 border-x-8 border-x-transparent border-b-8 border-b-cyan-400 mb-0.5" />
           )}
 
-          {/* Frame: 190x107 on Mobile, 480x270 on Desktop */}
-          <div className="w-[190px] sm:w-[480px] h-[107px] sm:h-[270px] rounded-xl sm:rounded-2xl overflow-hidden bg-black/95 border-2 border-cyan-400 shadow-2xl shadow-cyan-500/35 flex items-center justify-center relative">
+          {/* 2X-Enlarged HD Frame */}
+          <div className="w-[320px] xs:w-[380px] sm:w-[480px] lg:w-[540px] max-w-[92vw] aspect-video rounded-xl sm:rounded-2xl overflow-hidden bg-black/95 border-2 border-cyan-400 shadow-2xl shadow-cyan-500/40 flex items-center justify-center relative">
             <div className="w-full h-full" style={tpStyle} />
-            <div className="absolute bottom-1.5 sm:bottom-2.5 bg-black/85 backdrop-blur-md px-2.5 sm:px-3.5 py-0.5 sm:py-1 rounded-full text-[10px] sm:text-xs font-mono font-bold text-cyan-300 border border-white/20 shadow-lg">
+            <div className="absolute bottom-2 sm:bottom-2.5 bg-black/85 backdrop-blur-md px-3 sm:px-3.5 py-0.5 sm:py-1 rounded-full text-xs font-mono font-bold text-cyan-300 border border-white/20 shadow-lg">
               {formatTime(trickplayTime)}
             </div>
           </div>
 
           {/* Downward arrow if positioned above */}
           {!isNearTop && (
-            <div className="w-0 h-0 border-x-[6px] sm:border-x-8 border-x-transparent border-t-[6px] sm:border-t-8 border-t-cyan-400 mt-0.5" />
+            <div className="w-0 h-0 border-x-8 border-x-transparent border-t-8 border-t-cyan-400 mt-0.5" />
           )}
         </div>
       )}

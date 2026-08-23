@@ -725,15 +725,27 @@ export class JellyfinClient {
   }
 
   /**
-   * Trigger Jellyfin library rescan
+   * Trigger Jellyfin library rescan & metadata refresh (Scans for newly added movies on disk)
    */
-  async refreshLibrary() {
+  async refreshLibrary(parentId = '') {
     if (!this.auth.isConfigured) return false;
-    const res = await fetch(`${this.auth.serverUrl}/Library/Refresh`, {
-      method: 'POST',
-      headers: this.getAuthHeaders()
-    });
-    return res.ok;
+    try {
+      if (parentId && parentId !== 'all') {
+        // Refresh specific media folder
+        await fetch(`${this.auth.serverUrl}/Items/${parentId}/Refresh?Recursive=true&ImageRefreshMode=Default&MetadataRefreshMode=Default&ReplaceAllImages=false&ReplaceAllMetadata=false`, {
+          method: 'POST',
+          headers: this.getAuthHeaders()
+        }).catch(() => {});
+      }
+      const res = await fetch(`${this.auth.serverUrl}/Library/Refresh`, {
+        method: 'POST',
+        headers: this.getAuthHeaders()
+      });
+      return res.ok;
+    } catch (err) {
+      console.warn('Failed to trigger library refresh:', err);
+      return false;
+    }
   }
 }
 

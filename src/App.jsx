@@ -510,6 +510,20 @@ export default function App() {
     setIsLoginModalOpen(true);
   };
 
+  // Server-side library scan & metadata refresh (Scans disk for newly added movies)
+  const handleServerRefreshLibrary = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      await jellyfin.refreshLibrary(selectedViewId);
+      await new Promise(r => setTimeout(r, 1200));
+      await fetchAllMedia(selectedViewId, searchKeyword, statusFilter, sortMethod, selectedGenre, selectedYear, selectedLetter);
+    } catch (err) {
+      console.error('Failed to refresh library metadata on server:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [selectedViewId, searchKeyword, statusFilter, sortMethod, selectedGenre, selectedYear, selectedLetter, fetchAllMedia]);
+
   return (
     <ErrorBoundary>
       <div className="relative w-screen h-screen bg-[#080b11] text-gray-100 overflow-hidden select-none flex flex-col">
@@ -562,7 +576,7 @@ export default function App() {
               onDeleteItem={handleDeleteItem}
               onOpenMetadataEditor={(item) => setEditingItem(item)}
               onOpenIdentify={(item) => setIdentifyingItem(item)}
-              onRefreshLibrary={() => fetchAllMedia(selectedViewId, searchKeyword, statusFilter, sortMethod, selectedGenre, selectedYear, selectedLetter)}
+              onRefreshLibrary={handleServerRefreshLibrary}
               isRefreshing={isLoading}
             />
           ) : (

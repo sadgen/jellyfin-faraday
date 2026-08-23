@@ -836,10 +836,11 @@ export default function LibraryView({
           <button
             onClick={onRefreshLibrary}
             disabled={isRefreshing}
-            className="p-1.5 rounded-xl bg-black/40 hover:bg-white/10 border border-white/5 text-gray-400 hover:text-white transition disabled:opacity-50"
-            title="刷新数据"
+            className="px-2.5 py-1.5 rounded-xl bg-black/40 hover:bg-white/10 border border-white/5 text-gray-300 hover:text-cyan-300 transition disabled:opacity-50 flex items-center gap-1.5 text-xs font-medium"
+            title="扫描媒体库 & 刷新元数据 (通知 Jellyfin 扫描磁盘新增影片并刷新入库)"
           >
-            <RefreshCw size={13} className={isRefreshing ? 'animate-spin text-cyan-400' : ''} />
+            <RefreshCw size={13} className={isRefreshing ? 'animate-spin text-cyan-400' : 'text-cyan-400'} />
+            <span className="hidden xs:inline">{isRefreshing ? '扫描入库中...' : '刷新元数据'}</span>
           </button>
         </div>
 

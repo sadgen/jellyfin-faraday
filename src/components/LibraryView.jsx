@@ -14,8 +14,6 @@ import {
   SlidersHorizontal
 } from 'lucide-react';
 
-const ALPHABET = ['#', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'];
-
 const SUB_TABS = [
   { id: 'items', label: '影片', icon: Film },
   { id: 'genres', label: '类型', icon: Tag },
@@ -27,9 +25,13 @@ const SUB_TABS = [
 
 const BASE_STATUS_FILTERS = [
   { id: 'all', label: '全部' },
-  { id: 'unplayed', label: '👀 未播' },
+  { id: 'unplayed', label: '👀 未播完' },
   { id: 'played', label: '✅ 已播' },
-  { id: 'favorites', label: '⭐ 最爱' }
+  { id: 'favorites', label: '⭐ 最爱' },
+  { id: 'play_0', label: '0次' },
+  { id: 'play_1', label: '1次' },
+  { id: 'play_lte_1', label: '≤1次' },
+  { id: 'play_gte_2', label: '≥2次' }
 ];
 
 const SORT_OPTIONS = [
@@ -568,8 +570,6 @@ export default function LibraryView({
   onSelectGenre,
   selectedYear,
   onSelectYear,
-  selectedLetter,
-  onSelectLetter,
   autoRefillFloatingWindows = false,
   onToggleAutoRefill,
   onOpenRandom3Windows,
@@ -587,7 +587,6 @@ export default function LibraryView({
 }) {
   const [activeSubTab, setActiveSubTab] = useState('items');
   const [viewLayout, setViewLayout] = useState('poster');
-  const [playCountFilter, setPlayCountFilter] = useState('all');
   const [actionSheetItem, setActionSheetItem] = useState(null);
   const [deleteTargetItem, setDeleteTargetItem] = useState(null);
 
@@ -633,7 +632,7 @@ export default function LibraryView({
 
   useEffect(() => {
     setVisibleCount(80);
-  }, [selectedViewId, statusFilter, playCountFilter, selectedGenre, selectedYear, selectedLetter, searchKeyword, activeSubTab]);
+  }, [selectedViewId, statusFilter, selectedGenre, selectedYear, searchKeyword, activeSubTab]);
 
   // Duplicate detection across current items
   const { duplicateItemIds, duplicateCount } = useMemo(() => {
@@ -663,25 +662,25 @@ export default function LibraryView({
     }
   }, [activeSubTab, selectedViewId]);
 
-  // Display items with Play Count filter support
+  // Display items with Play Count and Status filter support
   const displayItems = useMemo(() => {
     let result = items;
     if (activeSubTab === 'duplicates') {
       result = items.filter(it => duplicateItemIds.has(it.Id));
     }
 
-    if (playCountFilter === 'play_0') {
+    if (statusFilter === 'play_0') {
       result = result.filter(it => (it.UserData?.PlayCount || 0) === 0 && !it.UserData?.Played);
-    } else if (playCountFilter === 'play_1') {
+    } else if (statusFilter === 'play_1') {
       result = result.filter(it => (it.UserData?.PlayCount || 0) === 1);
-    } else if (playCountFilter === 'play_lte_1') {
+    } else if (statusFilter === 'play_lte_1') {
       result = result.filter(it => (it.UserData?.PlayCount || 0) <= 1);
-    } else if (playCountFilter === 'play_gte_2') {
+    } else if (statusFilter === 'play_gte_2') {
       result = result.filter(it => (it.UserData?.PlayCount || 0) >= 2);
     }
 
     return result;
-  }, [items, activeSubTab, duplicateItemIds, playCountFilter]);
+  }, [items, activeSubTab, duplicateItemIds, statusFilter]);
 
   // Sync filtered items to parent container (for auto-refilling floating windows)
   useEffect(() => {
@@ -907,14 +906,14 @@ export default function LibraryView({
 
         {/* Row 3: Search, Filters & Sorting Bar */}
         <div className="flex items-center justify-between gap-2 text-xs pt-0.5 flex-wrap">
-          <div className="relative min-w-[140px] flex-1">
-            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+          <div className="relative w-28 xs:w-36 sm:w-44 flex-shrink-0">
+            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
             <input
               type="text"
               value={searchKeyword}
               onChange={(e) => onSearchChange(e.target.value)}
-              placeholder="搜索片名、演员..."
-              className="w-full pl-8 pr-7 py-1 rounded-xl bg-black/50 border border-white/10 text-white text-xs placeholder-gray-500 focus:outline-none focus:border-cyan-400 transition"
+              placeholder="搜索..."
+              className="w-full pl-7 pr-6 py-1 rounded-xl bg-black/50 border border-white/10 text-white text-xs placeholder-gray-500 focus:outline-none focus:border-cyan-400 transition"
             />
             {searchKeyword && (
               <button
@@ -926,8 +925,8 @@ export default function LibraryView({
             )}
           </div>
 
-          {/* Status Filters */}
-          <div className="flex items-center bg-black/40 p-0.5 rounded-xl border border-white/5 gap-0.5 overflow-x-auto">
+          {/* Status & Play Count Filter Buttons */}
+          <div className="flex items-center bg-black/40 p-0.5 rounded-xl border border-white/5 gap-0.5 overflow-x-auto min-w-0 flex-1 sm:flex-initial">
             {BASE_STATUS_FILTERS.map(f => (
               <button
                 key={f.id}
@@ -941,23 +940,6 @@ export default function LibraryView({
                 {f.label}
               </button>
             ))}
-          </div>
-
-          {/* Play Count Filter */}
-          <div className="flex items-center gap-1 bg-black/40 px-2 py-1 rounded-xl border border-white/5 text-gray-300 text-xs">
-            <Eye size={12} className="text-cyan-400" />
-            <select
-              value={playCountFilter}
-              onChange={(e) => setPlayCountFilter(e.target.value)}
-              className="bg-transparent text-gray-200 focus:outline-none cursor-pointer pr-1"
-              title="按播放次数筛选"
-            >
-              <option value="all" className="bg-slate-900 text-white">次数: 全部</option>
-              <option value="play_0" className="bg-slate-900 text-white">0 次 (未看)</option>
-              <option value="play_1" className="bg-slate-900 text-white">1 次</option>
-              <option value="play_lte_1" className="bg-slate-900 text-white">≤ 1 次 (0或1次)</option>
-              <option value="play_gte_2" className="bg-slate-900 text-white">≥ 2 次 (常看)</option>
-            </select>
           </div>
 
           {/* Sort Selector */}
@@ -985,29 +967,6 @@ export default function LibraryView({
             <RefreshCw size={13} className={isRefreshing ? 'animate-spin text-cyan-400' : 'text-cyan-400'} />
             <span className="hidden xs:inline">{isRefreshing ? '扫描入库中...' : '刷新元数据'}</span>
           </button>
-        </div>
-
-        {/* Row 4: A-Z Alphabet Scrubber */}
-        <div className="flex items-center justify-between gap-1 overflow-x-auto py-0.5 border-t border-white/5 text-[10px] font-mono text-gray-400">
-          <button
-            onClick={() => onSelectLetter('')}
-            className={`px-1 py-0.5 rounded hover:text-white transition flex-shrink-0 ${
-              !selectedLetter ? 'bg-cyan-500/20 text-cyan-300 font-bold' : ''
-            }`}
-          >
-            ALL
-          </button>
-          {ALPHABET.map(letter => (
-            <button
-              key={letter}
-              onClick={() => onSelectLetter(selectedLetter === letter ? '' : letter)}
-              className={`px-1 py-0.5 rounded hover:text-white hover:bg-white/10 transition flex-shrink-0 ${
-                selectedLetter === letter ? 'bg-jf-accent text-white font-bold' : ''
-              }`}
-            >
-              {letter}
-            </button>
-          ))}
         </div>
       </div>
 

@@ -750,18 +750,15 @@ export default function FloatingVideoWindow({
           slotIndex === 0 ? 'bg-cyan-950/80 text-cyan-200' : 'bg-slate-950/90 text-gray-300'
         }`}
       >
-        <div className="flex items-center gap-1.5 min-w-0 pr-2">
-          <span className={`w-2 h-2 rounded-full ${slotIndex === 0 ? 'bg-cyan-400 animate-pulse' : 'bg-amber-400'}`} />
-          <span className="font-bold text-white text-xs truncate max-w-[140px] sm:max-w-[200px]" title={item?.Name}>
-            {item?.Name || '视频预览'}
-          </span>
-          <span className="px-1.5 py-0.5 rounded bg-white/10 text-[10px] font-mono text-cyan-300 font-bold">
+        <div className="flex items-center gap-1.5 min-w-0 flex-1 pr-2">
+          <span className={`w-2 h-2 rounded-full flex-shrink-0 ${slotIndex === 0 ? 'bg-cyan-400 animate-pulse' : 'bg-amber-400'}`} />
+          <span className="px-1.5 py-0.5 rounded bg-white/10 text-[10px] font-mono text-cyan-300 font-bold flex-shrink-0">
             {slotIndex === 0 ? '主窗' : `副窗 #${slotIndex}`}
           </span>
           {/* Multi-part Video Part Selector */}
           {partsList.length > 1 && (
             <div 
-              className="flex items-center gap-1 bg-black/50 px-1.5 py-0.5 rounded border border-amber-500/40"
+              className="flex items-center gap-1 bg-black/50 px-1.5 py-0.5 rounded border border-amber-500/40 flex-shrink-0"
               onMouseDown={(e) => e.stopPropagation()}
             >
               <span className="text-[10px] text-amber-400 font-bold">Part</span>
@@ -778,6 +775,9 @@ export default function FloatingVideoWindow({
               </select>
             </div>
           )}
+          <span className="font-bold text-white text-xs truncate flex-1 min-w-0" title={item?.Name}>
+            {item?.Name || '视频预览'}
+          </span>
         </div>
 
         <div className="flex items-center gap-1">

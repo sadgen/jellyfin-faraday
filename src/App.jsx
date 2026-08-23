@@ -55,7 +55,6 @@ export default function App() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [selectedGenre, setSelectedGenre] = useState('');
   const [selectedYear, setSelectedYear] = useState('');
-  const [selectedLetter, setSelectedLetter] = useState('');
 
   // Loading state
   const [isLoading, setIsLoading] = useState(false);
@@ -243,13 +242,13 @@ export default function App() {
       const isBg = isFirstMountRef.current && mediaItems.length > 0;
       isFirstMountRef.current = false;
       
-      fetchAllMedia(selectedViewId, searchKeyword, statusFilter, sortMethod, selectedGenre, selectedYear, selectedLetter, isBg);
+      fetchAllMedia(selectedViewId, searchKeyword, statusFilter, sortMethod, selectedGenre, selectedYear, '', isBg);
     }, searchKeyword ? 300 : 0);
 
     return () => {
       if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
     };
-  }, [selectedViewId, searchKeyword, statusFilter, sortMethod, selectedGenre, selectedYear, selectedLetter, fetchAllMedia]);
+  }, [selectedViewId, searchKeyword, statusFilter, sortMethod, selectedGenre, selectedYear, fetchAllMedia]);
 
   // ==================== FLOATING 3-WINDOW PIP SYSTEM ====================
   // Open item in a floating slot (FIFO replacement with slot shifting if all 3 full)
@@ -479,7 +478,7 @@ export default function App() {
   const handleLoginSuccess = () => {
     setIsAuthenticated(true);
     setIsLoginModalOpen(false);
-    fetchAllMedia(selectedViewId, searchKeyword, statusFilter, sortMethod, selectedGenre, selectedYear, selectedLetter);
+    fetchAllMedia(selectedViewId, searchKeyword, statusFilter, sortMethod, selectedGenre, selectedYear, '');
   };
 
   const handleLogout = () => {
@@ -501,13 +500,13 @@ export default function App() {
     try {
       await jellyfin.refreshLibrary(selectedViewId);
       await new Promise(r => setTimeout(r, 1200));
-      await fetchAllMedia(selectedViewId, searchKeyword, statusFilter, sortMethod, selectedGenre, selectedYear, selectedLetter);
+      await fetchAllMedia(selectedViewId, searchKeyword, statusFilter, sortMethod, selectedGenre, selectedYear, '');
     } catch (err) {
       console.error('Failed to refresh library metadata on server:', err);
     } finally {
       setIsLoading(false);
     }
-  }, [selectedViewId, searchKeyword, statusFilter, sortMethod, selectedGenre, selectedYear, selectedLetter, fetchAllMedia]);
+  }, [selectedViewId, searchKeyword, statusFilter, sortMethod, selectedGenre, selectedYear, fetchAllMedia]);
 
   return (
     <ErrorBoundary>
@@ -545,8 +544,6 @@ export default function App() {
             onSelectGenre={setSelectedGenre}
             selectedYear={selectedYear}
             onSelectYear={setSelectedYear}
-            selectedLetter={selectedLetter}
-            onSelectLetter={setSelectedLetter}
             autoRefillFloatingWindows={autoRefillFloatingWindows}
             onToggleAutoRefill={handleToggleAutoRefill}
             onFilteredItemsChange={handleFilteredItemsChange}
@@ -619,7 +616,7 @@ export default function App() {
           isOpen={isSettingsModalOpen}
           onClose={() => setIsSettingsModalOpen(false)}
           onLogout={handleLogout}
-          onRefreshLibrary={() => fetchAllMedia(selectedViewId, searchKeyword, statusFilter, sortMethod, selectedGenre, selectedYear, selectedLetter)}
+          onRefreshLibrary={() => fetchAllMedia(selectedViewId, searchKeyword, statusFilter, sortMethod, selectedGenre, selectedYear, '')}
           isRefreshing={isLoading}
           totalItemsCount={totalRecordCount}
           lastSyncTime={lastSyncTime}

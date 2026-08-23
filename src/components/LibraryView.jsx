@@ -171,20 +171,15 @@ const MediaCard = React.memo(function MediaCard({
   }, [isSelecting, item, onPlay, onToggleSelect, trickplayTime]);
 
   const handleCoverMouseMove = useCallback((e) => {
-    const clientX = e.clientX;
-    const currentTarget = e.currentTarget;
-    if (rafIdRef.current) return;
-    rafIdRef.current = requestAnimationFrame(() => {
-      rafIdRef.current = null;
-      if (!currentTarget) return;
-      const rect = currentTarget.getBoundingClientRect();
-      if (!rect.width) return;
-      const percent = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-      setHoverPercent(percent);
-      setTrickplayTime(durationSec * percent);
-      // Auto-detect boundary: if card top is less than 300px from viewport top, display below!
-      setIsNearTop(rect.top < 300);
-    });
+    const target = e.currentTarget;
+    if (!target) return;
+    const rect = target.getBoundingClientRect();
+    if (!rect.width) return;
+    const percent = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    setHoverPercent(percent);
+    setTrickplayTime(durationSec * percent);
+    // Auto-detect boundary: if card top is less than 300px from viewport top, display below!
+    setIsNearTop(rect.top < 300);
   }, [durationSec]);
 
   // Touch tracking for mobile devices (trickplay follows finger)
@@ -227,9 +222,7 @@ const MediaCard = React.memo(function MediaCard({
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={handleCoverMouseLeave}
       style={{
-        zIndex: (isHovered || tpStyle) ? 100 : 1,
-        contentVisibility: 'auto',
-        containIntrinsicSize: isBackdrop ? '260px 180px' : '200px 300px'
+        zIndex: (isHovered || tpStyle) ? 999 : 1
       }}
       className={`group relative flex flex-col bg-slate-900/50 rounded-xl transition-all duration-150 select-none will-change-transform ${
         isSelected
@@ -297,11 +290,9 @@ const MediaCard = React.memo(function MediaCard({
           isBackdrop ? 'aspect-video' : 'aspect-[2/3]'
         }`}
         onClick={handleCardClick}
+        onMouseMove={handleCoverMouseMove}
         onPointerDown={handlePointerDown}
-        onPointerMove={(e) => {
-          handlePointerMove(e);
-          handleCoverMouseMove(e);
-        }}
+        onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
         onTouchStart={handleCoverTouchMove}
@@ -316,7 +307,7 @@ const MediaCard = React.memo(function MediaCard({
             alt={item.Name}
             loading="lazy"
             className={`w-full h-full object-cover transition-opacity duration-200 ${
-              isBackdrop && tpStyle ? 'opacity-0' : 'opacity-100'
+              tpStyle ? 'opacity-0' : 'opacity-100'
             }`}
           />
         ) : (
@@ -325,19 +316,21 @@ const MediaCard = React.memo(function MediaCard({
           </div>
         )}
 
-        {/* BACKDROP MODE: Inline inside 16:9 Card */}
-        {isBackdrop && tpStyle && (
+        {/* INLINE TRICKPLAY (Both Backdrop and Poster Mode) */}
+        {tpStyle && (
           <div className="absolute inset-0 bg-black flex items-center justify-center overflow-hidden pointer-events-none">
             <div 
-              className="w-full aspect-video relative shadow-2xl"
+              className={`w-full ${isBackdrop ? 'aspect-video' : 'h-full'} relative shadow-2xl bg-center bg-no-repeat`}
               style={tpStyle}
             />
 
-            <div className="absolute bottom-2 left-2 z-30 pointer-events-none">
-              <div className="px-2 py-0.5 rounded-full bg-black/85 backdrop-blur-md border border-cyan-400/50 text-[10px] font-mono font-bold text-cyan-300 shadow-lg">
-                {formatTime(trickplayTime)}
+            {isBackdrop && (
+              <div className="absolute bottom-2 left-2 z-30 pointer-events-none">
+                <div className="px-2 py-0.5 rounded-full bg-black/85 backdrop-blur-md border border-cyan-400/50 text-[10px] font-mono font-bold text-cyan-300 shadow-lg">
+                  {formatTime(trickplayTime)}
+                </div>
               </div>
-            </div>
+            )}
           </div>
         )}
 

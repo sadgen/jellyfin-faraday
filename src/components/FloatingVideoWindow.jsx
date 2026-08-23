@@ -1051,7 +1051,7 @@ export default function FloatingVideoWindow({
             hoverTime={hoverScrubberTime}
             hoverPercent={hoverScrubberPercent}
             containerWidth={scrubberWidth}
-            position={slotIndex === 1 ? 'below' : 'above'}
+            position={slotIndex === 2 ? 'above' : 'below'}
           />
 
           <div

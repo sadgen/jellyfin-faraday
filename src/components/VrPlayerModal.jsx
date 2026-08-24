@@ -18,6 +18,15 @@ const VR_MODES = [
   { id: 'plane_cinema', label: '📺 虚拟曲面巨幕影院' }
 ];
 
+function formatTime(seconds) {
+  if (!seconds || isNaN(seconds)) return '00:00';
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  if (h > 0) return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+}
+
 export default function VrPlayerModal({
   isOpen,
   item,
@@ -394,15 +403,6 @@ export default function VrPlayerModal({
       cameraRef.current.fov = 100;
       cameraRef.current.updateProjectionMatrix();
     }
-  };
-
-  const formatTime = (seconds) => {
-    if (!seconds || isNaN(seconds)) return '00:00';
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    const s = Math.floor(seconds % 60);
-    if (h > 0) return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
   const handleTimeUpdate = () => {

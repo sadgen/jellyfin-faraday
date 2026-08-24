@@ -14,6 +14,17 @@ import {
   SkipForward, SkipBack, Sun, Zap, FastForward, Glasses, Trash2, Gauge
 } from 'lucide-react';
 
+function formatTime(seconds) {
+  if (!seconds || isNaN(seconds)) return '00:00';
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  if (h > 0) {
+    return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  }
+  return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+}
+
 export default function VideoPlayerModal({
   isOpen,
   item,
@@ -69,6 +80,36 @@ export default function VideoPlayerModal({
 
   const { launchPlayer } = useExternalPlayer();
 
+  const togglePlay = useCallback(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    if (video.paused) {
+      video.play().catch(() => {});
+      setIsPlaying(true);
+    } else {
+      video.pause();
+      setIsPlaying(false);
+    }
+  }, []);
+
+  const toggleMute = useCallback(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    const nextMuted = !video.muted;
+    video.muted = nextMuted;
+    setIsMuted(nextMuted);
+  }, []);
+
+  const toggleFullscreen = useCallback(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    if (!document.fullscreenElement) {
+      container.requestFullscreen().catch(() => {});
+    } else {
+      document.exitFullscreen().catch(() => {});
+    }
+  }, []);
+
   // Mobile Touch Gestures with real-time Trickplay preview
   const { gestureState, brightness, touchHandlers } = useTouchGestures({
     videoRef,
@@ -94,9 +135,7 @@ export default function VideoPlayerModal({
         setIsWheelSeeking(false);
       }, 600);
     },
-    onTogglePlay: () => {
-      togglePlay();
-    },
+    onTogglePlay: togglePlay,
     normalSpeed: playbackSpeed,
     onSpeedChange: (speed) => {
       setPlaybackSpeed(speed);
@@ -498,19 +537,6 @@ export default function VideoPlayerModal({
     window.addEventListener('mouseup', handleWindowMouseUp);
   }, [updateScrubberDrag]);
 
-  if (!isOpen || !item) return null;
-
-  const formatTime = (seconds) => {
-    if (!seconds || isNaN(seconds)) return '00:00';
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    const s = Math.floor(seconds % 60);
-    if (h > 0) {
-      return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-    }
-    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-  };
-
   const handleTimeUpdate = () => {
     const video = videoRef.current;
     if (!video || !video.duration || isDraggingScrubberRef.current) return;
@@ -525,7 +551,7 @@ export default function VideoPlayerModal({
     if (isDraggingScrubberRef.current) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const pos = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    const duration = videoRef.current?.duration || (item.RunTimeTicks ? item.RunTimeTicks / 10000000 : 0);
+    const duration = videoRef.current?.duration || (item?.RunTimeTicks ? item.RunTimeTicks / 10000000 : 0);
     
     setHoverScrubberTime(duration * pos);
     setHoverScrubberPercent(pos);
@@ -535,36 +561,6 @@ export default function VideoPlayerModal({
   const handleScrubberMouseLeave = () => {
     if (!isDraggingScrubberRef.current && !isWheelSeeking) {
       setHoverScrubberTime(null);
-    }
-  };
-
-  const togglePlay = () => {
-    const video = videoRef.current;
-    if (!video) return;
-    if (video.paused) {
-      video.play();
-      setIsPlaying(true);
-    } else {
-      video.pause();
-      setIsPlaying(false);
-    }
-  };
-
-  const toggleMute = () => {
-    const video = videoRef.current;
-    if (!video) return;
-    const nextMuted = !video.muted;
-    video.muted = nextMuted;
-    setIsMuted(nextMuted);
-  };
-
-  const toggleFullscreen = () => {
-    const container = containerRef.current;
-    if (!container) return;
-    if (!document.fullscreenElement) {
-      container.requestFullscreen().catch(() => {});
-    } else {
-      document.exitFullscreen().catch(() => {});
     }
   };
 

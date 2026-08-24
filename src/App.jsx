@@ -599,60 +599,72 @@ export default function App() {
         />
 
         {/* Full-Screen Theater Video Player Modal */}
-        <VideoPlayerModal
-          isOpen={!!modalPlayingItem}
-          item={modalPlayingItem}
-          onClose={() => setModalPlayingItem(null)}
-          onNext={() => navigateModalItem(modalPlayingItem, 1)}
-          onPrev={() => navigateModalItem(modalPlayingItem, -1)}
-          onUpdateItem={handleUpdateItem}
-          onDeleteItem={handleDeleteItem}
-          onOpenVr={(item) => setVrPlayingItem(item)}
-        />
+        {modalPlayingItem && (
+          <VideoPlayerModal
+            isOpen={true}
+            item={modalPlayingItem}
+            onClose={() => setModalPlayingItem(null)}
+            onNext={() => navigateModalItem(modalPlayingItem, 1)}
+            onPrev={() => navigateModalItem(modalPlayingItem, -1)}
+            onUpdateItem={handleUpdateItem}
+            onDeleteItem={handleDeleteItem}
+            onOpenVr={(item) => setVrPlayingItem(item)}
+          />
+        )}
 
         {/* Three.js VR 180 / 360 SBS 3D Player Modal */}
-        <VrPlayerModal
-          isOpen={!!vrPlayingItem}
-          item={vrPlayingItem}
-          onClose={() => setVrPlayingItem(null)}
-          onNext={() => navigateVrItem(vrPlayingItem, 1)}
-          onPrev={() => navigateVrItem(vrPlayingItem, -1)}
-          onUpdateItem={handleUpdateItem}
-        />
+        {vrPlayingItem && (
+          <VrPlayerModal
+            isOpen={true}
+            item={vrPlayingItem}
+            onClose={() => setVrPlayingItem(null)}
+            onNext={() => navigateVrItem(vrPlayingItem, 1)}
+            onPrev={() => navigateVrItem(vrPlayingItem, -1)}
+            onUpdateItem={handleUpdateItem}
+          />
+        )}
 
         {/* Login Modal */}
-        <LoginModal
-          isOpen={isLoginModalOpen}
-          onClose={() => setIsLoginModalOpen(false)}
-          onLoginSuccess={handleLoginSuccess}
-        />
+        {isLoginModalOpen && (
+          <LoginModal
+            isOpen={true}
+            onClose={() => setIsLoginModalOpen(false)}
+            onLoginSuccess={handleLoginSuccess}
+          />
+        )}
 
         {/* Settings Modal */}
-        <SettingsModal
-          isOpen={isSettingsModalOpen}
-          onClose={() => setIsSettingsModalOpen(false)}
-          onLogout={handleLogout}
-          onRefreshLibrary={() => fetchAllMedia(selectedViewId, searchKeyword, statusFilter, sortMethod, selectedGenre, selectedYear, '')}
-          isRefreshing={isLoading}
-          totalItemsCount={totalRecordCount}
-          lastSyncTime={lastSyncTime}
-        />
+        {isSettingsModalOpen && (
+          <SettingsModal
+            isOpen={true}
+            onClose={() => setIsSettingsModalOpen(false)}
+            onLogout={handleLogout}
+            onRefreshLibrary={() => fetchAllMedia(selectedViewId, searchKeyword, statusFilter, sortMethod, selectedGenre, selectedYear, '')}
+            isRefreshing={isLoading}
+            totalItemsCount={totalRecordCount}
+            lastSyncTime={lastSyncTime}
+          />
+        )}
 
         {/* Metadata Editor Modal */}
-        <MetadataEditorModal
-          isOpen={!!editingItem}
-          item={editingItem}
-          onClose={() => setEditingItem(null)}
-          onSaved={handleUpdateItem}
-        />
+        {editingItem && (
+          <MetadataEditorModal
+            isOpen={true}
+            item={editingItem}
+            onClose={() => setEditingItem(null)}
+            onSaved={handleUpdateItem}
+          />
+        )}
 
         {/* Identify / Scraper Modal */}
-        <IdentifyModal
-          isOpen={!!identifyingItem}
-          item={identifyingItem}
-          onClose={() => setIdentifyingItem(null)}
-          onIdentified={handleUpdateItem}
-        />
+        {identifyingItem && (
+          <IdentifyModal
+            isOpen={true}
+            item={identifyingItem}
+            onClose={() => setIdentifyingItem(null)}
+            onIdentified={handleUpdateItem}
+          />
+        )}
       </div>
     </ErrorBoundary>
   );

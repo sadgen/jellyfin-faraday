@@ -14,6 +14,7 @@ import {
   SkipForward, SkipBack, Sun, Zap, FastForward, Glasses, Trash2, Gauge
 } from 'lucide-react';
 import { SEEK_SPEED_OPTIONS, getStoredSeekSpeed, setStoredSeekSpeed, getSeekStepSeconds, getSeekSwipeSpan } from '../utils/seekSettings';
+import { getPlaybackDefaults } from '../utils/playbackDefaults';
 
 export const QUALITY_OPTIONS = [
   { id: 'direct', label: '🎬 原画直推 (原始码率)', shortLabel: '原画', bitrate: 0 },
@@ -49,9 +50,11 @@ export default function VideoPlayerModal({
   const containerRef = useRef(null);
   const scrubberRef = useRef(null);
 
+  const [playbackDefaults] = useState(() => getPlaybackDefaults());
+
   const [isPlaying, setIsPlaying] = useState(true);
   const [isMuted, setIsMuted] = useState(false);
-  const [playbackSpeed, setPlaybackSpeed] = useState(1.0);
+  const [playbackSpeed, setPlaybackSpeed] = useState(() => playbackDefaults.speed || 1.0);
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
@@ -74,7 +77,7 @@ export default function VideoPlayerModal({
   }, []);
 
   // Stream Quality: 'direct' | '8000000' | '4000000' | '2000000' | '1000000'
-  const [streamQuality, setStreamQuality] = useState('direct');
+  const [streamQuality, setStreamQuality] = useState(() => playbackDefaults.quality || 'direct');
   const isSmoothMode = streamQuality !== 'direct';
   const [smoothToast, setSmoothToast] = useState('');
 

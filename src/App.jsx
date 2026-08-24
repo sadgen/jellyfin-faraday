@@ -7,6 +7,7 @@ import {
   deleteItemFromCache 
 } from './utils/mediaCache';
 import { sortMediaItems } from './utils/mediaSorter';
+import { getPlaybackDefaults, setPlaybackDefaults } from './utils/playbackDefaults';
 import LibraryView from './components/LibraryView';
 import FloatingWindowsContainer from './components/FloatingWindowsContainer';
 import LoginModal from './components/LoginModal';
@@ -66,17 +67,29 @@ export default function App() {
 
   // Auto refill floating windows when a window is closed
   const [autoRefillFloatingWindows, setAutoRefillFloatingWindows] = useState(() => {
-    return localStorage.getItem('jf_auto_refill_floating_windows') === 'true';
+    return getPlaybackDefaults().autoRefill || localStorage.getItem('jf_auto_refill_floating_windows') === 'true';
   });
   const autoRefillFloatingWindowsRef = useRef(autoRefillFloatingWindows);
   useEffect(() => {
     autoRefillFloatingWindowsRef.current = autoRefillFloatingWindows;
   }, [autoRefillFloatingWindows]);
 
+  useEffect(() => {
+    const handleDefaultsChange = (e) => {
+      if (e.detail && e.detail.autoRefill !== undefined) {
+        setAutoRefillFloatingWindows(e.detail.autoRefill);
+        autoRefillFloatingWindowsRef.current = e.detail.autoRefill;
+      }
+    };
+    window.addEventListener('faraday:playback_defaults_changed', handleDefaultsChange);
+    return () => window.removeEventListener('faraday:playback_defaults_changed', handleDefaultsChange);
+  }, []);
+
   const handleToggleAutoRefill = useCallback((checked) => {
     setAutoRefillFloatingWindows(checked);
     autoRefillFloatingWindowsRef.current = checked;
     localStorage.setItem('jf_auto_refill_floating_windows', String(checked));
+    setPlaybackDefaults({ autoRefill: checked });
   }, []);
 
   // Track current filtered items from LibraryView for auto-refill candidate picking

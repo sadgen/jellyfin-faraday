@@ -3,6 +3,8 @@ import { jellyfin } from '../api/jellyfinClient';
 import { getTrickplayStyle } from '../utils/trickplay';
 import { detectDuplicateMedia } from '../utils/duplicateChecker';
 import { useExternalPlayer } from '../hooks/useExternalPlayer';
+import { getPlaybackDefaults, setPlaybackDefaults, QUALITY_OPTIONS, SPEED_PRESETS } from '../utils/playbackDefaults';
+import { SEEK_SPEED_OPTIONS, getStoredSeekSpeed, setStoredSeekSpeed } from '../utils/seekSettings';
 import MobileActionSheet from './MobileActionSheet';
 import DeleteConfirmModal from './DeleteConfirmModal';
 import { 
@@ -765,6 +767,26 @@ export default function LibraryView({
   const [actionSheetItem, setActionSheetItem] = useState(null);
   const [deleteTargetItem, setDeleteTargetItem] = useState(null);
 
+  // Default Playback Settings State & Quick Popover
+  const [showPlaybackDefaultsMenu, setShowPlaybackDefaultsMenu] = useState(false);
+  const [playbackDefaults, setPlaybackDefaultsState] = useState(() => getPlaybackDefaults());
+  const [seekSpeed, setSeekSpeedState] = useState(() => getStoredSeekSpeed());
+
+  useEffect(() => {
+    const handleDefaultsChange = (e) => {
+      if (e.detail) setPlaybackDefaultsState(e.detail);
+    };
+    const handleSeekChange = (e) => {
+      if (e.detail) setSeekSpeedState(e.detail);
+    };
+    window.addEventListener('faraday:playback_defaults_changed', handleDefaultsChange);
+    window.addEventListener('faraday:seek_speed_changed', handleSeekChange);
+    return () => {
+      window.removeEventListener('faraday:playback_defaults_changed', handleDefaultsChange);
+      window.removeEventListener('faraday:seek_speed_changed', handleSeekChange);
+    };
+  }, []);
+
   // Dynamic Poster Columns Slider State (Persisted separately for Poster vs Backdrop)
   const [gridColumnsPoster, setGridColumnsPoster] = useState(() => {
     const saved = localStorage.getItem('jf_library_grid_cols_poster') || localStorage.getItem('jf_library_grid_cols');
@@ -1084,14 +1106,15 @@ export default function LibraryView({
           </div>
 
           <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
-            {/* Quick Random 2 Windows Button */}
+            {/* Quick Random Windows Button: Mobile shows 随机 2 窗, Desktop shows 随机 3 窗 */}
             <button
-              onClick={onOpenRandom2Windows || onPlayRandomItem}
-              className="flex items-center gap-1 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 text-xs font-bold shadow-lg transition transform hover:scale-[1.02]"
-              title="随机挑选 2 部视频同时开启双窗播放"
+              onClick={typeof window !== 'undefined' && window.innerWidth < 768 ? (onOpenRandom2Windows || onPlayRandomItem) : (onOpenRandom3Windows || onPlayRandomItem)}
+              className="flex items-center gap-1 px-2.5 sm:px-3.5 py-1 sm:py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 text-xs font-bold shadow-lg transition transform hover:scale-[1.02]"
+              title={typeof window !== 'undefined' && window.innerWidth < 768 ? "随机挑选 2 部视频开启双窗播放" : "随机挑选 3 部视频开启 1大+2小 悬浮 3 窗"}
             >
               <Play size={12} className="fill-amber-400 text-amber-400" />
-              <span>随机 2 窗</span>
+              <span className="sm:hidden">随机 2 窗</span>
+              <span className="hidden sm:inline">随机 3 窗</span>
             </button>
 
             {/* Quick Random 1 Play Button */}
@@ -1118,15 +1141,164 @@ export default function LibraryView({
               <span className="font-medium text-gray-200">自动补窗</span>
             </label>
 
-            {/* Desktop Only: Tampermonkey 3-Window PIP Launcher */}
-            <button
-              onClick={onOpenRandom3Windows}
-              className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-cyan-950/40 hover:bg-cyan-900/50 border border-cyan-500/30 text-cyan-300 text-xs font-bold shadow-lg transition"
-              title="开启 1大+2小 经典 3 独立悬浮播放窗"
-            >
-              <Tv size={13} className="text-cyan-400" />
-              <span>3 窗模式</span>
-            </button>
+            {/* Default Playback Settings Popover */}
+            <div className="relative">
+              <button
+                onClick={() => setShowPlaybackDefaultsMenu(prev => !prev)}
+                className={`flex items-center gap-1 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl border text-xs font-bold transition ${
+                  showPlaybackDefaultsMenu
+                    ? 'bg-cyan-950/80 border-cyan-400 text-cyan-300 shadow-lg shadow-cyan-500/25'
+                    : 'bg-black/40 hover:bg-white/10 border-white/10 text-gray-300 hover:text-cyan-300'
+                }`}
+                title="设置全局默认播放选项（画质、倍速、海报画中画、快进步长等）"
+              >
+                <SlidersHorizontal size={12} className="text-cyan-400" />
+                <span className="hidden xs:inline">默认播放</span>
+              </button>
+
+              {/* Dropdown Menu */}
+              {showPlaybackDefaultsMenu && (
+                <div 
+                  className="absolute right-0 top-[calc(100%+6px)] z-50 w-72 bg-slate-900/98 backdrop-blur-xl border border-cyan-500/40 rounded-2xl p-3 shadow-2xl shadow-black/90 flex flex-col gap-3 text-xs animate-in fade-in zoom-in-95 duration-100"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="flex items-center justify-between border-b border-white/10 pb-1.5">
+                    <span className="font-bold text-white flex items-center gap-1.5">
+                      <SlidersHorizontal size={13} className="text-cyan-400" />
+                      默认播放设置
+                    </span>
+                    <button
+                      onClick={() => setShowPlaybackDefaultsMenu(false)}
+                      className="p-1 rounded-full text-gray-400 hover:text-white hover:bg-white/10"
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+
+                  {/* 1. Default Quality */}
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[11px] text-gray-400 font-medium">🎥 默认画质</span>
+                    <div className="grid grid-cols-5 gap-1">
+                      {QUALITY_OPTIONS.map(q => (
+                        <button
+                          key={q.id}
+                          onClick={() => {
+                            const updated = setPlaybackDefaults({ quality: q.id });
+                            setPlaybackDefaultsState(updated);
+                          }}
+                          className={`py-1 rounded-lg text-[10px] font-medium text-center transition ${
+                            playbackDefaults.quality === q.id
+                              ? 'bg-cyan-500 text-white font-bold shadow'
+                              : 'bg-black/50 text-gray-400 hover:text-white hover:bg-white/10'
+                          }`}
+                        >
+                          {q.shortLabel}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* 2. Default Speed */}
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[11px] text-gray-400 font-medium">⚡ 默认播放速度</span>
+                    <div className="grid grid-cols-5 gap-1">
+                      {SPEED_PRESETS.map(spd => (
+                        <button
+                          key={spd}
+                          onClick={() => {
+                            const updated = setPlaybackDefaults({ speed: spd });
+                            setPlaybackDefaultsState(updated);
+                          }}
+                          className={`py-1 rounded-lg text-[10px] font-medium text-center transition ${
+                            playbackDefaults.speed === spd
+                              ? 'bg-cyan-500 text-white font-bold shadow'
+                              : 'bg-black/50 text-gray-400 hover:text-white hover:bg-white/10'
+                          }`}
+                        >
+                          {spd}x
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* 3. Default Pinned Poster PIP */}
+                  <div className="flex items-center justify-between py-0.5">
+                    <span className="text-[11px] text-gray-300 font-medium">🖼️ 海报画中画</span>
+                    <div className="flex items-center bg-black/50 p-0.5 rounded-lg border border-white/10 text-[10px]">
+                      <button
+                        onClick={() => {
+                          const updated = setPlaybackDefaults({ showPinnedPoster: true });
+                          setPlaybackDefaultsState(updated);
+                        }}
+                        className={`px-2 py-0.5 rounded transition ${
+                          playbackDefaults.showPinnedPoster
+                            ? 'bg-cyan-500 text-white font-bold'
+                            : 'text-gray-400 hover:text-white'
+                        }`}
+                      >
+                        开启
+                      </button>
+                      <button
+                        onClick={() => {
+                          const updated = setPlaybackDefaults({ showPinnedPoster: false });
+                          setPlaybackDefaultsState(updated);
+                        }}
+                        className={`px-2 py-0.5 rounded transition ${
+                          !playbackDefaults.showPinnedPoster
+                            ? 'bg-cyan-500 text-white font-bold'
+                            : 'text-gray-400 hover:text-white'
+                        }`}
+                      >
+                        关闭
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 4. Seek Speed Tier */}
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[11px] text-gray-400 font-medium">⏩ 快进快退步长</span>
+                    <div className="grid grid-cols-3 gap-1">
+                      {SEEK_SPEED_OPTIONS.map(opt => (
+                        <button
+                          key={opt.id}
+                          onClick={() => {
+                            setStoredSeekSpeed(opt.id);
+                            setSeekSpeedState(opt.id);
+                          }}
+                          className={`py-1 rounded-lg text-[10px] font-medium text-center transition ${
+                            seekSpeed === opt.id
+                              ? 'bg-cyan-500 text-white font-bold shadow'
+                              : 'bg-black/50 text-gray-400 hover:text-white hover:bg-white/10'
+                          }`}
+                        >
+                          {opt.label.split(' ')[0]} ({opt.shortLabel})
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* 5. Auto Refill Floating Windows */}
+                  <div className="flex items-center justify-between pt-1 border-t border-white/10">
+                    <span className="text-[11px] text-gray-300 font-medium">🪟 自动补齐悬浮窗</span>
+                    <button
+                      onClick={() => {
+                        const nextVal = !autoRefillFloatingWindows;
+                        if (onToggleAutoRefill) onToggleAutoRefill(nextVal);
+                        const updated = setPlaybackDefaults({ autoRefill: nextVal });
+                        setPlaybackDefaultsState(updated);
+                      }}
+                      className={`px-2.5 py-0.5 rounded-lg text-[10px] font-bold transition ${
+                        autoRefillFloatingWindows
+                          ? 'bg-cyan-500 text-white shadow'
+                          : 'bg-black/50 text-gray-400 hover:text-white border border-white/10'
+                      }`}
+                    >
+                      {autoRefillFloatingWindows ? '已开启' : '已关闭'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -1212,22 +1384,22 @@ export default function LibraryView({
           </div>
         </div>
 
-        {/* Row 2/3: Search, Filters & Sorting Bar (Compact Single-Row Horizontal Scroll on Mobile) */}
-        <div className="flex items-center justify-between gap-1.5 text-xs pt-0.5 overflow-x-auto min-w-0 no-scrollbar">
-          {/* Compact Search Input */}
-          <div className="relative w-20 xs:w-28 sm:w-40 flex-shrink-0">
-            <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+        {/* Row 2/3: Search, Filters & Sorting Bar: Auto-resizing Search Bar tiling smoothly */}
+        <div className="flex items-center gap-1.5 sm:gap-2 text-xs pt-0.5 min-w-0 flex-nowrap overflow-x-auto no-scrollbar">
+          {/* Auto-expanding Search Input */}
+          <div className="relative flex-1 min-w-[120px] sm:min-w-[180px] max-w-full sm:max-w-md flex-shrink">
+            <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
             <input
               type="text"
               value={searchKeyword}
               onChange={(e) => onSearchChange(e.target.value)}
-              placeholder="搜索..."
-              className="w-full pl-6 pr-5 py-1 rounded-xl bg-black/50 border border-white/10 text-white text-xs placeholder-gray-500 focus:outline-none focus:border-cyan-400 transition"
+              placeholder="搜索视频 / 演员..."
+              className="w-full pl-7 sm:pl-8 pr-6 py-1 sm:py-1.5 rounded-xl bg-black/50 border border-white/10 text-white text-xs placeholder-gray-500 focus:outline-none focus:border-cyan-400 focus:bg-black/80 transition"
             />
             {searchKeyword && (
               <button
                 onClick={() => onSearchChange('')}
-                className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white transition"
               >
                 <X size={11} />
               </button>

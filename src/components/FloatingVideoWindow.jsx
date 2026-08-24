@@ -5,6 +5,8 @@ import { calculateSlotStyle } from '../utils/windowLayout';
 import { useExternalPlayer } from '../hooks/useExternalPlayer';
 import { useTouchGestures } from '../hooks/useTouchGestures';
 import { SEEK_SPEED_OPTIONS, getStoredSeekSpeed, setStoredSeekSpeed, getSeekStepSeconds, getSeekSwipeSpan } from '../utils/seekSettings';
+import { getPlaybackDefaults } from '../utils/playbackDefaults';
+import { getDefaultSubtitleIndex } from '../utils/subtitleHelper';
 import TrickplayScrubberThumbnail from './TrickplayScrubberThumbnail';
 import InlineVrCanvas from './InlineVrCanvas';
 import SubtitleModal from './SubtitleModal';
@@ -114,10 +116,13 @@ export default function FloatingVideoWindow({
     return () => window.removeEventListener('resize', handleResize);
   }, [slotIndex]);
 
+  // Default Playback Settings initialization
+  const [playbackDefaults] = useState(() => getPlaybackDefaults());
+
   // Playback state
   const [isPlaying, setIsPlaying] = useState(true);
   const [isMuted, setIsMuted] = useState(true);
-  const [playbackSpeed, setPlaybackSpeed] = useState(1.0);
+  const [playbackSpeed, setPlaybackSpeed] = useState(() => playbackDefaults.speed || 1.0);
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
   const [showPlayerMenu, setShowPlayerMenu] = useState(false);
@@ -139,12 +144,12 @@ export default function FloatingVideoWindow({
   }, []);
 
   // Stream Quality: 'direct' | '8000000' | '4000000' | '2000000' | '1000000'
-  const [streamQuality, setStreamQuality] = useState('direct');
+  const [streamQuality, setStreamQuality] = useState(() => playbackDefaults.quality || 'direct');
   const isSmoothMode = streamQuality !== 'direct';
   const [smoothToast, setSmoothToast] = useState('');
 
-  // Pinned Poster PIP: ENABLED BY DEFAULT (1X on Mobile, 1.5X on Desktop)
-  const [showPinnedPoster, setShowPinnedPoster] = useState(true);
+  // Pinned Poster PIP: defaults from global settings (1X on Mobile, 1.5X on Desktop)
+  const [showPinnedPoster, setShowPinnedPoster] = useState(() => playbackDefaults.showPinnedPoster !== false);
 
   // INLINE VR Projection State (Auto-detected on load)
   const [isVrActive, setIsVrActive] = useState(false);
@@ -237,21 +242,13 @@ export default function FloatingVideoWindow({
     return streams.filter(s => s.Type === 'Subtitle' && !['pgssub', 'dvdsub', 'dvbsub'].includes(s.Codec?.toLowerCase()));
   }, [item, playbackData, mediaSource]);
 
-  // Auto-detect default subtitle (or disable if hardsub flag in name)
+  // Auto-detect default subtitle (or disable if hardsub flag in name e.g. C / UC)
   useEffect(() => {
     if (subtitleStreams.length > 0) {
-      const fileName = item?.Path || item?.Name || '';
-      const hasHardcodedSubs = /-(u?c)(?:[^a-z0-9]|$)/i.test(fileName);
-      if (hasHardcodedSubs) {
-        setSelectedSubtitleIndex(-1);
-      } else {
-        const defaultStream = subtitleStreams.find(s => s.IsDefault) || subtitleStreams[0];
-        if (defaultStream) {
-          setSelectedSubtitleIndex(defaultStream.Index);
-        }
-      }
+      const defIdx = getDefaultSubtitleIndex(item, subtitleStreams);
+      setSelectedSubtitleIndex(defIdx);
     }
-  }, [item?.Id, subtitleStreams]);
+  }, [item?.Id, item?.Path, item?.Name, subtitleStreams]);
 
   // Sync subtitle mode to video.textTracks
   const syncSubtitles = useCallback(() => {

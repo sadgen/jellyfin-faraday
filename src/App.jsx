@@ -340,6 +340,20 @@ export default function App() {
     }
   }, [modalNavPool]);
 
+  // Play a random single video (prioritizes unplayed from current filter pool)
+  const handlePlayRandomItem = useCallback(() => {
+    const pool = currentFilteredItemsRef.current.length > 0 ? currentFilteredItemsRef.current : mediaItems;
+    if (pool.length === 0) return;
+
+    const unplayed = pool.filter(it => !it.UserData?.Played);
+    const candidatePool = unplayed.length > 0 ? unplayed : pool;
+    const randomItem = candidatePool[Math.floor(Math.random() * candidatePool.length)] || pool[0];
+
+    if (randomItem) {
+      handlePlaySingleItem(randomItem);
+    }
+  }, [mediaItems, handlePlaySingleItem]);
+
   // Open 3 random videos simultaneously (from current filtered media pool)
   const handleOpenRandom3Windows = useCallback(() => {
     const pool = currentFilteredItemsRef.current.length > 0 ? currentFilteredItemsRef.current : mediaItems;
@@ -548,6 +562,7 @@ export default function App() {
             onToggleAutoRefill={handleToggleAutoRefill}
             onFilteredItemsChange={handleFilteredItemsChange}
             onOpenRandom3Windows={handleOpenRandom3Windows}
+            onPlayRandomItem={handlePlayRandomItem}
             onPlaySingleItem={handlePlaySingleItem}
             onOpenFloatingWindow={handleOpenFloatingWindow}
             onPlayModal={(item) => setModalPlayingItem(item)}
@@ -574,6 +589,7 @@ export default function App() {
 
         {/* Mobile Bottom Navigation Bar */}
         <MobileNavBar
+          onOpenRandomPlay={handlePlayRandomItem}
           onOpenRandom3Windows={handleOpenRandom3Windows}
           onOpenSearch={() => {
             const searchInput = document.querySelector('input[type="text"]');

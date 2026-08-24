@@ -386,7 +386,7 @@ const MediaCard = React.memo(function MediaCard({
         </div>
 
         {/* Hover Action Buttons */}
-        <div className="absolute inset-x-2 bottom-2 z-30 flex items-center justify-between opacity-80 md:opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+        <div className="absolute inset-x-2 bottom-2 z-30 flex items-center justify-between opacity-0 group-hover:opacity-100 transition-opacity duration-200">
           <button
             onClick={(e) => { e.stopPropagation(); onToggleFavorite(item); }}
             className={`p-1.5 rounded-lg backdrop-blur-md border transition ${
@@ -743,6 +743,7 @@ export default function LibraryView({
   autoRefillFloatingWindows = false,
   onToggleAutoRefill,
   onOpenRandom3Windows,
+  onPlayRandomItem,
   onPlaySingleItem,
   onOpenFloatingWindow,
   onPlayModal,
@@ -1041,29 +1042,29 @@ export default function LibraryView({
     <div className="w-full h-full flex flex-col bg-[#080b11] text-gray-100 overflow-hidden select-none">
       
       {/* Top Navigation Bar */}
-      <div className="border-b border-white/5 bg-slate-950/90 backdrop-blur-md px-3 sm:px-5 py-2.5 sm:py-3 flex flex-col gap-2.5 z-30 pt-[max(0.5rem,env(safe-area-inset-top))]">
+      <div className="border-b border-white/5 bg-slate-950/90 backdrop-blur-md px-2.5 sm:px-5 py-2 sm:py-2.5 flex flex-col gap-1.5 sm:gap-2 z-30 pt-[max(0.5rem,env(safe-area-inset-top))]">
         
-        {/* Row 1: Primary Library Tabs, Random 3 Windows & Kanban Launcher */}
-        <div className="flex items-center justify-between gap-2.5">
-          <div className="flex items-center gap-1.5 overflow-x-auto py-0.5 flex-1 min-w-0">
+        {/* Row 1: Primary Library Tabs & Random Play Launcher */}
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5 overflow-x-auto py-0.5 flex-1 min-w-0 no-scrollbar">
             {userViews.map(view => (
               <button
                 key={view.Id}
                 onClick={() => onSelectView(view.Id)}
-                className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex-shrink-0 ${
+                className={`flex items-center gap-1 px-2.5 sm:px-3.5 py-1 sm:py-1.5 rounded-xl text-xs font-bold transition flex-shrink-0 ${
                   selectedViewId === view.Id
                     ? 'bg-jf-accent text-white shadow-lg shadow-cyan-500/25 scale-[1.02]'
                     : 'bg-black/40 hover:bg-white/10 text-gray-300 border border-white/5'
                 }`}
               >
-                <Folder size={13} className={selectedViewId === view.Id ? 'text-white' : 'text-cyan-400'} />
+                <Folder size={12} className={selectedViewId === view.Id ? 'text-white' : 'text-cyan-400'} />
                 <span>{view.Name}</span>
               </button>
             ))}
 
             <button
               onClick={() => onSelectView('all')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition flex-shrink-0 ${
+              className={`flex items-center gap-1 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl text-xs font-medium transition flex-shrink-0 ${
                 selectedViewId === 'all'
                   ? 'bg-jf-accent text-white shadow-lg shadow-cyan-500/25'
                   : 'bg-black/40 hover:bg-white/10 text-gray-400 border border-white/5'
@@ -1071,14 +1072,25 @@ export default function LibraryView({
               title="跨库全量浏览 (全部媒体)"
             >
               <Film size={12} />
-              <span>全部媒体</span>
+              <span>全部</span>
             </button>
           </div>
 
-          <div className="flex items-center gap-2 flex-shrink-0">
-            {/* Auto Refill Floating Windows Checkbox */}
+          <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
+            {/* Quick Random Play Button (Prioritizing Playback on Mobile & Desktop!) */}
+            <button
+              onClick={onPlayRandomItem || onOpenRandom3Windows}
+              className="flex items-center gap-1 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 text-xs font-bold shadow-lg transition transform hover:scale-[1.02]"
+              title="随机挑选一部未看/当前筛选的视频立即播放"
+            >
+              <Play size={12} className="fill-amber-400 text-amber-400" />
+              <span className="hidden xs:inline">随机播放</span>
+              <span className="xs:hidden">随机</span>
+            </button>
+
+            {/* Desktop Only: Auto Refill Floating Windows Checkbox */}
             <label 
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-black/40 hover:bg-white/10 border border-white/10 text-xs text-gray-300 cursor-pointer select-none transition" 
+              className="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-black/40 hover:bg-white/10 border border-white/10 text-xs text-gray-300 cursor-pointer select-none transition" 
               title="勾选后，关闭某个悬浮播放窗口时将自动从当前筛选的媒体库中打开新窗口补充"
             >
               <input
@@ -1087,23 +1099,23 @@ export default function LibraryView({
                 onChange={(e) => onToggleAutoRefill && onToggleAutoRefill(e.target.checked)}
                 className="w-3.5 h-3.5 accent-cyan-400 rounded cursor-pointer"
               />
-              <span className="hidden xs:inline font-medium text-gray-200">自动补窗</span>
+              <span className="font-medium text-gray-200">自动补窗</span>
             </label>
 
-            {/* Tampermonkey 随机3窗 Launcher */}
+            {/* Desktop Only: Tampermonkey 3-Window PIP Launcher */}
             <button
               onClick={onOpenRandom3Windows}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 text-xs font-bold shadow-lg transition transform hover:scale-[1.02]"
-              title="复刻油猴脚本：开启 1大+2小 经典非对称 3 独立悬浮播放窗"
+              className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-cyan-950/40 hover:bg-cyan-900/50 border border-cyan-500/30 text-cyan-300 text-xs font-bold shadow-lg transition"
+              title="开启 1大+2小 经典 3 独立悬浮播放窗"
             >
-              <Tv size={13} className="text-amber-400" />
-              <span>随机3窗</span>
+              <Tv size={13} className="text-cyan-400" />
+              <span>3 窗模式</span>
             </button>
           </div>
         </div>
 
-        {/* Row 2: Secondary Sub-Tabs */}
-        <div className="flex items-center justify-between gap-2 border-t border-white/5 pt-2 text-xs">
+        {/* Row 2 (Desktop Only): Secondary Sub-Tabs, Sliders, Layout Switcher */}
+        <div className="hidden md:flex items-center justify-between gap-2 border-t border-white/5 pt-2 text-xs">
           <div className="flex items-center gap-1 overflow-x-auto flex-1 min-w-0">
             {SUB_TABS.map(tab => {
               const Icon = tab.icon;
@@ -1184,29 +1196,30 @@ export default function LibraryView({
           </div>
         </div>
 
-        {/* Row 3: Search, Filters & Sorting Bar */}
-        <div className="flex items-center justify-between gap-2 text-xs pt-0.5 flex-wrap">
-          <div className="relative w-28 xs:w-36 sm:w-44 flex-shrink-0">
-            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+        {/* Row 2/3: Search, Filters & Sorting Bar (Compact Single-Row Horizontal Scroll on Mobile) */}
+        <div className="flex items-center justify-between gap-1.5 text-xs pt-0.5 overflow-x-auto min-w-0 no-scrollbar">
+          {/* Compact Search Input */}
+          <div className="relative w-20 xs:w-28 sm:w-40 flex-shrink-0">
+            <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
             <input
               type="text"
               value={searchKeyword}
               onChange={(e) => onSearchChange(e.target.value)}
               placeholder="搜索..."
-              className="w-full pl-7 pr-6 py-1 rounded-xl bg-black/50 border border-white/10 text-white text-xs placeholder-gray-500 focus:outline-none focus:border-cyan-400 transition"
+              className="w-full pl-6 pr-5 py-1 rounded-xl bg-black/50 border border-white/10 text-white text-xs placeholder-gray-500 focus:outline-none focus:border-cyan-400 transition"
             />
             {searchKeyword && (
               <button
                 onClick={() => onSearchChange('')}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white"
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white"
               >
-                <X size={12} />
+                <X size={11} />
               </button>
             )}
           </div>
 
           {/* Filter Bar with Status, Favorites and Play Count */}
-          <div className="flex items-center bg-black/40 p-0.5 rounded-xl border border-white/5 gap-1 overflow-x-auto min-w-0 flex-1 sm:flex-initial">
+          <div className="flex items-center bg-black/40 p-0.5 rounded-xl border border-white/5 gap-0.5 sm:gap-1 overflow-x-auto flex-shrink-0">
             {/* Status (Mutually Exclusive: 全部 / 未播完 / 已播) */}
             <div className="flex items-center gap-0.5">
               {STATUS_OPTIONS.map(f => {
@@ -1215,7 +1228,7 @@ export default function LibraryView({
                   <button
                     key={f.id}
                     onClick={() => onStatusFilterChange(active && f.id !== 'all' ? 'all' : f.id)}
-                    className={`px-2 py-1 rounded-lg transition flex-shrink-0 text-xs ${
+                    className={`px-1.5 sm:px-2 py-1 rounded-lg transition flex-shrink-0 text-xs ${
                       active
                         ? 'bg-slate-700 text-cyan-300 font-medium shadow'
                         : 'text-gray-400 hover:text-white'
@@ -1233,24 +1246,24 @@ export default function LibraryView({
             <div className="flex items-center gap-0.5">
               <button
                 onClick={() => setFavoriteFilter(prev => prev === 'favorite' ? 'all' : 'favorite')}
-                className={`px-2 py-1 rounded-lg transition flex-shrink-0 text-xs flex items-center gap-1 ${
+                className={`px-1.5 sm:px-2 py-1 rounded-lg transition flex-shrink-0 text-xs flex items-center gap-1 ${
                   favoriteFilter === 'favorite'
                     ? 'bg-amber-500/25 border border-amber-500/40 text-amber-300 font-medium shadow'
                     : 'text-gray-400 hover:text-amber-300'
                 }`}
-                title="只看最爱视频 (可与状态及播放次数叠加筛选)"
+                title="只看最爱视频"
               >
                 <Star size={11} className={favoriteFilter === 'favorite' ? 'fill-amber-400 text-amber-400' : ''} />
                 <span>最爱</span>
               </button>
               <button
                 onClick={() => setFavoriteFilter(prev => prev === 'not_favorite' ? 'all' : 'not_favorite')}
-                className={`px-2 py-1 rounded-lg transition flex-shrink-0 text-xs flex items-center gap-1 ${
+                className={`px-1.5 sm:px-2 py-1 rounded-lg transition flex-shrink-0 text-xs flex items-center gap-1 ${
                   favoriteFilter === 'not_favorite'
                     ? 'bg-slate-700 text-cyan-300 font-medium shadow'
                     : 'text-gray-400 hover:text-white'
                 }`}
-                title="只看非最爱视频 (可与状态及播放次数叠加筛选)"
+                title="只看非最爱视频"
               >
                 <span>非最爱</span>
               </button>
@@ -1258,7 +1271,7 @@ export default function LibraryView({
 
             <div className="h-3.5 w-px bg-white/10 mx-0.5 flex-shrink-0" />
 
-            {/* Play Count Filter (Mutually Exclusive: 0次 / 1次 / ≤1次 / 2-5次 / 5-10次 / 10+次) */}
+            {/* Play Count Filter */}
             <div className="flex items-center gap-0.5">
               {PLAY_COUNT_OPTIONS.map(opt => {
                 const active = playCountFilter === opt.id;
@@ -1266,7 +1279,7 @@ export default function LibraryView({
                   <button
                     key={opt.id}
                     onClick={() => setPlayCountFilter(active ? 'all' : opt.id)}
-                    className={`px-2 py-1 rounded-lg transition flex-shrink-0 text-xs ${
+                    className={`px-1.5 sm:px-2 py-1 rounded-lg transition flex-shrink-0 text-xs ${
                       active
                         ? 'bg-slate-700 text-cyan-300 font-medium shadow'
                         : 'text-gray-400 hover:text-white'
@@ -1282,16 +1295,16 @@ export default function LibraryView({
 
           {/* Filtered Total Count Badge */}
           <div 
-            className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-cyan-950/40 border border-cyan-500/30 text-cyan-300 text-xs font-mono font-bold flex-shrink-0"
-            title={`当前筛选条件下的视频总数: ${displayItems.length} 部`}
+            className="flex items-center gap-1 px-2 py-1 rounded-xl bg-cyan-950/40 border border-cyan-500/30 text-cyan-300 text-xs font-mono font-bold flex-shrink-0"
+            title={`当前筛选: ${displayItems.length} 部`}
           >
-            <Film size={12} className="text-cyan-400 flex-shrink-0" />
-            <span>共 {displayItems.length} 部</span>
+            <Film size={11} className="text-cyan-400 flex-shrink-0" />
+            <span>{displayItems.length}部</span>
           </div>
 
           {/* Sort Selector */}
-          <div className="flex items-center gap-1 bg-black/40 px-2 py-1 rounded-xl border border-white/5 text-gray-300 text-xs">
-            <ArrowUpDown size={12} className="text-cyan-400" />
+          <div className="flex items-center gap-1 bg-black/40 px-1.5 sm:px-2 py-1 rounded-xl border border-white/5 text-gray-300 text-xs flex-shrink-0">
+            <ArrowUpDown size={11} className="text-cyan-400" />
             <select
               value={sortMethod}
               onChange={(e) => onSortMethodChange(e.target.value)}
@@ -1305,14 +1318,15 @@ export default function LibraryView({
             </select>
           </div>
 
+          {/* Desktop Only: Refresh Library */}
           <button
             onClick={onRefreshLibrary}
             disabled={isRefreshing}
-            className="px-2.5 py-1.5 rounded-xl bg-black/40 hover:bg-white/10 border border-white/5 text-gray-300 hover:text-cyan-300 transition disabled:opacity-50 flex items-center gap-1.5 text-xs font-medium"
-            title="扫描媒体库 & 刷新元数据 (通知 Jellyfin 扫描磁盘新增影片并刷新入库)"
+            className="hidden md:flex px-2.5 py-1.5 rounded-xl bg-black/40 hover:bg-white/10 border border-white/5 text-gray-300 hover:text-cyan-300 transition disabled:opacity-50 items-center gap-1.5 text-xs font-medium flex-shrink-0"
+            title="扫描媒体库 & 刷新元数据"
           >
-            <RefreshCw size={13} className={isRefreshing ? 'animate-spin text-cyan-400' : 'text-cyan-400'} />
-            <span className="hidden xs:inline">{isRefreshing ? '扫描入库中...' : '刷新元数据'}</span>
+            <RefreshCw size={12} className={isRefreshing ? 'animate-spin text-cyan-400' : 'text-cyan-400'} />
+            <span>{isRefreshing ? '扫描中...' : '刷新'}</span>
           </button>
         </div>
       </div>
@@ -1320,7 +1334,7 @@ export default function LibraryView({
       {/* Main Content Viewport with Infinite Progressive Loading */}
       <div 
         onScroll={handleScroll}
-        className="flex-1 overflow-y-auto p-3 sm:p-5 pb-24 md:pb-20"
+        className="flex-1 overflow-y-auto p-2 sm:p-5 pb-24 md:pb-20"
       >
         {/* SUB-VIEW 1: Genres */}
         {activeSubTab === 'genres' && (

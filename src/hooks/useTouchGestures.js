@@ -36,6 +36,10 @@ export function useTouchGestures({
   normalSpeed = 1.0,
   onSpeedChange,
   disableLongPressBoost = false,
+  enableLongPressDrag = false,
+  onLongPressDragStart,
+  onLongPressDragMove,
+  onLongPressDragEnd,
   customSwipeSpan = null
 }) {
   const [gestureState, setGestureState] = useState({
@@ -49,7 +53,8 @@ export function useTouchGestures({
 
   // Touch tracking refs
   const touchStartRef = useRef({ x: 0, y: 0, time: 0 });
-  const touchActionRef = useRef(null); // 'seek' | 'brightness' | 'speed_step' | null
+  const touchActionRef = useRef(null); // 'seek' | 'brightness' | 'speed_step' | 'window_drag' | null
+  const isDraggingWindowRef = useRef(false);
   const initialValueRef = useRef(0);
   const longPressTimerRef = useRef(null);
   const lastTapRef = useRef({ time: 0, x: 0, y: 0 });
@@ -60,6 +65,7 @@ export function useTouchGestures({
   // Unmount cleanup for the fade-out timer
   useEffect(() => () => {
     if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
+    if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
   }, []);
 
   /** 手势结束后让提示滞留片刻再淡出移除 */
@@ -109,6 +115,7 @@ export function useTouchGestures({
     };
 
     touchActionRef.current = null;
+    isDraggingWindowRef.current = false;
 
     // Double-tap detection (< 300ms, < 35px displacement)
     const now = Date.now();
@@ -125,14 +132,28 @@ export function useTouchGestures({
 
     lastTapRef.current = { time: now, x: touch.clientX, y: touch.clientY };
 
-    // Setup Long-press speed boost (hold for > 400ms)
     if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
-    if (!disableLongPressBoost) {
+
+    if (enableLongPressDrag) {
+      // Long-press to drag entire window on mobile (350ms hold)
+      longPressTimerRef.current = setTimeout(() => {
+        if (!touchActionRef.current) {
+          try {
+            if (typeof navigator !== 'undefined' && navigator.vibrate) {
+              navigator.vibrate([40, 30, 40]);
+            }
+          } catch (_) {}
+          isDraggingWindowRef.current = true;
+          touchActionRef.current = 'window_drag';
+          if (onLongPressDragStart) {
+            onLongPressDragStart({ x: touch.clientX, y: touch.clientY });
+          }
+        }
+      }, 350);
+    } else if (!disableLongPressBoost) {
+      // Setup Long-press speed boost (hold for > 400ms)
       longPressTimerRef.current = setTimeout(() => {
         if (!touchActionRef.current && videoRef.current) {
-          // Capture the PRE-boost speed now (closure value from touch start),
-          // so release always restores the original pace even if onSpeedChange
-          // re-rendered this hook with the boosted speed (audit race fix).
           boostRestoreSpeedRef.current = normalSpeed;
           isBoostedRef.current = true;
           touchActionRef.current = null;
@@ -147,7 +168,7 @@ export function useTouchGestures({
         }
       }, 400);
     }
-  }, [containerRef, videoRef, onTogglePlay, onSpeedChange, normalSpeed, disableLongPressBoost]);
+  }, [containerRef, videoRef, onTogglePlay, onSpeedChange, normalSpeed, disableLongPressBoost, enableLongPressDrag, onLongPressDragStart]);
 
   const handleTouchMove = useCallback((e) => {
     if (e.touches.length !== 1) return;
@@ -156,8 +177,17 @@ export function useTouchGestures({
     const dx = touch.clientX - start.x;
     const dy = touch.clientY - start.y;
 
+    // Handle Active Long-press Window Dragging
+    if (isDraggingWindowRef.current) {
+      e.preventDefault();
+      if (onLongPressDragMove) {
+        onLongPressDragMove({ dx, dy, clientX: touch.clientX, clientY: touch.clientY });
+      }
+      return;
+    }
+
     // Cancel long press if user moves fingers
-    if (Math.hypot(dx, dy) > 10) {
+    if (Math.hypot(dx, dy) > 8) {
       if (longPressTimerRef.current) {
         clearTimeout(longPressTimerRef.current);
         longPressTimerRef.current = null;
@@ -221,7 +251,6 @@ export function useTouchGestures({
       });
     } else if (touchActionRef.current === 'speed_step') {
       // Vertical swipe on right: up = faster step, down = slower step.
-      // Full-height drag spans 4 steps across SPEED_OPTIONS.
       const steps = Math.round(-(dy / start.rectHeight) * 4);
       const baseIdx = SPEED_OPTIONS.indexOf(initialValueRef.current);
       const idx = baseIdx === -1 ? 0 : baseIdx;
@@ -236,12 +265,19 @@ export function useTouchGestures({
         fading: false
       });
     }
-  }, [currentTime, duration, brightness, normalSpeed, videoRef, onSeekPreview, applySpeedStep]);
+  }, [currentTime, duration, brightness, normalSpeed, videoRef, onSeekPreview, applySpeedStep, onLongPressDragMove, customSwipeSpan]);
 
   const handleTouchEnd = useCallback(() => {
     if (longPressTimerRef.current) {
       clearTimeout(longPressTimerRef.current);
       longPressTimerRef.current = null;
+    }
+
+    if (isDraggingWindowRef.current) {
+      isDraggingWindowRef.current = false;
+      touchActionRef.current = null;
+      if (onLongPressDragEnd) onLongPressDragEnd();
+      return;
     }
 
     const wasBoosted = isBoostedRef.current;
@@ -270,7 +306,7 @@ export function useTouchGestures({
     } else {
       setGestureState({ type: null, value: 0, text: '', fading: false });
     }
-  }, [gestureState, onSeek, onSeekPreviewEnd, onSpeedChange, videoRef, scheduleGestureFade]);
+  }, [gestureState, onSeek, onSeekPreviewEnd, onSpeedChange, videoRef, scheduleGestureFade, onLongPressDragEnd]);
 
   return {
     gestureState,

@@ -57,8 +57,6 @@ export default function FloatingVideoWindow({
 
   // Long-press Drag state & tactile feedback for mobile
   const [isLongPressDragging, setIsLongPressDragging] = useState(false);
-  const longPressDragTimerRef = useRef(null);
-  const touchStartPosRef = useRef({ x: 0, y: 0, left: 0, top: 0 });
 
   // Multi-part video list (e.g. Part 1, 2, 3 / CD1, CD2)
   const [partsList, setPartsList] = useState(() => [{ Id: item?.Id, Name: item?.Name || 'Part 1' }]);
@@ -177,13 +175,32 @@ export default function FloatingVideoWindow({
 
   const { launchPlayer } = useExternalPlayer();
 
-  // Mobile Touch Gestures with real-time Trickplay preview
+  const dragStartPosRef = useRef({ left: 0, top: 0 });
+
+  // Mobile Touch Gestures with real-time Trickplay preview & Long-press window drag
   const { gestureState, brightness, touchHandlers } = useTouchGestures({
     videoRef,
     containerRef,
     duration: rawDuration,
     currentTime: videoRef.current?.currentTime || 0,
-    disableLongPressBoost: true, // Disable speed boost on floating window so long press drags window
+    disableLongPressBoost: true,
+    enableLongPressDrag: true,
+    onLongPressDragStart: () => {
+      setIsLongPressDragging(true);
+      setIsDragging(true);
+      isCustomPositionRef.current = true;
+      if (onBringToFront) onBringToFront(id);
+      dragStartPosRef.current = { left: layout.left, top: layout.top };
+    },
+    onLongPressDragMove: ({ dx, dy }) => {
+      const newX = Math.max(0, Math.min(window.innerWidth - 60, dragStartPosRef.current.left + dx));
+      const newY = Math.max(50, Math.min(window.innerHeight - 60, dragStartPosRef.current.top + dy));
+      setLayout(prev => ({ ...prev, left: newX, top: newY }));
+    },
+    onLongPressDragEnd: () => {
+      setIsLongPressDragging(false);
+      setIsDragging(false);
+    },
     customSwipeSpan: getSeekSwipeSpan(seekSpeed),
     onSeek: (target) => {
       if (videoRef.current) videoRef.current.currentTime = target;
@@ -683,69 +700,6 @@ export default function FloatingVideoWindow({
     window.addEventListener('touchcancel', handleTouchEnd);
   };
 
-  // Long-press Drag handler on video window body (with vibration & visual feedback)
-  const handleContainerTouchStart = (e) => {
-    if (
-      e.target.closest('button') || 
-      e.target.closest('select') || 
-      e.target.closest('.group\\/bar') || 
-      e.target.closest('.group\\/pip') || 
-      e.target.closest('.group\\/resizer')
-    ) {
-      return;
-    }
-    if (e.touches.length !== 1) return;
-    const touch = e.touches[0];
-    touchStartPosRef.current = { x: touch.clientX, y: touch.clientY, left: layout.left, top: layout.top };
-
-    if (longPressDragTimerRef.current) clearTimeout(longPressDragTimerRef.current);
-    longPressDragTimerRef.current = setTimeout(() => {
-      try {
-        if (typeof navigator !== 'undefined' && navigator.vibrate) {
-          navigator.vibrate([40, 30, 40]);
-        }
-      } catch (err) {}
-
-      setIsLongPressDragging(true);
-      setIsDragging(true);
-      isCustomPositionRef.current = true;
-      if (onBringToFront) onBringToFront(id);
-    }, 380);
-  };
-
-  const handleContainerTouchMove = (e) => {
-    if (e.touches.length !== 1) return;
-    const touch = e.touches[0];
-    const dx = touch.clientX - touchStartPosRef.current.x;
-    const dy = touch.clientY - touchStartPosRef.current.y;
-
-    if (!isLongPressDragging) {
-      if (Math.hypot(dx, dy) > 8) {
-        if (longPressDragTimerRef.current) {
-          clearTimeout(longPressDragTimerRef.current);
-          longPressDragTimerRef.current = null;
-        }
-      }
-      return;
-    }
-
-    e.preventDefault();
-    const newX = Math.max(0, Math.min(window.innerWidth - 60, touchStartPosRef.current.left + dx));
-    const newY = Math.max(50, Math.min(window.innerHeight - 60, touchStartPosRef.current.top + dy));
-    setLayout(prev => ({ ...prev, left: newX, top: newY }));
-  };
-
-  const handleContainerTouchEnd = () => {
-    if (longPressDragTimerRef.current) {
-      clearTimeout(longPressDragTimerRef.current);
-      longPressDragTimerRef.current = null;
-    }
-    if (isLongPressDragging) {
-      setIsLongPressDragging(false);
-      setIsDragging(false);
-    }
-  };
-
   // Resizing the floating window via bottom-right handle
   const handleMouseDownResize = (e) => {
     if (e.button !== 0) return;
@@ -989,23 +943,39 @@ export default function FloatingVideoWindow({
       onMouseDown={() => onBringToFront && onBringToFront(id)}
       onAuxClick={handleAuxClick}
       onWheel={handleWheel}
+      onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
       style={{
         left: `${layout.left}px`,
         top: `${layout.top}px`,
         width: `${layout.width}px`,
-        zIndex: hoverScrubberTime !== null ? 999 : (isDragging || isResizing ? 500 : 50 + (slotIndex === 1 ? 5 : (slotIndex === 0 ? 1 : 0))),
+        zIndex: hoverScrubberTime !== null ? 9999 : (isDragging || isResizing ? 500 : 50 + (slotIndex === 1 ? 5 : (slotIndex === 0 ? 1 : 0))),
         transition: (isDragging || isResizing)
           ? 'none' 
-          : 'left 0.3s cubic-bezier(0.2, 0, 0, 1), top 0.3s cubic-bezier(0.2, 0, 0, 1), width 0.3s cubic-bezier(0.2, 0, 0, 1), height 0.3s cubic-bezier(0.2, 0, 0, 1), box-shadow 0.2s'
+          : 'left 0.3s cubic-bezier(0.2, 0, 0, 1), top 0.3s cubic-bezier(0.2, 0, 0, 1), width 0.3s cubic-bezier(0.2, 0, 0, 1), height 0.3s cubic-bezier(0.2, 0, 0, 1), box-shadow 0.2s',
+        WebkitTouchCallout: 'none',
+        userSelect: 'none',
+        WebkitUserSelect: 'none'
       }}
       className={`fixed rounded-2xl overflow-visible shadow-2xl border bg-[#0d1117] flex flex-col group select-none ${
         slotIndex === 0 
           ? 'border-cyan-400/70 shadow-cyan-500/25' 
           : 'border-white/15 shadow-black/80'
       } ${
-        (isDragging || isResizing) ? 'shadow-cyan-500/50 opacity-95 scale-[1.01]' : 'hover:border-cyan-400'
+        (isDragging || isResizing) ? 'ring-2 ring-cyan-400 shadow-cyan-500/50 opacity-95 scale-[1.01]' : 'hover:border-cyan-400'
       }`}
     >
+      {/* Mobile Window-level Centered Trickplay Thumbnail (Adaptive Above / Below entire window) */}
+      {typeof window !== 'undefined' && window.innerWidth < 768 && (
+        <TrickplayScrubberThumbnail
+          item={item}
+          hoverTime={hoverScrubberTime}
+          hoverPercent={hoverScrubberPercent}
+          containerWidth={layout.width}
+          mode="window"
+          position={layout.top > (window.innerHeight * 0.42) ? 'above' : 'below'}
+        />
+      )}
+
       {/* Draggable Header */}
       <div
         onMouseDown={handleMouseDownHeader}
@@ -1256,12 +1226,9 @@ export default function FloatingVideoWindow({
 
       {/* Video Viewport (16:9) with Long-press Drag Support */}
       <div 
-        className="relative w-full aspect-video bg-black flex items-center justify-center overflow-hidden touch-none"
-        style={{ filter: `brightness(${brightness})` }}
-        onTouchStart={handleContainerTouchStart}
-        onTouchMove={handleContainerTouchMove}
-        onTouchEnd={handleContainerTouchEnd}
-        onTouchCancel={handleContainerTouchEnd}
+        className="relative w-full aspect-video bg-black flex items-center justify-center overflow-hidden touch-none select-none"
+        style={{ filter: `brightness(${brightness})`, WebkitTouchCallout: 'none', userSelect: 'none' }}
+        onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
         {...touchHandlers}
       >
         {/* Long-press Window Dragging Active Feedback Overlay */}
@@ -1294,7 +1261,12 @@ export default function FloatingVideoWindow({
           ref={videoRef}
           playsInline
           crossOrigin="anonymous"
-          className="w-full h-full object-contain cursor-pointer z-10"
+          controls={false}
+          controlsList="nodownload noplaybackrate"
+          disablePictureInPicture={true}
+          onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
+          className="w-full h-full object-contain cursor-pointer z-10 select-none pointer-events-auto"
+          style={{ WebkitTouchCallout: 'none', userSelect: 'none', WebkitUserSelect: 'none' }}
           onClick={togglePlay}
           onWaiting={() => setIsLoading(true)}
           onPlaying={() => {
@@ -1395,14 +1367,17 @@ export default function FloatingVideoWindow({
       <div className="p-2.5 bg-slate-950/95 border-t border-white/5 rounded-b-2xl flex flex-col gap-1.5 text-xs">
         {/* Scrubber with Real-time Drag & Centered Trickplay */}
         <div className="relative w-full">
-          <TrickplayScrubberThumbnail
-            item={item}
-            hoverTime={hoverScrubberTime}
-            hoverPercent={hoverScrubberPercent}
-            containerWidth={scrubberWidth}
-            position={typeof window !== 'undefined' && window.innerWidth < 768 ? (layout.top > window.innerHeight * 0.38 ? 'above' : 'below') : (slotIndex === 2 ? 'above' : 'below')}
-            centerMode={typeof window !== 'undefined' && window.innerWidth < 768}
-          />
+          {/* Desktop Scrubber-level Trickplay Thumbnail */}
+          {typeof window !== 'undefined' && window.innerWidth >= 768 && (
+            <TrickplayScrubberThumbnail
+              item={item}
+              hoverTime={hoverScrubberTime}
+              hoverPercent={hoverScrubberPercent}
+              containerWidth={scrubberWidth}
+              mode="scrubber"
+              position={slotIndex === 2 ? 'above' : 'below'}
+            />
+          )}
 
           <div
             ref={scrubberRef}

@@ -7,7 +7,8 @@ export default function TrickplayScrubberThumbnail({
   hoverPercent,
   containerWidth,
   position = 'above', // 'above' | 'below'
-  centerMode = false  // When true, centers thumbnail horizontally relative to player window
+  centerMode = false, // When true, centers thumbnail horizontally relative to container
+  mode = 'scrubber'   // 'scrubber' (relative to scrubber bar) | 'window' (relative to whole floating window)
 }) {
   const style = useMemo(() => {
     return getTrickplayStyle(item, hoverTime);
@@ -36,30 +37,36 @@ export default function TrickplayScrubberThumbnail({
   // Exact cursor/finger position along scrubber (0px to cWidth)
   const cursorX = Math.max(0, Math.min(cWidth, (hoverPercent || 0) * cWidth));
 
-  // In centerMode, thumbnail is centered on the container
+  // In centerMode or window mode, thumbnail is centered horizontally
+  const isCentered = centerMode || mode === 'window';
   const halfThumb = thumbWidth / 2;
   const margin = 4;
-  const clampedBoxLeft = centerMode
+  const clampedBoxLeft = isCentered
     ? cWidth / 2
     : Math.max(halfThumb + margin, Math.min(cWidth - halfThumb - margin, cursorX));
 
   // Arrow offset from thumbnail center (-halfThumb to +halfThumb)
-  const arrowOffset = Math.max(-halfThumb + 14, Math.min(halfThumb - 14, cursorX - clampedBoxLeft));
+  const arrowOffset = isCentered ? 0 : Math.max(-halfThumb + 14, Math.min(halfThumb - 14, cursorX - clampedBoxLeft));
 
   const isBelow = position === 'below';
 
+  // Positioning classes:
+  // When mode === 'window': positioned 8px outside window boundary
+  // When mode === 'scrubber': positioned 24px (top-6 / bottom-6) relative to scrubber bar
+  const positionClass = mode === 'window'
+    ? (isBelow ? 'top-[calc(100%+8px)] left-1/2 -translate-x-1/2' : 'bottom-[calc(100%+8px)] left-1/2 -translate-x-1/2')
+    : (isBelow ? 'top-6' : 'bottom-6') + (isCentered ? ' left-1/2 -translate-x-1/2' : '');
+
   return (
     <div
-      className={`absolute z-[9999] -translate-x-1/2 flex flex-col items-center pointer-events-none transition-all duration-75 animate-in fade-in zoom-in-95 duration-100 ${
-        isBelow ? 'top-6' : 'bottom-6'
-      }`}
-      style={{ left: `${clampedBoxLeft}px` }}
+      className={`absolute z-[99999] flex flex-col items-center pointer-events-none ${positionClass}`}
+      style={!isCentered && mode !== 'window' ? { left: `${clampedBoxLeft}px` } : undefined}
     >
-      {/* Upward pointer arrow when positioned below scrubber */}
+      {/* Upward pointer arrow when positioned below scrubber or below window */}
       {isBelow && (
         <div 
-          className="w-0 h-0 border-x-[6px] sm:border-x-8 border-x-transparent border-b-[6px] sm:border-b-8 border-b-cyan-400 mb-0.5 transition-transform duration-75"
-          style={{ transform: `translateX(${arrowOffset}px)` }}
+          className="w-0 h-0 border-x-[6px] sm:border-x-8 border-x-transparent border-b-[6px] sm:border-b-8 border-b-cyan-400 mb-0.5"
+          style={arrowOffset !== 0 ? { transform: `translateX(${arrowOffset}px)` } : undefined}
         />
       )}
 
@@ -80,11 +87,11 @@ export default function TrickplayScrubberThumbnail({
         </div>
       </div>
 
-      {/* Downward pointer arrow when positioned above scrubber */}
+      {/* Downward pointer arrow when positioned above scrubber or above window */}
       {!isBelow && (
         <div 
-          className="w-0 h-0 border-x-[6px] sm:border-x-8 border-x-transparent border-t-[6px] sm:border-t-8 border-t-cyan-400 mt-0.5 transition-transform duration-75"
-          style={{ transform: `translateX(${arrowOffset}px)` }}
+          className="w-0 h-0 border-x-[6px] sm:border-x-8 border-x-transparent border-t-[6px] sm:border-t-8 border-t-cyan-400 mt-0.5"
+          style={arrowOffset !== 0 ? { transform: `translateX(${arrowOffset}px)` } : undefined}
         />
       )}
     </div>

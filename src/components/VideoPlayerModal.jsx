@@ -757,7 +757,12 @@ export default function VideoPlayerModal({
             ref={videoRef}
             playsInline
             crossOrigin="anonymous"
-            className="w-full h-full object-contain cursor-pointer z-10"
+            controls={false}
+            controlsList="nodownload noplaybackrate"
+            disablePictureInPicture={true}
+            onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
+            className="w-full h-full object-contain cursor-pointer z-10 select-none"
+            style={{ WebkitTouchCallout: 'none', userSelect: 'none', WebkitUserSelect: 'none' }}
             onClick={togglePlay}
             onWaiting={() => setIsLoading(true)}
             onPlaying={() => {

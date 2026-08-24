@@ -6,7 +6,8 @@ export default function TrickplayScrubberThumbnail({
   hoverTime,
   hoverPercent,
   containerWidth,
-  position = 'above' // 'above' | 'below'
+  position = 'above', // 'above' | 'below'
+  centerMode = false  // When true, centers thumbnail horizontally relative to player window
 }) {
   const style = useMemo(() => {
     return getTrickplayStyle(item, hoverTime);
@@ -25,20 +26,22 @@ export default function TrickplayScrubberThumbnail({
 
   if (!item || hoverTime === null) return null;
 
-  // On Mobile: enlarged size (220px - 260px)
+  // On Mobile: enlarged size (220px - 280px)
   // On Desktop: 2X enlarged size (340px - 400px)
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 640;
   const cWidth = containerWidth || 360;
-  const thumbWidth = isMobile ? Math.min(260, Math.max(180, cWidth * 0.8)) : Math.min(380, Math.max(260, cWidth * 0.72));
+  const thumbWidth = isMobile ? Math.min(270, Math.max(200, cWidth * 0.85)) : Math.min(380, Math.max(260, cWidth * 0.72));
   const thumbHeight = Math.round(thumbWidth * 9 / 16);
 
   // Exact cursor/finger position along scrubber (0px to cWidth)
   const cursorX = Math.max(0, Math.min(cWidth, (hoverPercent || 0) * cWidth));
 
-  // Clamp the thumbnail center so the entire box stays within [padding, cWidth - padding]
+  // In centerMode, thumbnail is centered on the container
   const halfThumb = thumbWidth / 2;
   const margin = 4;
-  const clampedBoxLeft = Math.max(halfThumb + margin, Math.min(cWidth - halfThumb - margin, cursorX));
+  const clampedBoxLeft = centerMode
+    ? cWidth / 2
+    : Math.max(halfThumb + margin, Math.min(cWidth - halfThumb - margin, cursorX));
 
   // Arrow offset from thumbnail center (-halfThumb to +halfThumb)
   const arrowOffset = Math.max(-halfThumb + 14, Math.min(halfThumb - 14, cursorX - clampedBoxLeft));
@@ -47,7 +50,7 @@ export default function TrickplayScrubberThumbnail({
 
   return (
     <div
-      className={`absolute z-50 -translate-x-1/2 flex flex-col items-center pointer-events-none transition-all duration-75 animate-in fade-in zoom-in-95 duration-100 ${
+      className={`absolute z-[9999] -translate-x-1/2 flex flex-col items-center pointer-events-none transition-all duration-75 animate-in fade-in zoom-in-95 duration-100 ${
         isBelow ? 'top-6' : 'bottom-6'
       }`}
       style={{ left: `${clampedBoxLeft}px` }}
@@ -63,7 +66,7 @@ export default function TrickplayScrubberThumbnail({
       {/* Thumbnail Window */}
       <div 
         style={{ width: `${thumbWidth}px`, height: `${thumbHeight}px` }}
-        className="rounded-xl sm:rounded-2xl overflow-hidden bg-black/95 border-2 border-cyan-400 shadow-2xl shadow-cyan-500/40 flex items-center justify-center relative"
+        className="rounded-xl sm:rounded-2xl overflow-hidden bg-black/95 border-2 border-cyan-400 shadow-2xl shadow-cyan-500/50 flex items-center justify-center relative"
       >
         {style ? (
           <div className="w-full h-full" style={style} />

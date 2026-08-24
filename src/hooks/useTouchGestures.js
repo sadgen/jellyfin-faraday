@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { getSeekSwipeSpan } from '../utils/seekSettings';
 
 /**
  * 倍速档位（与 ControlHUD 全局倍速下拉菜单保持同一语义）
@@ -20,10 +21,8 @@ function formatSec(seconds) {
  * 2. Left vertical swipe: Brightness adjust (0.2 - 1.0)
  * 3. Right vertical swipe: Playback speed stepping along SPEED_OPTIONS (up = faster, down = slower),
  *    with a transient toast showing the current speed that fades out after release.
- *    (2026-08 audit fix: replaced the old volume-control gesture — no longer touches
- *    video.volume / video.muted, so the isTileMuted icon cannot be clobbered by gestures.)
  * 4. Double tap: Play / Pause toggle
- * 5. Long press: 2.5x speed boost (倍速冲锋)，松手恢复冲锋前的档位
+ * 5. Long press: 2.5x speed boost (倍速冲锋，可在不需要时通过 disableLongPressBoost 禁用以支持长按拖窗)
  */
 export function useTouchGestures({
   videoRef,
@@ -35,7 +34,9 @@ export function useTouchGestures({
   onSeekPreviewEnd,
   onTogglePlay,
   normalSpeed = 1.0,
-  onSpeedChange
+  onSpeedChange,
+  disableLongPressBoost = false,
+  customSwipeSpan = null
 }) {
   const [gestureState, setGestureState] = useState({
     type: null, // 'seek' | 'brightness' | 'speed_step' | 'speed_boost'
@@ -126,25 +127,27 @@ export function useTouchGestures({
 
     // Setup Long-press speed boost (hold for > 400ms)
     if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
-    longPressTimerRef.current = setTimeout(() => {
-      if (!touchActionRef.current && videoRef.current) {
-        // Capture the PRE-boost speed now (closure value from touch start),
-        // so release always restores the original pace even if onSpeedChange
-        // re-rendered this hook with the boosted speed (audit race fix).
-        boostRestoreSpeedRef.current = normalSpeed;
-        isBoostedRef.current = true;
-        touchActionRef.current = null;
-        videoRef.current.playbackRate = 2.5;
-        if (onSpeedChange) onSpeedChange(2.5);
-        setGestureState({
-          type: 'speed_boost',
-          value: 2.5,
-          text: '2.5x 倍速冲锋',
-          fading: false
-        });
-      }
-    }, 400);
-  }, [containerRef, videoRef, onTogglePlay, onSpeedChange, normalSpeed]);
+    if (!disableLongPressBoost) {
+      longPressTimerRef.current = setTimeout(() => {
+        if (!touchActionRef.current && videoRef.current) {
+          // Capture the PRE-boost speed now (closure value from touch start),
+          // so release always restores the original pace even if onSpeedChange
+          // re-rendered this hook with the boosted speed (audit race fix).
+          boostRestoreSpeedRef.current = normalSpeed;
+          isBoostedRef.current = true;
+          touchActionRef.current = null;
+          videoRef.current.playbackRate = 2.5;
+          if (onSpeedChange) onSpeedChange(2.5);
+          setGestureState({
+            type: 'speed_boost',
+            value: 2.5,
+            text: '2.5x 倍速冲锋',
+            fading: false
+          });
+        }
+      }, 400);
+    }
+  }, [containerRef, videoRef, onTogglePlay, onSpeedChange, normalSpeed, disableLongPressBoost]);
 
   const handleTouchMove = useCallback((e) => {
     if (e.touches.length !== 1) return;
@@ -186,9 +189,10 @@ export function useTouchGestures({
     e.preventDefault();
 
     if (touchActionRef.current === 'seek') {
-      // Horizontal swipe: delta of full width = ~90 seconds seek
+      // Horizontal swipe: delta of full width = swipeSpan seconds seek (based on slow/medium/fast tier)
       const videoDuration = duration || (videoRef.current ? videoRef.current.duration : 100);
-      const seekDelta = (dx / start.rectWidth) * 90;
+      const swipeSpan = customSwipeSpan || getSeekSwipeSpan();
+      const seekDelta = (dx / start.rectWidth) * swipeSpan;
       const targetTime = Math.max(0, Math.min(videoDuration, initialValueRef.current + seekDelta));
       const deltaSec = Math.round(targetTime - initialValueRef.current);
       const percent = videoDuration > 0 ? targetTime / videoDuration : 0;

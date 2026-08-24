@@ -13,6 +13,7 @@ import {
   Star, Eye, EyeOff, ExternalLink, X, Film, 
   SkipForward, SkipBack, Sun, Zap, FastForward, Glasses, Trash2, Gauge
 } from 'lucide-react';
+import { SEEK_SPEED_OPTIONS, getStoredSeekSpeed, setStoredSeekSpeed, getSeekStepSeconds, getSeekSwipeSpan } from '../utils/seekSettings';
 
 export const QUALITY_OPTIONS = [
   { id: 'direct', label: '🎬 原画直推 (原始码率)', shortLabel: '原画', bitrate: 0 },
@@ -59,6 +60,18 @@ export default function VideoPlayerModal({
   const [showQualityMenu, setShowQualityMenu] = useState(false);
   const [isVrActive, setIsVrActive] = useState(false);
   const [detectedVrMode, setDetectedVrMode] = useState('180_3d_sbs');
+
+  // Fast Forward / Rewind / Seek Step Tier: 'slow' (5s) | 'medium' (15s, default) | 'fast' (30s)
+  const [seekSpeed, setSeekSpeed] = useState(() => getStoredSeekSpeed());
+  const [showSeekSpeedMenu, setShowSeekSpeedMenu] = useState(false);
+
+  useEffect(() => {
+    const handleSeekSpeedChange = (e) => {
+      if (e.detail) setSeekSpeed(e.detail);
+    };
+    window.addEventListener('faraday:seek_speed_changed', handleSeekSpeedChange);
+    return () => window.removeEventListener('faraday:seek_speed_changed', handleSeekSpeedChange);
+  }, []);
 
   // Stream Quality: 'direct' | '8000000' | '4000000' | '2000000' | '1000000'
   const [streamQuality, setStreamQuality] = useState('direct');
@@ -126,6 +139,7 @@ export default function VideoPlayerModal({
     containerRef,
     duration: rawDuration,
     currentTime: videoRef.current?.currentTime || 0,
+    customSwipeSpan: getSeekSwipeSpan(seekSpeed),
     onSeek: (target) => {
       if (videoRef.current) {
         videoRef.current.currentTime = target;
@@ -467,7 +481,7 @@ export default function VideoPlayerModal({
     if (!video || !video.duration) return;
 
     const duration = video.duration;
-    const step = 5;
+    const step = getSeekStepSeconds(seekSpeed);
     const delta = e.deltaY > 0 ? step : -step;
     
     const baseTime = wheelSeekingTimeRef.current !== null ? wheelSeekingTimeRef.current : video.currentTime;
@@ -493,7 +507,7 @@ export default function VideoPlayerModal({
       setIsWheelSeeking(false);
       setHoverScrubberTime(null);
     }, 750);
-  }, []);
+  }, [seekSpeed]);
 
   // Scrubber Mouse Drag Seeking
   const updateScrubberDrag = useCallback((clientX) => {
@@ -574,59 +588,63 @@ export default function VideoPlayerModal({
     const rect = e.currentTarget.getBoundingClientRect();
     const pos = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
     const duration = videoRef.current?.duration || (item?.RunTimeTicks ? item.RunTimeTicks / 10000000 : 0);
-    
-    setHoverScrubberTime(duration * pos);
+    if (!duration) return;
+    const targetTime = duration * pos;
+    setHoverScrubberTime(targetTime);
     setHoverScrubberPercent(pos);
     setScrubberWidth(rect.width);
   };
 
   const handleScrubberMouseLeave = () => {
-    if (!isDraggingScrubberRef.current && !isWheelSeeking) {
+    if (!isDraggingScrubberRef.current) {
       setHoverScrubberTime(null);
     }
   };
 
-  // Toggle Favorite
   const handleToggleFavorite = async () => {
     if (!item?.Id) return;
-    const isFav = !!item.UserData?.IsFavorite;
-    const nextFav = !isFav;
-    if (onUpdateItem) {
-      onUpdateItem({ ...item, UserData: { ...item.UserData, IsFavorite: nextFav } });
-    }
+    const nextFav = !item.UserData?.IsFavorite;
     try {
-      await jellyfin.toggleFavorite(item.Id, nextFav);
-    } catch (err) {
-      console.error('Failed to toggle favorite:', err);
+      await jellyfin.setFavorite(item.Id, nextFav);
+      const updated = {
+        ...item,
+        UserData: { ...item.UserData, IsFavorite: nextFav }
+      };
+      if (onUpdateItem) onUpdateItem(updated);
+    } catch (e) {
+      console.warn('Failed to toggle favorite:', e);
     }
   };
 
-  // Toggle Played Status
   const handleTogglePlayed = async () => {
     if (!item?.Id) return;
-    const isPlayed = !!item.UserData?.Played;
-    const nextPlayed = !isPlayed;
-    const playCount = nextPlayed ? (item.UserData?.PlayCount || 0) + 1 : Math.max(0, (item.UserData?.PlayCount || 1) - 1);
-    if (onUpdateItem) {
-      onUpdateItem({ ...item, UserData: { ...item.UserData, Played: nextPlayed, PlayCount: playCount } });
-    }
+    const nextPlayed = !item.UserData?.Played;
     try {
-      await jellyfin.markPlayed(item.Id, nextPlayed);
-    } catch (err) {
-      console.error('Failed to toggle played status:', err);
+      await jellyfin.setPlayed(item.Id, nextPlayed);
+      const updated = {
+        ...item,
+        UserData: { 
+          ...item.UserData, 
+          Played: nextPlayed,
+          PlayCount: nextPlayed ? Math.max(1, (item.UserData?.PlayCount || 0) + 1) : 0
+        }
+      };
+      if (onUpdateItem) onUpdateItem(updated);
+    } catch (e) {
+      console.warn('Failed to toggle played:', e);
     }
   };
 
-  // Delete Video from Disk (custom modal)
-  const handleDeleteVideo = () => {
+  const handleDeleteVideo = async () => {
+    if (!item?.Id) return;
     setShowDeleteModal(true);
   };
 
   const handleConfirmDelete = async () => {
-    if (!item?.Id) return;
     try {
       await jellyfin.deleteItem(item.Id);
       if (onDeleteItem) onDeleteItem(item.Id);
+      setShowDeleteModal(false);
       onClose();
     } catch (err) {
       alert(err.message || '删除失败');
@@ -658,14 +676,9 @@ export default function VideoPlayerModal({
             {item?.ProductionYear && (
               <span className="text-gray-400 font-mono hidden sm:inline">({item.ProductionYear})</span>
             )}
-            <span className="hidden xs:flex items-center gap-1 font-mono text-[11px] text-cyan-300 bg-white/5 px-2 py-0.5 rounded-full">
-              <Eye size={11} className="text-cyan-400" />
-              <span>{playCount}</span>
-            </span>
           </div>
 
           <div className="flex items-center gap-1.5 sm:gap-2">
-            {/* Inline VR Mode */}
             <button
               onClick={() => setIsVrActive(!isVrActive)}
               className={`px-2.5 py-1.5 rounded-lg border font-bold transition flex items-center gap-1.5 ${
@@ -673,18 +686,15 @@ export default function VideoPlayerModal({
                   ? 'bg-amber-500/40 border-amber-400 text-amber-300 animate-pulse' 
                   : 'bg-amber-500/20 hover:bg-amber-500/30 border-amber-400/40 text-amber-300'
               }`}
-              title="🥽 开启/退出 VR 180° / 360° 全景模式"
             >
               <Glasses size={14} />
               <span className="hidden sm:inline">{isVrActive ? '退出 VR' : '开启 VR'}</span>
             </button>
 
-            {/* External Player Menu */}
             <div className="relative">
               <button
                 onClick={() => setShowPlayerMenu(!showPlayerMenu)}
                 className="px-2.5 py-1.5 rounded-lg bg-black/60 hover:bg-black/80 border border-white/10 text-gray-300 hover:text-cyan-300 transition flex items-center gap-1.5"
-                title="调用外部播放器"
               >
                 <ExternalLink size={13} />
                 <span className="hidden sm:inline">外部播放器</span>
@@ -704,52 +714,43 @@ export default function VideoPlayerModal({
                     className="w-full px-3 py-1.5 text-left hover:bg-white/10 flex items-center justify-between"
                   >
                     <span>PotPlayer</span>
-                    <span className="text-[10px] text-amber-400">pot://</span>
+                    <span className="text-[10px] text-cyan-400">pot://</span>
                   </button>
                   <button 
                     onClick={() => { launchPlayer('vlc', item); setShowPlayerMenu(false); }}
-                    className="w-full px-3 py-1.5 text-left hover:bg-white/10 flex items-center justify-between"
+                    className="w-full px-3 py-1.5 text-left hover:bg-white/10 flex items-center justify-between text-orange-300"
                   >
                     <span>VLC 播放器</span>
-                    <span className="text-[10px] text-orange-400">vlc://</span>
-                  </button>
-                  <button 
-                    onClick={() => { launchPlayer('direct', item); setShowPlayerMenu(false); }}
-                    className="w-full px-3 py-1.5 text-left hover:bg-white/10 flex items-center justify-between"
-                  >
-                    <span>新标签页直链</span>
+                    <span className="text-[10px]">vlc://</span>
                   </button>
                 </div>
               )}
             </div>
 
-            {/* Close */}
             <button
               onClick={onClose}
               className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition"
             >
-              <X size={20} />
+              <X size={18} />
             </button>
           </div>
         </div>
 
-        {/* Video Canvas Container */}
-        <div className="relative flex-1 min-h-0 w-full md:aspect-video bg-black flex items-center justify-center overflow-hidden touch-none">
-          {posterUrl && (
-            <div className="absolute inset-0 w-full h-full overflow-hidden pointer-events-none flex items-center justify-center">
-              <img 
-                src={posterUrl} 
-                alt="" 
-                className="absolute inset-0 w-full h-full object-cover opacity-25 blur-lg scale-110" 
-              />
-              <img 
-                src={posterUrl} 
-                alt="Poster" 
-                className={`relative max-w-full max-h-full object-contain transition-opacity duration-500 ${
-                  isLoading ? 'opacity-70 blur-sm' : 'opacity-0'
-                }`} 
-              />
+        <div className="relative w-full aspect-video bg-black flex items-center justify-center overflow-hidden flex-1 select-none">
+          {smoothToast && (
+            <div className="absolute top-3 left-1/2 -translate-x-1/2 z-40 px-3.5 py-1.5 bg-black/85 backdrop-blur-md border border-cyan-400/60 rounded-full text-xs font-bold text-cyan-300 shadow-xl pointer-events-none animate-in fade-in duration-150">
+              {smoothToast}
             </div>
+          )}
+
+          {posterUrl && (
+            <img
+              src={posterUrl}
+              alt=""
+              className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-300 pointer-events-none ${
+                isLoading ? 'opacity-50 blur-md' : 'opacity-0'
+              }`}
+            />
           )}
 
           <video
@@ -763,14 +764,11 @@ export default function VideoPlayerModal({
               setIsLoading(false);
               setIsPlaying(true);
             }}
-            onLoadedData={() => setIsLoading(false)}
-            onCanPlay={() => setIsLoading(false)}
             onPause={() => setIsPlaying(false)}
             onEnded={handleEnded}
             onTimeUpdate={handleTimeUpdate}
           />
 
-          {/* INLINE VR WEBGL CANVAS */}
           <InlineVrCanvas
             videoRef={videoRef}
             isActive={isVrActive}
@@ -778,51 +776,59 @@ export default function VideoPlayerModal({
             initialMode={detectedVrMode}
           />
 
-          {/* Smooth Mode Notification Toast */}
-          {smoothToast && (
-            <div className="absolute top-4 left-1/2 -translate-x-1/2 z-40 px-4 py-1.5 bg-black/85 backdrop-blur-md border border-cyan-400/60 rounded-full text-xs font-bold text-cyan-300 shadow-2xl pointer-events-none animate-in fade-in duration-150">
-              {smoothToast}
+          {isLoading && !hasError && (
+            <div className="absolute z-20 flex flex-col items-center justify-center pointer-events-none gap-2">
+              <div className="w-10 h-10 border-3 border-cyan-500/30 border-t-cyan-400 rounded-full animate-spin" />
+              <span className="text-xs text-gray-300 font-mono">加载中...</span>
             </div>
           )}
 
-          {/* Touch Gesture HUD Overlay */}
+          {hasError && (
+            <div className="absolute z-20 flex flex-col items-center justify-center p-4 text-center">
+              <div className="p-3 rounded-full bg-red-500/20 text-red-400 mb-2">
+                <Film size={24} />
+              </div>
+              <p className="text-sm text-red-300 font-medium mb-3">{errorMessage}</p>
+              <button
+                onClick={() => {
+                  setHasError(false);
+                  setIsLoading(true);
+                  if (videoRef.current) {
+                    videoRef.current.load();
+                    videoRef.current.play().catch(() => {});
+                  }
+                }}
+                className="px-4 py-1.5 rounded-xl bg-jf-accent hover:bg-cyan-400 text-white text-xs font-bold transition"
+              >
+                重试播放
+              </button>
+            </div>
+          )}
+
           {gestureState.type && (
             <div className={`absolute inset-0 z-30 flex items-center justify-center pointer-events-none animate-in fade-in zoom-in-95 duration-100 transition-opacity ${gestureState.fading ? 'opacity-0 duration-500' : 'opacity-100'}`}>
               <div className="flex flex-col items-center gap-2 bg-black/80 backdrop-blur-md px-5 py-3.5 rounded-2xl border border-white/10 shadow-2xl text-white">
                 {gestureState.type === 'seek' && <FastForward size={28} className="text-cyan-400 animate-pulse" />}
                 {gestureState.type === 'brightness' && <Sun size={28} className="text-amber-400" />}
                 {(gestureState.type === 'speed_step' || gestureState.type === 'speed_boost') && <Gauge size={28} className="text-amber-400" />}
-                
                 <span className="font-mono font-bold text-sm">{gestureState.text}</span>
               </div>
             </div>
           )}
 
-          {/* Loading Spinner */}
-          {isLoading && !hasError && (
-            <div className="absolute z-20 flex flex-col items-center justify-center pointer-events-none gap-2">
-              <div className="w-12 h-12 border-4 border-cyan-500/30 border-t-cyan-400 rounded-full animate-spin" />
-              <span className="text-xs font-mono text-cyan-200 drop-shadow">加载视频流...</span>
-            </div>
-          )}
-
-          {/* Error View */}
-          {hasError && (
-            <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-black/80 gap-3 p-4 text-center">
-              <div className="text-red-400 text-sm font-semibold">{errorMessage || '播放失败'}</div>
-              <button
-                onClick={() => launchPlayer('mpv', item)}
-                className="px-4 py-2 bg-jf-accent hover:bg-cyan-400 text-white text-xs font-medium rounded-xl transition"
-              >
-                使用外部 MPV 播放器打开
-              </button>
+          {!isPlaying && !isLoading && !hasError && (
+            <div 
+              onClick={togglePlay}
+              className="absolute inset-0 z-20 flex items-center justify-center bg-black/20 cursor-pointer"
+            >
+              <div className="w-14 h-14 rounded-full bg-black/60 border border-white/20 flex items-center justify-center text-white shadow-2xl">
+                <Play size={26} className="ml-1 fill-white" />
+              </div>
             </div>
           )}
         </div>
 
-        {/* Player Controls & Scrubber */}
         <div className="p-3 sm:p-4 bg-slate-900/95 border-t border-white/5 flex flex-col gap-2.5 pb-[max(1.25rem,env(safe-area-inset-bottom))] z-30 flex-shrink-0">
-          {/* Scrubber Container with Real-Time Mouse Drag */}
           <div className="relative w-full">
             <TrickplayScrubberThumbnail
               item={item}
@@ -830,6 +836,7 @@ export default function VideoPlayerModal({
               hoverPercent={hoverScrubberPercent}
               containerWidth={scrubberWidth}
               position="above"
+              centerMode={typeof window !== 'undefined' && window.innerWidth < 768}
             />
 
             <div
@@ -852,7 +859,6 @@ export default function VideoPlayerModal({
             </div>
           </div>
 
-          {/* Controls Row */}
           <div className="flex items-center justify-between text-xs text-gray-300 gap-1 flex-wrap sm:flex-nowrap">
             <div className="flex items-center gap-1.5 sm:gap-2">
               <button
@@ -895,7 +901,6 @@ export default function VideoPlayerModal({
             </div>
 
             <div className="flex items-center gap-1.5">
-              {/* Favorite */}
               <button
                 onClick={handleToggleFavorite}
                 className={`p-2 rounded-xl border transition ${
@@ -906,7 +911,6 @@ export default function VideoPlayerModal({
                 <Star size={14} className={isFavorite ? 'fill-amber-400' : ''} />
               </button>
 
-              {/* Played */}
               <button
                 onClick={handleTogglePlayed}
                 className="p-2 rounded-xl bg-black/40 border border-white/5 text-gray-300 hover:text-cyan-400 transition"
@@ -915,7 +919,6 @@ export default function VideoPlayerModal({
                 {item?.UserData?.Played ? <EyeOff size={14} /> : <Eye size={14} />}
               </button>
 
-              {/* Delete Video */}
               <button
                 onClick={handleDeleteVideo}
                 className="p-2 rounded-xl bg-black/40 border border-white/5 text-gray-400 hover:text-red-400 transition"
@@ -924,7 +927,46 @@ export default function VideoPlayerModal({
                 <Trash2 size={14} />
               </button>
 
-              {/* Quality & Transcode Selector Menu */}
+              <div className="relative">
+                <button
+                  onClick={() => setShowSeekSpeedMenu(!showSeekSpeedMenu)}
+                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl border bg-black/40 border-white/5 text-gray-300 hover:text-cyan-300 hover:bg-white/10 text-xs font-bold transition"
+                  title="设置快进/快退/滚轮寻轨步长 (慢 5s / 中 15s / 快 30s)"
+                >
+                  <FastForward size={13} className="text-cyan-400" />
+                  <span>{SEEK_SPEED_OPTIONS.find(o => o.id === seekSpeed)?.shortLabel || '15s'}</span>
+                </button>
+
+                {showSeekSpeedMenu && (
+                  <div 
+                    className="absolute right-0 bottom-10 w-36 glass-panel rounded-xl shadow-2xl py-1 z-50 text-xs text-gray-200 divide-y divide-white/5 animate-in fade-in zoom-in-95 duration-100"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div className="px-3 py-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                      快进/快退步长
+                    </div>
+                    {SEEK_SPEED_OPTIONS.map(opt => (
+                      <button
+                        key={opt.id}
+                        onClick={() => {
+                          setStoredSeekSpeed(opt.id);
+                          setSeekSpeed(opt.id);
+                          setShowSeekSpeedMenu(false);
+                        }}
+                        className={`w-full px-3 py-1.5 text-left flex items-center justify-between transition ${
+                          seekSpeed === opt.id
+                            ? 'bg-cyan-500/20 text-cyan-300 font-bold'
+                            : 'hover:bg-white/10 text-gray-300'
+                        }`}
+                      >
+                        <span>{opt.label}</span>
+                        {seekSpeed === opt.id && <span className="text-cyan-400 text-xs">✓</span>}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               <div className="relative">
                 <button
                   onClick={() => setShowQualityMenu(!showQualityMenu)}
@@ -965,7 +1007,6 @@ export default function VideoPlayerModal({
                 )}
               </div>
 
-              {/* Speed */}
               <div className="flex items-center bg-black/40 px-2 py-1 rounded-xl border border-white/5 gap-1">
                 <select
                   value={playbackSpeed}

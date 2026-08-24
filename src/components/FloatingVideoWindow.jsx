@@ -4,6 +4,7 @@ import { jellyfin } from '../api/jellyfinClient';
 import { calculateSlotStyle } from '../utils/windowLayout';
 import { useExternalPlayer } from '../hooks/useExternalPlayer';
 import { useTouchGestures } from '../hooks/useTouchGestures';
+import { SEEK_SPEED_OPTIONS, getStoredSeekSpeed, setStoredSeekSpeed, getSeekStepSeconds, getSeekSwipeSpan } from '../utils/seekSettings';
 import TrickplayScrubberThumbnail from './TrickplayScrubberThumbnail';
 import InlineVrCanvas from './InlineVrCanvas';
 import SubtitleModal from './SubtitleModal';
@@ -53,6 +54,11 @@ export default function FloatingVideoWindow({
   const [isResizing, setIsResizing] = useState(false);
   const isCustomPositionRef = useRef(false);
   const prevSlotRef = useRef(slotIndex);
+
+  // Long-press Drag state & tactile feedback for mobile
+  const [isLongPressDragging, setIsLongPressDragging] = useState(false);
+  const longPressDragTimerRef = useRef(null);
+  const touchStartPosRef = useRef({ x: 0, y: 0, left: 0, top: 0 });
 
   // Multi-part video list (e.g. Part 1, 2, 3 / CD1, CD2)
   const [partsList, setPartsList] = useState(() => [{ Id: item?.Id, Name: item?.Name || 'Part 1' }]);
@@ -122,6 +128,18 @@ export default function FloatingVideoWindow({
   const [showQualityMenu, setShowQualityMenu] = useState(false);
   const [selectedSubtitleIndex, setSelectedSubtitleIndex] = useState(-1);
 
+  // Fast Forward / Rewind / Seek Step Tier: 'slow' (5s) | 'medium' (15s, default) | 'fast' (30s)
+  const [seekSpeed, setSeekSpeed] = useState(() => getStoredSeekSpeed());
+  const [showSeekSpeedMenu, setShowSeekSpeedMenu] = useState(false);
+
+  useEffect(() => {
+    const handleSeekSpeedChange = (e) => {
+      if (e.detail) setSeekSpeed(e.detail);
+    };
+    window.addEventListener('faraday:seek_speed_changed', handleSeekSpeedChange);
+    return () => window.removeEventListener('faraday:seek_speed_changed', handleSeekSpeedChange);
+  }, []);
+
   // Stream Quality: 'direct' | '8000000' | '4000000' | '2000000' | '1000000'
   const [streamQuality, setStreamQuality] = useState('direct');
   const isSmoothMode = streamQuality !== 'direct';
@@ -165,6 +183,8 @@ export default function FloatingVideoWindow({
     containerRef,
     duration: rawDuration,
     currentTime: videoRef.current?.currentTime || 0,
+    disableLongPressBoost: true, // Disable speed boost on floating window so long press drags window
+    customSwipeSpan: getSeekSwipeSpan(seekSpeed),
     onSeek: (target) => {
       if (videoRef.current) videoRef.current.currentTime = target;
     },
@@ -187,8 +207,6 @@ export default function FloatingVideoWindow({
     },
     normalSpeed: playbackSpeed,
     onSpeedChange: (speed) => {
-      // 同步本地倍速状态（修复既有不一致：state 与元素脱节），
-      // 元素立即生效；下次换片时 setupDirectPlay 也会按该档位起播
       setPlaybackSpeed(speed);
       if (videoRef.current) videoRef.current.playbackRate = speed;
     }
@@ -665,6 +683,69 @@ export default function FloatingVideoWindow({
     window.addEventListener('touchcancel', handleTouchEnd);
   };
 
+  // Long-press Drag handler on video window body (with vibration & visual feedback)
+  const handleContainerTouchStart = (e) => {
+    if (
+      e.target.closest('button') || 
+      e.target.closest('select') || 
+      e.target.closest('.group\\/bar') || 
+      e.target.closest('.group\\/pip') || 
+      e.target.closest('.group\\/resizer')
+    ) {
+      return;
+    }
+    if (e.touches.length !== 1) return;
+    const touch = e.touches[0];
+    touchStartPosRef.current = { x: touch.clientX, y: touch.clientY, left: layout.left, top: layout.top };
+
+    if (longPressDragTimerRef.current) clearTimeout(longPressDragTimerRef.current);
+    longPressDragTimerRef.current = setTimeout(() => {
+      try {
+        if (typeof navigator !== 'undefined' && navigator.vibrate) {
+          navigator.vibrate([40, 30, 40]);
+        }
+      } catch (err) {}
+
+      setIsLongPressDragging(true);
+      setIsDragging(true);
+      isCustomPositionRef.current = true;
+      if (onBringToFront) onBringToFront(id);
+    }, 380);
+  };
+
+  const handleContainerTouchMove = (e) => {
+    if (e.touches.length !== 1) return;
+    const touch = e.touches[0];
+    const dx = touch.clientX - touchStartPosRef.current.x;
+    const dy = touch.clientY - touchStartPosRef.current.y;
+
+    if (!isLongPressDragging) {
+      if (Math.hypot(dx, dy) > 8) {
+        if (longPressDragTimerRef.current) {
+          clearTimeout(longPressDragTimerRef.current);
+          longPressDragTimerRef.current = null;
+        }
+      }
+      return;
+    }
+
+    e.preventDefault();
+    const newX = Math.max(0, Math.min(window.innerWidth - 60, touchStartPosRef.current.left + dx));
+    const newY = Math.max(50, Math.min(window.innerHeight - 60, touchStartPosRef.current.top + dy));
+    setLayout(prev => ({ ...prev, left: newX, top: newY }));
+  };
+
+  const handleContainerTouchEnd = () => {
+    if (longPressDragTimerRef.current) {
+      clearTimeout(longPressDragTimerRef.current);
+      longPressDragTimerRef.current = null;
+    }
+    if (isLongPressDragging) {
+      setIsLongPressDragging(false);
+      setIsDragging(false);
+    }
+  };
+
   // Resizing the floating window via bottom-right handle
   const handleMouseDownResize = (e) => {
     if (e.button !== 0) return;
@@ -698,7 +779,7 @@ export default function FloatingVideoWindow({
     window.addEventListener('mouseup', handleMouseUp);
   };
 
-  // Mouse Wheel Seek
+  // Mouse Wheel Seek (uses seekSpeed tier: 5s / 15s / 30s)
   const handleWheel = useCallback((e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -706,7 +787,7 @@ export default function FloatingVideoWindow({
     if (!video || !video.duration) return;
 
     const duration = video.duration;
-    const step = 5;
+    const step = getSeekStepSeconds(seekSpeed);
     const delta = e.deltaY > 0 ? step : -step;
     
     const baseTime = wheelSeekingTimeRef.current !== null ? wheelSeekingTimeRef.current : video.currentTime;
@@ -732,7 +813,7 @@ export default function FloatingVideoWindow({
       setIsWheelSeeking(false);
       setHoverScrubberTime(null);
     }, 750);
-  }, []);
+  }, [seekSpeed]);
 
   // Scrubber Mouse & Touch Drag Seeking
   const updateScrubberDrag = useCallback((clientX) => {
@@ -965,6 +1046,47 @@ export default function FloatingVideoWindow({
         </div>
 
         <div className="flex items-center gap-1">
+          {/* Fast-Forward / Rewind Speed Tier Selector (3 档: 慢 5s, 中 15s, 快 30s) */}
+          <div className="relative">
+            <button
+              onClick={() => setShowSeekSpeedMenu(!showSeekSpeedMenu)}
+              className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[11px] font-bold text-gray-400 hover:text-cyan-300 hover:bg-white/10 transition"
+              title="设置快进/快退/滚轮寻轨步长 (慢 5s / 中 15s / 快 30s)"
+            >
+              <FastForward size={12} className="text-cyan-400" />
+              <span>{SEEK_SPEED_OPTIONS.find(o => o.id === seekSpeed)?.shortLabel || '15s'}</span>
+            </button>
+
+            {showSeekSpeedMenu && (
+              <div
+                className="absolute right-0 top-7 w-36 glass-panel rounded-xl shadow-2xl py-1 z-50 text-xs text-gray-200 divide-y divide-white/5 animate-in fade-in zoom-in-95 duration-100"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="px-3 py-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                  快进/快退步长
+                </div>
+                {SEEK_SPEED_OPTIONS.map(opt => (
+                  <button
+                    key={opt.id}
+                    onClick={() => {
+                      setStoredSeekSpeed(opt.id);
+                      setSeekSpeed(opt.id);
+                      setShowSeekSpeedMenu(false);
+                    }}
+                    className={`w-full px-3 py-1.5 text-left flex items-center justify-between transition ${
+                      seekSpeed === opt.id
+                        ? 'bg-cyan-500/20 text-cyan-300 font-bold'
+                        : 'hover:bg-white/10 text-gray-300'
+                    }`}
+                  >
+                    <span>{opt.label}</span>
+                    {seekSpeed === opt.id && <span className="text-cyan-400 text-xs">✓</span>}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
           {/* Subtitles & MeiamSub Download */}
           <button
             onClick={() => setShowSubtitleModal(true)}
@@ -1106,34 +1228,16 @@ export default function FloatingVideoWindow({
                   <span>PotPlayer</span>
                   <span className="text-[10px]">pot://</span>
                 </button>
-                <button 
-                  onClick={() => { launchPlayer('vlc', item); setShowPlayerMenu(false); }}
-                  className="w-full px-3 py-1.5 text-left hover:bg-white/10 flex items-center justify-between text-orange-300"
-                >
-                  <span>VLC 播放器</span>
-                  <span className="text-[10px]">vlc://</span>
-                </button>
               </div>
             )}
           </div>
-
-          {/* Expand to full theater */}
-          <button
-            onClick={() => onExpand && onExpand(item)}
-            className="p-1 rounded hover:bg-white/10 text-gray-400 hover:text-cyan-300 transition"
-            title="放大影院全屏"
-          >
-            <Maximize size={13} />
-          </button>
-
-          {/* Skip next / next part (promotes next part or promotes next windows forward) */}
           <button
             onClick={handleSkipNext}
             className="p-1 rounded hover:bg-white/10 text-gray-400 hover:text-cyan-300 transition"
             title={
               partsList.length > 1 && currentPartIndex < partsList.length - 1
-                ? `播放下一段 (Part ${currentPartIndex + 2}/${partsList.length})`
-                : '换一个 (下一个顶上来)'
+                ? `播放下一分段 (Part ${currentPartIndex + 2}/${partsList.length})`
+                : '跳过当前视频 (下一个顶上来)'
             }
           >
             <SkipForward size={13} />
@@ -1150,12 +1254,25 @@ export default function FloatingVideoWindow({
         </div>
       </div>
 
-      {/* Video Viewport (16:9) */}
+      {/* Video Viewport (16:9) with Long-press Drag Support */}
       <div 
         className="relative w-full aspect-video bg-black flex items-center justify-center overflow-hidden touch-none"
         style={{ filter: `brightness(${brightness})` }}
+        onTouchStart={handleContainerTouchStart}
+        onTouchMove={handleContainerTouchMove}
+        onTouchEnd={handleContainerTouchEnd}
+        onTouchCancel={handleContainerTouchEnd}
         {...touchHandlers}
       >
+        {/* Long-press Window Dragging Active Feedback Overlay */}
+        {isLongPressDragging && (
+          <div className="absolute inset-0 z-40 bg-cyan-950/40 backdrop-blur-[1px] flex items-center justify-center pointer-events-none rounded-2xl border-2 border-cyan-400">
+            <div className="px-3.5 py-1.5 rounded-full bg-black/85 border border-cyan-400 text-cyan-300 text-xs font-bold flex items-center gap-1.5 shadow-2xl animate-pulse">
+              <span>🖐️ 正在拖动窗口...</span>
+            </div>
+          </div>
+        )}
+
         {/* Smooth Mode Notification Toast */}
         {smoothToast && (
           <div className="absolute top-2 left-1/2 -translate-x-1/2 z-40 px-3 py-1 bg-black/85 backdrop-blur-md border border-cyan-400/60 rounded-full text-[11px] font-bold text-cyan-300 shadow-xl pointer-events-none animate-in fade-in duration-150">
@@ -1276,14 +1393,15 @@ export default function FloatingVideoWindow({
 
       {/* Scrubber & Controls Footer */}
       <div className="p-2.5 bg-slate-950/95 border-t border-white/5 rounded-b-2xl flex flex-col gap-1.5 text-xs">
-        {/* Scrubber with Real-time Drag & Trickplay */}
+        {/* Scrubber with Real-time Drag & Centered Trickplay */}
         <div className="relative w-full">
           <TrickplayScrubberThumbnail
             item={item}
             hoverTime={hoverScrubberTime}
             hoverPercent={hoverScrubberPercent}
             containerWidth={scrubberWidth}
-            position={typeof window !== 'undefined' && window.innerWidth < 768 ? 'above' : (slotIndex === 2 ? 'above' : 'below')}
+            position={typeof window !== 'undefined' && window.innerWidth < 768 ? (layout.top > window.innerHeight * 0.38 ? 'above' : 'below') : (slotIndex === 2 ? 'above' : 'below')}
+            centerMode={typeof window !== 'undefined' && window.innerWidth < 768}
           />
 
           <div

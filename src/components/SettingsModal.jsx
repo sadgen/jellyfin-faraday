@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { jellyfin } from '../api/jellyfinClient';
 import { clearLibraryCache } from '../utils/mediaCache';
-import { Settings, Server, User, LogOut, RefreshCw, ShieldCheck, X, HardDrive, Clock, Trash2 } from 'lucide-react';
+import { SEEK_SPEED_OPTIONS, getStoredSeekSpeed, setStoredSeekSpeed } from '../utils/seekSettings';
+import { Settings, Server, User, LogOut, RefreshCw, ShieldCheck, X, HardDrive, Clock, FastForward } from 'lucide-react';
 
 export default function SettingsModal({
   isOpen,
@@ -12,6 +13,8 @@ export default function SettingsModal({
   totalItemsCount,
   lastSyncTime
 }) {
+  const [seekSpeed, setSeekSpeed] = useState(() => getStoredSeekSpeed());
+
   if (!isOpen) return null;
 
   const formatLastSync = (timestamp) => {
@@ -90,6 +93,42 @@ export default function SettingsModal({
               </span>
             </div>
           )}
+        </div>
+
+        {/* Seek Speed Tier Setting (慢 5s / 中 15s / 快 30s) */}
+        <div className="bg-black/40 rounded-xl p-4 border border-white/5 flex flex-col gap-2.5 text-xs">
+          <div className="flex items-center justify-between">
+            <span className="text-gray-300 font-medium flex items-center gap-1.5">
+              <FastForward size={14} className="text-cyan-400" />
+              <span>快进快退 / 滚轮寻轨步长</span>
+            </span>
+            <span className="text-[11px] text-cyan-300 font-mono font-bold">
+              {SEEK_SPEED_OPTIONS.find(o => o.id === seekSpeed)?.label}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-3 gap-2 pt-1">
+            {SEEK_SPEED_OPTIONS.map(opt => (
+              <button
+                key={opt.id}
+                onClick={() => {
+                  setStoredSeekSpeed(opt.id);
+                  setSeekSpeed(opt.id);
+                }}
+                className={`py-2 px-1 rounded-xl text-center border font-medium transition flex flex-col items-center gap-0.5 ${
+                  seekSpeed === opt.id
+                    ? 'bg-cyan-500/20 border-cyan-400/60 text-cyan-300 shadow-sm shadow-cyan-500/30'
+                    : 'bg-white/5 border-white/5 text-gray-400 hover:text-gray-200 hover:bg-white/10'
+                }`}
+              >
+                <span className="text-xs font-bold">{opt.label.split(' ')[0]}</span>
+                <span className="text-[10px] font-mono opacity-80">{opt.seconds}秒 / 步</span>
+              </button>
+            ))}
+          </div>
+          <div className="text-[10px] text-gray-500">
+            影响电脑版滚轮寻轨步长、手机版滑动手势跨度与播放窗口快进快退。
+          </div>
         </div>
 
         {/* Actions */}

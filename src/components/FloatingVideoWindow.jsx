@@ -548,47 +548,6 @@ export default function FloatingVideoWindow({
     }
   }, [currentPartId, isMuted, playbackSpeed, syncSubtitles]);
 
-  // Backward compatibility alias for diagnostics
-  const switchToSmoothMode = useCallback((enable = true, silent = false) => {
-    changeStreamQuality(enable ? '4000000' : 'direct', silent);
-  }, [changeStreamQuality]);
-
-  // Automatic stutter & frame-drop diagnosis loop (Tampermonkey original logic: ONLY when continuously playing with dropped frames)
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video) return;
-
-    let lastDecoded = 0;
-    let lastDropped = 0;
-
-    const diagInterval = setInterval(() => {
-      if (!video || video.paused || video.ended || isDraggingScrubberRef.current || isWheelSeeking || streamQuality !== 'direct') return;
-      if (typeof video.getVideoPlaybackQuality === 'function') {
-        const q = video.getVideoPlaybackQuality();
-        const totalDecoded = q.totalVideoFrames;
-        const totalDropped = q.droppedVideoFrames;
-        const periodDropped = totalDropped - lastDropped;
-        const periodDecoded = totalDecoded - lastDecoded;
-        lastDecoded = totalDecoded;
-        lastDropped = totalDropped;
-
-        if (totalDecoded > 30) {
-          const dropRate = (totalDropped / totalDecoded) * 100;
-          if (dropRate > 5.0 || (periodDropped > 8 && periodDecoded > 15)) {
-            console.warn(`[Faraday ⚡] 检测到网页播放掉帧率: ${dropRate.toFixed(2)}%，自动切为流畅模式`);
-            changeStreamQuality('4000000', true);
-            setSmoothToast(`⚡ 检测到网页掉帧 (${dropRate.toFixed(1)}%)，已自动切换为流畅模式`);
-            setTimeout(() => setSmoothToast(''), 3500);
-          }
-        }
-      }
-    }, 3000);
-
-    return () => {
-      clearInterval(diagInterval);
-    };
-  }, [streamQuality, isWheelSeeking, changeStreamQuality]);
-
   const handleTimeUpdate = () => {
     const video = videoRef.current;
     if (!video || !video.duration || isDraggingScrubberRef.current) return;

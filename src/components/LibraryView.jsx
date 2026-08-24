@@ -1147,7 +1147,7 @@ export default function LibraryView({
                 onClick={() => setShowPlaybackDefaultsMenu(prev => !prev)}
                 className={`flex items-center gap-1 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl border text-xs font-bold transition ${
                   showPlaybackDefaultsMenu
-                    ? 'bg-cyan-950/80 border-cyan-400 text-cyan-300 shadow-lg shadow-cyan-500/25'
+                    ? 'bg-cyan-950 border-cyan-400 text-cyan-300 shadow-lg shadow-cyan-500/30'
                     : 'bg-black/40 hover:bg-white/10 border-white/10 text-gray-300 hover:text-cyan-300'
                 }`}
                 title="设置全局默认播放选项（画质、倍速、海报画中画、快进步长等）"
@@ -1156,29 +1156,37 @@ export default function LibraryView({
                 <span className="hidden xs:inline">默认播放</span>
               </button>
 
-              {/* Dropdown Menu */}
+              {/* Backdrop to close on outside click */}
               {showPlaybackDefaultsMenu && (
                 <div 
-                  className="absolute right-0 top-[calc(100%+6px)] z-50 w-72 bg-slate-900/98 backdrop-blur-xl border border-cyan-500/40 rounded-2xl p-3 shadow-2xl shadow-black/90 flex flex-col gap-3 text-xs animate-in fade-in zoom-in-95 duration-100"
+                  className="fixed inset-0 z-40" 
+                  onClick={() => setShowPlaybackDefaultsMenu(false)} 
+                />
+              )}
+
+              {/* Solid High-Contrast Dropdown Menu */}
+              {showPlaybackDefaultsMenu && (
+                <div 
+                  className="absolute right-0 top-[calc(100%+8px)] z-50 w-80 bg-[#0d131f] border-2 border-cyan-400/80 rounded-2xl p-4 shadow-[0_20px_60px_rgba(0,0,0,0.95)] flex flex-col gap-3.5 text-xs animate-in fade-in zoom-in-95 duration-100"
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <div className="flex items-center justify-between border-b border-white/10 pb-1.5">
-                    <span className="font-bold text-white flex items-center gap-1.5">
-                      <SlidersHorizontal size={13} className="text-cyan-400" />
-                      默认播放设置
+                  <div className="flex items-center justify-between border-b border-white/15 pb-2">
+                    <span className="font-bold text-white text-sm flex items-center gap-1.5">
+                      <SlidersHorizontal size={14} className="text-cyan-400" />
+                      默认播放偏好设置
                     </span>
                     <button
                       onClick={() => setShowPlaybackDefaultsMenu(false)}
-                      className="p-1 rounded-full text-gray-400 hover:text-white hover:bg-white/10"
+                      className="p-1 rounded-full text-gray-400 hover:text-white hover:bg-white/10 transition"
                     >
-                      <X size={12} />
+                      <X size={14} />
                     </button>
                   </div>
 
                   {/* 1. Default Quality */}
-                  <div className="flex flex-col gap-1">
-                    <span className="text-[11px] text-gray-400 font-medium">🎥 默认画质</span>
-                    <div className="grid grid-cols-5 gap-1">
+                  <div className="flex flex-col gap-1.5">
+                    <span className="text-[11px] text-cyan-300 font-bold">🎥 默认画质</span>
+                    <div className="grid grid-cols-5 gap-1.5">
                       {QUALITY_OPTIONS.map(q => (
                         <button
                           key={q.id}
@@ -1186,10 +1194,10 @@ export default function LibraryView({
                             const updated = setPlaybackDefaults({ quality: q.id });
                             setPlaybackDefaultsState(updated);
                           }}
-                          className={`py-1 rounded-lg text-[10px] font-medium text-center transition ${
+                          className={`py-1.5 rounded-lg text-[11px] text-center transition ${
                             playbackDefaults.quality === q.id
-                              ? 'bg-cyan-500 text-white font-bold shadow'
-                              : 'bg-black/50 text-gray-400 hover:text-white hover:bg-white/10'
+                              ? 'bg-cyan-400 text-slate-950 font-extrabold shadow-md shadow-cyan-400/40'
+                              : 'bg-slate-800 hover:bg-slate-700 text-gray-200 border border-white/10 font-medium'
                           }`}
                         >
                           {q.shortLabel}
@@ -1199,9 +1207,9 @@ export default function LibraryView({
                   </div>
 
                   {/* 2. Default Speed */}
-                  <div className="flex flex-col gap-1">
-                    <span className="text-[11px] text-gray-400 font-medium">⚡ 默认播放速度</span>
-                    <div className="grid grid-cols-5 gap-1">
+                  <div className="flex flex-col gap-1.5">
+                    <span className="text-[11px] text-cyan-300 font-bold">⚡ 默认播放倍速</span>
+                    <div className="grid grid-cols-5 gap-1.5">
                       {SPEED_PRESETS.map(spd => (
                         <button
                           key={spd}
@@ -1209,10 +1217,10 @@ export default function LibraryView({
                             const updated = setPlaybackDefaults({ speed: spd });
                             setPlaybackDefaultsState(updated);
                           }}
-                          className={`py-1 rounded-lg text-[10px] font-medium text-center transition ${
+                          className={`py-1.5 rounded-lg text-[11px] text-center transition ${
                             playbackDefaults.speed === spd
-                              ? 'bg-cyan-500 text-white font-bold shadow'
-                              : 'bg-black/50 text-gray-400 hover:text-white hover:bg-white/10'
+                              ? 'bg-cyan-400 text-slate-950 font-extrabold shadow-md shadow-cyan-400/40'
+                              : 'bg-slate-800 hover:bg-slate-700 text-gray-200 border border-white/10 font-medium'
                           }`}
                         >
                           {spd}x
@@ -1222,18 +1230,18 @@ export default function LibraryView({
                   </div>
 
                   {/* 3. Default Pinned Poster PIP */}
-                  <div className="flex items-center justify-between py-0.5">
-                    <span className="text-[11px] text-gray-300 font-medium">🖼️ 海报画中画</span>
-                    <div className="flex items-center bg-black/50 p-0.5 rounded-lg border border-white/10 text-[10px]">
+                  <div className="flex items-center justify-between py-1 border-t border-white/10">
+                    <span className="text-[11px] text-gray-200 font-medium">🖼️ 海报画中画 (PIP)</span>
+                    <div className="flex items-center bg-slate-950 p-0.5 rounded-lg border border-white/15 text-[11px]">
                       <button
                         onClick={() => {
                           const updated = setPlaybackDefaults({ showPinnedPoster: true });
                           setPlaybackDefaultsState(updated);
                         }}
-                        className={`px-2 py-0.5 rounded transition ${
+                        className={`px-3 py-1 rounded transition ${
                           playbackDefaults.showPinnedPoster
-                            ? 'bg-cyan-500 text-white font-bold'
-                            : 'text-gray-400 hover:text-white'
+                            ? 'bg-cyan-400 text-slate-950 font-extrabold shadow-sm'
+                            : 'text-gray-400 hover:text-white font-medium'
                         }`}
                       >
                         开启
@@ -1243,10 +1251,10 @@ export default function LibraryView({
                           const updated = setPlaybackDefaults({ showPinnedPoster: false });
                           setPlaybackDefaultsState(updated);
                         }}
-                        className={`px-2 py-0.5 rounded transition ${
+                        className={`px-3 py-1 rounded transition ${
                           !playbackDefaults.showPinnedPoster
-                            ? 'bg-cyan-500 text-white font-bold'
-                            : 'text-gray-400 hover:text-white'
+                            ? 'bg-cyan-400 text-slate-950 font-extrabold shadow-sm'
+                            : 'text-gray-400 hover:text-white font-medium'
                         }`}
                       >
                         关闭
@@ -1255,9 +1263,9 @@ export default function LibraryView({
                   </div>
 
                   {/* 4. Seek Speed Tier */}
-                  <div className="flex flex-col gap-1">
-                    <span className="text-[11px] text-gray-400 font-medium">⏩ 快进快退步长</span>
-                    <div className="grid grid-cols-3 gap-1">
+                  <div className="flex flex-col gap-1.5 pt-1 border-t border-white/10">
+                    <span className="text-[11px] text-cyan-300 font-bold">⏩ 快进快退 / 滚轮寻轨步长</span>
+                    <div className="grid grid-cols-3 gap-1.5">
                       {SEEK_SPEED_OPTIONS.map(opt => (
                         <button
                           key={opt.id}
@@ -1265,10 +1273,10 @@ export default function LibraryView({
                             setStoredSeekSpeed(opt.id);
                             setSeekSpeedState(opt.id);
                           }}
-                          className={`py-1 rounded-lg text-[10px] font-medium text-center transition ${
+                          className={`py-1.5 rounded-lg text-[11px] text-center transition ${
                             seekSpeed === opt.id
-                              ? 'bg-cyan-500 text-white font-bold shadow'
-                              : 'bg-black/50 text-gray-400 hover:text-white hover:bg-white/10'
+                              ? 'bg-cyan-400 text-slate-950 font-extrabold shadow-md shadow-cyan-400/40'
+                              : 'bg-slate-800 hover:bg-slate-700 text-gray-200 border border-white/10 font-medium'
                           }`}
                         >
                           {opt.label.split(' ')[0]} ({opt.shortLabel})
@@ -1278,8 +1286,8 @@ export default function LibraryView({
                   </div>
 
                   {/* 5. Auto Refill Floating Windows */}
-                  <div className="flex items-center justify-between pt-1 border-t border-white/10">
-                    <span className="text-[11px] text-gray-300 font-medium">🪟 自动补齐悬浮窗</span>
+                  <div className="flex items-center justify-between pt-2 border-t border-white/15">
+                    <span className="text-[11px] text-gray-200 font-medium">🪟 关窗后自动补充新窗</span>
                     <button
                       onClick={() => {
                         const nextVal = !autoRefillFloatingWindows;
@@ -1287,10 +1295,10 @@ export default function LibraryView({
                         const updated = setPlaybackDefaults({ autoRefill: nextVal });
                         setPlaybackDefaultsState(updated);
                       }}
-                      className={`px-2.5 py-0.5 rounded-lg text-[10px] font-bold transition ${
+                      className={`px-3 py-1 rounded-lg text-[11px] font-bold transition ${
                         autoRefillFloatingWindows
-                          ? 'bg-cyan-500 text-white shadow'
-                          : 'bg-black/50 text-gray-400 hover:text-white border border-white/10'
+                          ? 'bg-cyan-400 text-slate-950 font-extrabold shadow-md shadow-cyan-400/40'
+                          : 'bg-slate-800 hover:bg-slate-700 text-gray-400 hover:text-white border border-white/15'
                       }`}
                     >
                       {autoRefillFloatingWindows ? '已开启' : '已关闭'}

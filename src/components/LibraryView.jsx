@@ -742,6 +742,7 @@ export default function LibraryView({
   onSelectYear,
   autoRefillFloatingWindows = false,
   onToggleAutoRefill,
+  onOpenRandom2Windows,
   onOpenRandom3Windows,
   onPlayRandomItem,
   onPlaySingleItem,
@@ -1083,15 +1084,24 @@ export default function LibraryView({
           </div>
 
           <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
-            {/* Quick Random Play Button (Prioritizing Playback on Mobile & Desktop!) */}
+            {/* Quick Random 2 Windows Button */}
             <button
-              onClick={onPlayRandomItem || onOpenRandom3Windows}
+              onClick={onOpenRandom2Windows || onPlayRandomItem}
               className="flex items-center gap-1 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 text-xs font-bold shadow-lg transition transform hover:scale-[1.02]"
-              title="随机挑选一部未看/当前筛选的视频立即播放"
+              title="随机挑选 2 部视频同时开启双窗播放"
             >
               <Play size={12} className="fill-amber-400 text-amber-400" />
-              <span className="hidden xs:inline">随机播放</span>
-              <span className="xs:hidden">随机</span>
+              <span>随机 2 窗</span>
+            </button>
+
+            {/* Quick Random 1 Play Button */}
+            <button
+              onClick={onPlayRandomItem}
+              className="hidden sm:flex items-center gap-1 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl bg-black/40 hover:bg-white/10 border border-white/10 text-gray-300 text-xs font-medium transition"
+              title="随机挑选一部视频立即播放"
+            >
+              <Play size={12} className="text-gray-400" />
+              <span>单片随机</span>
             </button>
 
             {/* Desktop Only: Auto Refill Floating Windows Checkbox */}

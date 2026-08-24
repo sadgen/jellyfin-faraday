@@ -14,6 +14,14 @@ import {
   Glasses, Trash2, FastForward, Sun, Zap, Gauge, RefreshCw, Subtitles
 } from 'lucide-react';
 
+export const QUALITY_OPTIONS = [
+  { id: 'direct', label: '🎬 原画直推 (原始码率)', shortLabel: '原画', bitrate: 0 },
+  { id: '8000000', label: '🌟 极清 8 Mbps (1080p)', shortLabel: '8M', bitrate: 8000000 },
+  { id: '4000000', label: '⚡ 流畅 4 Mbps (1080p)', shortLabel: '4M', bitrate: 4000000 },
+  { id: '2000000', label: '🚀 标清 2 Mbps (720p)', shortLabel: '2M', bitrate: 2000000 },
+  { id: '1000000', label: '📱 省流 1 Mbps (480p)', shortLabel: '1M', bitrate: 1000000 }
+];
+
 function formatTime(seconds) {
   if (!seconds || isNaN(seconds)) return '00:00';
   const h = Math.floor(seconds / 3600);
@@ -49,10 +57,18 @@ export default function FloatingVideoWindow({
   // Multi-part video list (e.g. Part 1, 2, 3 / CD1, CD2)
   const [partsList, setPartsList] = useState(() => [{ Id: item?.Id, Name: item?.Name || 'Part 1' }]);
   const [currentPartIndex, setCurrentPartIndex] = useState(0);
+  const currentPartId = partsList[currentPartIndex]?.Id || item?.Id;
 
-  // Fetch additional video parts (slices / multi-part VR / multi-part episodes)
+  // Media playback info (MediaSources, Container, Bitrate, SubtitleStreams)
+  const [playbackData, setPlaybackData] = useState(null);
+
+  // Fetch multi-part items & detailed playback info on mount or item change
   useEffect(() => {
     if (!item?.Id) return;
+    jellyfin.getItemPlaybackInfo(item.Id).then(info => {
+      if (info) setPlaybackData(info);
+    }).catch(() => {});
+
     jellyfin.getAdditionalParts(item.Id).then(additional => {
       if (additional && additional.length > 0) {
         setPartsList([
@@ -103,10 +119,12 @@ export default function FloatingVideoWindow({
   const [showPlayerMenu, setShowPlayerMenu] = useState(false);
   const [showPosterModal, setShowPosterModal] = useState(false);
   const [showSubtitleModal, setShowSubtitleModal] = useState(false);
+  const [showQualityMenu, setShowQualityMenu] = useState(false);
   const [selectedSubtitleIndex, setSelectedSubtitleIndex] = useState(-1);
 
-  // Smooth Mode: HLS 4Mbps transcode stream for 0-drop playback on high-bitrate/stuttering videos
-  const [isSmoothMode, setIsSmoothMode] = useState(false);
+  // Stream Quality: 'direct' | '8000000' | '4000000' | '2000000' | '1000000'
+  const [streamQuality, setStreamQuality] = useState('direct');
+  const isSmoothMode = streamQuality !== 'direct';
   const [smoothToast, setSmoothToast] = useState('');
 
   // Pinned Poster PIP: ENABLED BY DEFAULT (1X on Mobile, 1.5X on Desktop)
@@ -176,20 +194,6 @@ export default function FloatingVideoWindow({
     }
   });
 
-  const [playbackData, setPlaybackData] = useState(null);
-
-  // Fetch full playback info with MediaSources & MediaStreams when opened
-  useEffect(() => {
-    if (item?.Id) {
-      jellyfin.getItemPlaybackInfo(item.Id).then(info => {
-        if (info) {
-          setPlaybackData(info);
-          if (onUpdateItem) onUpdateItem(info);
-        }
-      }).catch(() => {});
-    }
-  }, [item?.Id]);
-
   // Extract subtitle streams
   const mediaSource = playbackData?.MediaSources?.[0] || item?.MediaSources?.[0];
   const mediaSourceId = mediaSource?.Id || item?.Id;
@@ -251,7 +255,6 @@ export default function FloatingVideoWindow({
   }, []);
 
   const currentPlayingPart = partsList[currentPartIndex] || item;
-  const currentPartId = currentPlayingPart?.Id || item?.Id;
 
   // Load and play video when item/part changes + Report Playback to Jellyfin
   useEffect(() => {
@@ -378,12 +381,9 @@ export default function FloatingVideoWindow({
     };
 
     const setupDirectPlay = () => {
-      const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
-      const path = item.Path || item.Name || '';
-      const isMkvOrHevc = /\.(mkv|avi|wmv|flv|ts)$/i.test(path);
-
-      if (isMobile || isMkvOrHevc || isSmoothMode) {
-        setupHlsPlay();
+      if (streamQuality !== 'direct') {
+        const bitrate = parseInt(streamQuality, 10) || 4000000;
+        setupHlsPlay(jellyfin.getSmoothHlsUrl(currentPartId, bitrate));
         return;
       }
 
@@ -454,12 +454,13 @@ export default function FloatingVideoWindow({
     setIsLoading(false);
   }, [currentPartId, isMuted, playbackSpeed, onUpdateItem, selectedSubtitleIndex, syncSubtitles]);
 
-  // Switch between Direct Play (原画) and 4Mbps HLS Transcode (流畅模式)
-  const switchToSmoothMode = useCallback((enable = true, silent = false) => {
+  // Switch Stream Quality / Transcode Bitrate seamlessly
+  const changeStreamQuality = useCallback((qualityId, silent = false) => {
     const videoEl = videoRef.current;
     if (!videoEl || !currentPartId) return;
 
-    setIsSmoothMode(enable);
+    setStreamQuality(qualityId);
+    setShowQualityMenu(false);
     const currentPos = videoEl.currentTime || 0;
     const speed = playbackSpeed;
     const muted = isMuted;
@@ -469,8 +470,23 @@ export default function FloatingVideoWindow({
       hlsRef.current = null;
     }
 
-    if (enable) {
-      const smoothUrl = jellyfin.getSmoothHlsUrl(currentPartId);
+    if (qualityId === 'direct') {
+      videoEl.src = jellyfin.getStreamUrl(currentPartId);
+      videoEl.playbackRate = speed;
+      videoEl.muted = muted;
+      videoEl.addEventListener('loadedmetadata', () => {
+        if (currentPos > 0) videoEl.currentTime = currentPos;
+        videoEl.play().catch(() => {});
+        syncSubtitles();
+      }, { once: true });
+      videoEl.load();
+      if (!silent) {
+        setSmoothToast('🎬 已切换为原画直推模式');
+        setTimeout(() => setSmoothToast(''), 3000);
+      }
+    } else {
+      const bitrate = parseInt(qualityId, 10) || 4000000;
+      const smoothUrl = jellyfin.getSmoothHlsUrl(currentPartId, bitrate);
       if (Hls.isSupported()) {
         const hls = new Hls({
           enableWorker: true,
@@ -493,44 +509,28 @@ export default function FloatingVideoWindow({
         videoEl.play().catch(() => {});
       }
       if (!silent) {
-        setSmoothToast('⚡ 已切换为 4Mbps HLS 流畅模式');
-        setTimeout(() => setSmoothToast(''), 3000);
-      }
-    } else {
-      // Switch back to Direct Play
-      videoEl.src = jellyfin.getStreamUrl(currentPartId);
-      videoEl.currentTime = currentPos;
-      videoEl.playbackRate = speed;
-      videoEl.muted = muted;
-      videoEl.play().catch(() => {});
-      if (!silent) {
-        setSmoothToast('🎬 已切换为原画直推模式');
+        const opt = QUALITY_OPTIONS.find(q => q.id === qualityId);
+        setSmoothToast(`⚡ 已切换为 ${opt?.shortLabel || qualityId} 转码模式`);
         setTimeout(() => setSmoothToast(''), 3000);
       }
     }
-  }, [currentPartId, isMuted, playbackSpeed]);
+  }, [currentPartId, isMuted, playbackSpeed, syncSubtitles]);
 
-  // Automatic stutter & frame-drop diagnosis loop (Tampermonkey smooth mode auto-trigger replica)
+  // Backward compatibility alias for diagnostics
+  const switchToSmoothMode = useCallback((enable = true, silent = false) => {
+    changeStreamQuality(enable ? '4000000' : 'direct', silent);
+  }, [changeStreamQuality]);
+
+  // Automatic stutter & frame-drop diagnosis loop (Tampermonkey original logic: ONLY when continuously playing with dropped frames)
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
 
     let lastDecoded = 0;
     let lastDropped = 0;
-    let waitingCount = 0;
-
-    const onWaiting = () => {
-      waitingCount++;
-      if (!isSmoothMode && waitingCount >= 3) {
-        switchToSmoothMode(true, true);
-        setSmoothToast('⚡ 检测到频繁缓冲，已自动切为流畅模式');
-        setTimeout(() => setSmoothToast(''), 3500);
-      }
-    };
-    video.addEventListener('waiting', onWaiting);
 
     const diagInterval = setInterval(() => {
-      if (!video || video.paused || video.ended || isSmoothMode) return;
+      if (!video || video.paused || video.ended || isDraggingScrubberRef.current || isWheelSeeking || streamQuality !== 'direct') return;
       if (typeof video.getVideoPlaybackQuality === 'function') {
         const q = video.getVideoPlaybackQuality();
         const totalDecoded = q.totalVideoFrames;
@@ -544,7 +544,7 @@ export default function FloatingVideoWindow({
           const dropRate = (totalDropped / totalDecoded) * 100;
           if (dropRate > 5.0 || (periodDropped > 8 && periodDecoded > 15)) {
             console.warn(`[Faraday ⚡] 检测到网页播放掉帧率: ${dropRate.toFixed(2)}%，自动切为流畅模式`);
-            switchToSmoothMode(true, true);
+            changeStreamQuality('4000000', true);
             setSmoothToast(`⚡ 检测到网页掉帧 (${dropRate.toFixed(1)}%)，已自动切换为流畅模式`);
             setTimeout(() => setSmoothToast(''), 3500);
           }
@@ -554,9 +554,8 @@ export default function FloatingVideoWindow({
 
     return () => {
       clearInterval(diagInterval);
-      video.removeEventListener('waiting', onWaiting);
     };
-  }, [isSmoothMode, switchToSmoothMode]);
+  }, [streamQuality, isWheelSeeking, changeStreamQuality]);
 
   const handleTimeUpdate = () => {
     const video = videoRef.current;
@@ -631,6 +630,41 @@ export default function FloatingVideoWindow({
     window.addEventListener('mouseup', handleMouseUp);
   };
 
+  const handleTouchStartHeader = (e) => {
+    if (e.target.closest('button') || e.target.closest('select')) return;
+    if (e.touches.length !== 1) return;
+    if (onBringToFront) onBringToFront(id);
+
+    setIsDragging(true);
+    isCustomPositionRef.current = true;
+    const touch = e.touches[0];
+    const startTouchX = touch.clientX;
+    const startTouchY = touch.clientY;
+    const startPosX = layout.left;
+    const startPosY = layout.top;
+
+    const handleTouchMove = (moveEvent) => {
+      if (moveEvent.touches.length !== 1) return;
+      const t = moveEvent.touches[0];
+      const dx = t.clientX - startTouchX;
+      const dy = t.clientY - startTouchY;
+      const newX = Math.max(0, Math.min(window.innerWidth - 60, startPosX + dx));
+      const newY = Math.max(50, Math.min(window.innerHeight - 60, startPosY + dy));
+      setLayout(prev => ({ ...prev, left: newX, top: newY }));
+    };
+
+    const handleTouchEnd = () => {
+      setIsDragging(false);
+      window.removeEventListener('touchmove', handleTouchMove);
+      window.removeEventListener('touchend', handleTouchEnd);
+      window.removeEventListener('touchcancel', handleTouchEnd);
+    };
+
+    window.addEventListener('touchmove', handleTouchMove, { passive: false });
+    window.addEventListener('touchend', handleTouchEnd);
+    window.addEventListener('touchcancel', handleTouchEnd);
+  };
+
   // Resizing the floating window via bottom-right handle
   const handleMouseDownResize = (e) => {
     if (e.button !== 0) return;
@@ -700,7 +734,7 @@ export default function FloatingVideoWindow({
     }, 750);
   }, []);
 
-  // Scrubber Mouse Drag Seeking
+  // Scrubber Mouse & Touch Drag Seeking
   const updateScrubberDrag = useCallback((clientX) => {
     if (!scrubberRef.current || !videoRef.current) return;
     const rect = scrubberRef.current.getBoundingClientRect();
@@ -742,6 +776,27 @@ export default function FloatingVideoWindow({
     window.addEventListener('mousemove', handleWindowMouseMove);
     window.addEventListener('mouseup', handleWindowMouseUp);
   }, [updateScrubberDrag]);
+
+  const handleScrubberTouchStart = useCallback((e) => {
+    if (e.touches.length !== 1) return;
+    isDraggingScrubberRef.current = true;
+    updateScrubberDrag(e.touches[0].clientX);
+  }, [updateScrubberDrag]);
+
+  const handleScrubberTouchMove = useCallback((e) => {
+    if (e.touches.length !== 1) return;
+    if (isDraggingScrubberRef.current) {
+      e.preventDefault();
+      updateScrubberDrag(e.touches[0].clientX);
+    }
+  }, [updateScrubberDrag]);
+
+  const handleScrubberTouchEnd = useCallback(() => {
+    if (isDraggingScrubberRef.current) {
+      isDraggingScrubberRef.current = false;
+      setTimeout(() => setHoverScrubberTime(null), 800);
+    }
+  }, []);
 
   const handleScrubberMouseMove = (e) => {
     if (isDraggingScrubberRef.current) return;
@@ -873,6 +928,7 @@ export default function FloatingVideoWindow({
       {/* Draggable Header */}
       <div
         onMouseDown={handleMouseDownHeader}
+        onTouchStart={handleTouchStartHeader}
         className={`px-3 py-2 border-b border-white/10 rounded-t-2xl flex items-center justify-between cursor-move text-xs ${
           slotIndex === 0 ? 'bg-cyan-950/80 text-cyan-200' : 'bg-slate-950/90 text-gray-300'
         }`}
@@ -887,6 +943,7 @@ export default function FloatingVideoWindow({
             <div 
               className="flex items-center gap-1 bg-black/50 px-1.5 py-0.5 rounded border border-amber-500/40 flex-shrink-0"
               onMouseDown={(e) => e.stopPropagation()}
+              onTouchStart={(e) => e.stopPropagation()}
             >
               <span className="text-[10px] text-amber-400 font-bold">Part</span>
               <select
@@ -919,19 +976,46 @@ export default function FloatingVideoWindow({
             <Subtitles size={13} />
           </button>
 
-          {/* Smooth Mode Toggle Button (4Mbps HLS 转码流畅模式) */}
-          <button
-            onClick={() => switchToSmoothMode(!isSmoothMode, false)}
-            className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[11px] font-bold transition ${
-              isSmoothMode 
-                ? 'bg-cyan-500/30 text-cyan-300 border border-cyan-400/50 shadow-sm shadow-cyan-500/30' 
-                : 'text-gray-400 hover:text-cyan-300 hover:bg-white/10'
-            }`}
-            title={isSmoothMode ? '当前为 4Mbps HLS 流畅转码模式 (点击切回原画)' : '切换为 4Mbps HLS 流畅模式 (解决掉帧卡顿)'}
-          >
-            <Zap size={12} className={isSmoothMode ? 'fill-cyan-400 text-cyan-400 animate-pulse' : ''} />
-            <span className="hidden xs:inline">{isSmoothMode ? '流畅' : '原画'}</span>
-          </button>
+          {/* Quality & Transcode Selector Menu */}
+          <div className="relative">
+            <button
+              onClick={() => setShowQualityMenu(!showQualityMenu)}
+              className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-bold transition ${
+                streamQuality !== 'direct'
+                  ? 'bg-cyan-500/30 text-cyan-300 border border-cyan-400/50 shadow-sm shadow-cyan-500/30'
+                  : 'text-gray-400 hover:text-cyan-300 hover:bg-white/10'
+              }`}
+              title="切换播放画质 / 转码模式"
+            >
+              <Zap size={12} className={streamQuality !== 'direct' ? 'fill-cyan-400 text-cyan-400' : ''} />
+              <span>{QUALITY_OPTIONS.find(q => q.id === streamQuality)?.shortLabel || '原画'}</span>
+            </button>
+
+            {showQualityMenu && (
+              <div
+                className="absolute right-0 top-7 w-44 glass-panel rounded-xl shadow-2xl py-1 z-50 text-xs text-gray-200 divide-y divide-white/5 animate-in fade-in zoom-in-95 duration-100"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="px-3 py-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                  选择画质 / 转码
+                </div>
+                {QUALITY_OPTIONS.map(opt => (
+                  <button
+                    key={opt.id}
+                    onClick={() => changeStreamQuality(opt.id, false)}
+                    className={`w-full px-3 py-1.5 text-left flex items-center justify-between transition ${
+                      streamQuality === opt.id
+                        ? 'bg-cyan-500/20 text-cyan-300 font-bold'
+                        : 'hover:bg-white/10 text-gray-300'
+                    }`}
+                  >
+                    <span>{opt.label}</span>
+                    {streamQuality === opt.id && <span className="text-cyan-400 text-xs">✓</span>}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
 
           {/* Refresh / Reload Stream (to load newly downloaded subs) */}
           <button
@@ -1192,22 +1276,26 @@ export default function FloatingVideoWindow({
 
       {/* Scrubber & Controls Footer */}
       <div className="p-2.5 bg-slate-950/95 border-t border-white/5 rounded-b-2xl flex flex-col gap-1.5 text-xs">
-        {/* Scrubber with Real-time Drag & Trickplay (Position BELOW) */}
+        {/* Scrubber with Real-time Drag & Trickplay */}
         <div className="relative w-full">
           <TrickplayScrubberThumbnail
             item={item}
             hoverTime={hoverScrubberTime}
             hoverPercent={hoverScrubberPercent}
             containerWidth={scrubberWidth}
-            position={slotIndex === 2 ? 'above' : 'below'}
+            position={typeof window !== 'undefined' && window.innerWidth < 768 ? 'above' : (slotIndex === 2 ? 'above' : 'below')}
           />
 
           <div
             ref={scrubberRef}
-            className="w-full h-2 hover:h-3 bg-white/20 rounded-full cursor-pointer transition-all relative overflow-hidden group/bar"
+            className="w-full h-2.5 sm:h-2 hover:h-3.5 sm:hover:h-3 bg-white/20 rounded-full cursor-pointer transition-all relative overflow-hidden group/bar touch-none"
             onMouseDown={handleScrubberMouseDown}
             onMouseMove={handleScrubberMouseMove}
             onMouseLeave={handleScrubberMouseLeave}
+            onTouchStart={handleScrubberTouchStart}
+            onTouchMove={handleScrubberTouchMove}
+            onTouchEnd={handleScrubberTouchEnd}
+            onTouchCancel={handleScrubberTouchEnd}
           >
             <div
               className="absolute top-0 left-0 bottom-0 bg-cyan-400 shadow-sm shadow-cyan-400/50 rounded-full transition-all duration-75"

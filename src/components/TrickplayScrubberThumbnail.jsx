@@ -25,15 +25,23 @@ export default function TrickplayScrubberThumbnail({
 
   if (!item || hoverTime === null) return null;
 
-  // On Mobile: enlarged size (240px - 280px)
-  // On Desktop: 2X enlarged size (360px - 420px)
+  // On Mobile: enlarged size (220px - 260px)
+  // On Desktop: 2X enlarged size (340px - 400px)
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 640;
-  const cWidth = containerWidth || 400;
-  const thumbWidth = isMobile ? Math.min(280, Math.max(200, cWidth * 0.85)) : Math.min(420, Math.max(280, cWidth * 0.75));
+  const cWidth = containerWidth || 360;
+  const thumbWidth = isMobile ? Math.min(260, Math.max(180, cWidth * 0.8)) : Math.min(380, Math.max(260, cWidth * 0.72));
   const thumbHeight = Math.round(thumbWidth * 9 / 16);
 
-  // Directly follow hoverPercent (0% to 100%) so the pointer aligns precisely with cursor/finger at extreme ends (0px to 100%), allowing the thumbnail to naturally protrude outside the frame
-  const left = Math.max(0, Math.min(cWidth, (hoverPercent || 0) * cWidth));
+  // Exact cursor/finger position along scrubber (0px to cWidth)
+  const cursorX = Math.max(0, Math.min(cWidth, (hoverPercent || 0) * cWidth));
+
+  // Clamp the thumbnail center so the entire box stays within [padding, cWidth - padding]
+  const halfThumb = thumbWidth / 2;
+  const margin = 4;
+  const clampedBoxLeft = Math.max(halfThumb + margin, Math.min(cWidth - halfThumb - margin, cursorX));
+
+  // Arrow offset from thumbnail center (-halfThumb to +halfThumb)
+  const arrowOffset = Math.max(-halfThumb + 14, Math.min(halfThumb - 14, cursorX - clampedBoxLeft));
 
   const isBelow = position === 'below';
 
@@ -42,17 +50,20 @@ export default function TrickplayScrubberThumbnail({
       className={`absolute z-50 -translate-x-1/2 flex flex-col items-center pointer-events-none transition-all duration-75 animate-in fade-in zoom-in-95 duration-100 ${
         isBelow ? 'top-6' : 'bottom-6'
       }`}
-      style={{ left: `${left}px` }}
+      style={{ left: `${clampedBoxLeft}px` }}
     >
       {/* Upward pointer arrow when positioned below scrubber */}
       {isBelow && (
-        <div className="w-0 h-0 border-x-[6px] sm:border-x-8 border-x-transparent border-b-[6px] sm:border-b-8 border-b-cyan-400 mb-0.5" />
+        <div 
+          className="w-0 h-0 border-x-[6px] sm:border-x-8 border-x-transparent border-b-[6px] sm:border-b-8 border-b-cyan-400 mb-0.5 transition-transform duration-75"
+          style={{ transform: `translateX(${arrowOffset}px)` }}
+        />
       )}
 
       {/* Thumbnail Window */}
       <div 
         style={{ width: `${thumbWidth}px`, height: `${thumbHeight}px` }}
-        className="rounded-xl sm:rounded-2xl overflow-hidden bg-black/95 border-2 border-cyan-400 shadow-2xl shadow-cyan-500/35 flex items-center justify-center relative"
+        className="rounded-xl sm:rounded-2xl overflow-hidden bg-black/95 border-2 border-cyan-400 shadow-2xl shadow-cyan-500/40 flex items-center justify-center relative"
       >
         {style ? (
           <div className="w-full h-full" style={style} />
@@ -61,14 +72,17 @@ export default function TrickplayScrubberThumbnail({
         )}
         
         {/* Time Stamp Badge */}
-        <div className="absolute bottom-1.5 sm:bottom-2.5 bg-black/85 backdrop-blur-md px-2.5 sm:px-3.5 py-0.5 sm:py-1 rounded-full text-[10px] sm:text-xs font-mono font-bold text-cyan-300 border border-white/20 shadow-lg">
+        <div className="absolute bottom-1.5 sm:bottom-2 bg-black/85 backdrop-blur-md px-2.5 sm:px-3 py-0.5 sm:py-1 rounded-full text-[10px] sm:text-xs font-mono font-bold text-cyan-300 border border-white/20 shadow-lg">
           {formatTime(hoverTime)}
         </div>
       </div>
 
       {/* Downward pointer arrow when positioned above scrubber */}
       {!isBelow && (
-        <div className="w-0 h-0 border-x-[6px] sm:border-x-8 border-x-transparent border-t-[6px] sm:border-t-8 border-t-cyan-400 mt-0.5" />
+        <div 
+          className="w-0 h-0 border-x-[6px] sm:border-x-8 border-x-transparent border-t-[6px] sm:border-t-8 border-t-cyan-400 mt-0.5 transition-transform duration-75"
+          style={{ transform: `translateX(${arrowOffset}px)` }}
+        />
       )}
     </div>
   );

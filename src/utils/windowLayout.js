@@ -19,21 +19,20 @@ export function calculateSlotStyle(slotIndex) {
   const gap = 12;
   const uiH = 34 + 38; // Header (~34px) + Footer (~38px)
 
-  // Mobile Phones (< 768px)
+  // Mobile Phones (< 768px): Stack 2 windows cleanly without overlap for simultaneous playback
   if (window.innerWidth < 768) {
-    const w = Math.min(360, window.innerWidth - 24);
-    const h = (w * 9 / 16) + uiH;
-    const left = Math.max(12, (window.innerWidth - w) / 2);
-    // Stack with slight offset for tabs or docked at bottom/top
-    // Math.max 兜底：横屏小屏时 innerHeight - h - 70 可能为负，防止窗口顶出屏幕
-    const top = Math.max(
-      headerOffset,
-      Math.min(
-        window.innerHeight - h - 70,
-        headerOffset + 10 + slotIndex * 35
-      )
-    );
-    return { left: Math.round(left), top: Math.round(top), width: Math.round(w), height: Math.round(h) };
+    const padding = 8;
+    const w = Math.min(420, window.innerWidth - padding * 2);
+    const h = Math.round((w * 9 / 16) + uiH);
+    const left = Math.max(padding, Math.round((window.innerWidth - w) / 2));
+    const mobileGap = 8;
+    const top = headerOffset + 4 + (slotIndex * (h + mobileGap));
+    return { 
+      left: Math.round(left), 
+      top: Math.round(top), 
+      width: Math.round(w), 
+      height: Math.round(h) 
+    };
   }
 
   // Tablets & Compact Screens (< 1024px)

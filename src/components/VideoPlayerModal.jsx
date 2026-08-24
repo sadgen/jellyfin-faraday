@@ -14,6 +14,14 @@ import {
   SkipForward, SkipBack, Sun, Zap, FastForward, Glasses, Trash2, Gauge
 } from 'lucide-react';
 
+export const QUALITY_OPTIONS = [
+  { id: 'direct', label: '🎬 原画直推 (原始码率)', shortLabel: '原画', bitrate: 0 },
+  { id: '8000000', label: '🌟 极清 8 Mbps (1080p)', shortLabel: '8M', bitrate: 8000000 },
+  { id: '4000000', label: '⚡ 流畅 4 Mbps (1080p)', shortLabel: '4M', bitrate: 4000000 },
+  { id: '2000000', label: '🚀 标清 2 Mbps (720p)', shortLabel: '2M', bitrate: 2000000 },
+  { id: '1000000', label: '📱 省流 1 Mbps (480p)', shortLabel: '1M', bitrate: 1000000 }
+];
+
 function formatTime(seconds) {
   if (!seconds || isNaN(seconds)) return '00:00';
   const h = Math.floor(seconds / 3600);
@@ -48,11 +56,13 @@ export default function VideoPlayerModal({
   const [errorMessage, setErrorMessage] = useState('');
   const [showPlayerMenu, setShowPlayerMenu] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showQualityMenu, setShowQualityMenu] = useState(false);
   const [isVrActive, setIsVrActive] = useState(false);
   const [detectedVrMode, setDetectedVrMode] = useState('180_3d_sbs');
 
-  // Smooth Mode: HLS 4Mbps transcode stream for 0 frame drops
-  const [isSmoothMode, setIsSmoothMode] = useState(false);
+  // Stream Quality: 'direct' | '8000000' | '4000000' | '2000000' | '1000000'
+  const [streamQuality, setStreamQuality] = useState('direct');
+  const isSmoothMode = streamQuality !== 'direct';
   const [smoothToast, setSmoothToast] = useState('');
 
   // Progress & Duration
@@ -296,13 +306,9 @@ export default function VideoPlayerModal({
     };
 
     const setupDirectPlay = () => {
-      const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
-      const path = item.Path || item.Name || '';
-      const isMkvOrHevc = /\.(mkv|avi|wmv|flv|ts)$/i.test(path);
-
-      // On mobile or for MKV/non-mp4 containers, directly use HLS/Smooth to avoid black screen
-      if (isMobile || isMkvOrHevc || isSmoothMode) {
-        setupHlsPlay();
+      if (streamQuality !== 'direct') {
+        const bitrate = parseInt(streamQuality, 10) || 4000000;
+        setupHlsPlay(jellyfin.getSmoothHlsUrl(item.Id, bitrate));
         return;
       }
 
@@ -337,12 +343,13 @@ export default function VideoPlayerModal({
     };
   }, [isOpen, item?.Id]);
 
-  // Switch between Direct Play (原画) and 4Mbps HLS Transcode (流畅模式)
-  const switchToSmoothMode = useCallback((enable = true, silent = false) => {
+  // Switch Stream Quality / Transcode Bitrate seamlessly
+  const changeStreamQuality = useCallback((qualityId, silent = false) => {
     const videoEl = videoRef.current;
     if (!videoEl || !item?.Id) return;
 
-    setIsSmoothMode(enable);
+    setStreamQuality(qualityId);
+    setShowQualityMenu(false);
     const currentPos = videoEl.currentTime || 0;
     const speed = playbackSpeedRef.current;
     const muted = isMutedRef.current;
@@ -352,8 +359,19 @@ export default function VideoPlayerModal({
       hlsRef.current = null;
     }
 
-    if (enable) {
-      const smoothUrl = jellyfin.getSmoothHlsUrl(item.Id);
+    if (qualityId === 'direct') {
+      videoEl.src = jellyfin.getStreamUrl(item.Id);
+      videoEl.currentTime = currentPos;
+      videoEl.playbackRate = speed;
+      videoEl.muted = muted;
+      videoEl.play().catch(() => {});
+      if (!silent) {
+        setSmoothToast('🎬 已切换为原画直推模式');
+        setTimeout(() => setSmoothToast(''), 3000);
+      }
+    } else {
+      const bitrate = parseInt(qualityId, 10) || 4000000;
+      const smoothUrl = jellyfin.getSmoothHlsUrl(item.Id, bitrate);
       if (Hls.isSupported()) {
         const hls = new Hls({
           enableWorker: true,
@@ -376,24 +394,19 @@ export default function VideoPlayerModal({
         videoEl.play().catch(() => {});
       }
       if (!silent) {
-        setSmoothToast('⚡ 已切换为 4Mbps HLS 流畅模式');
-        setTimeout(() => setSmoothToast(''), 3000);
-      }
-    } else {
-      // Switch back to Direct Play
-      videoEl.src = jellyfin.getStreamUrl(item.Id);
-      videoEl.currentTime = currentPos;
-      videoEl.playbackRate = speed;
-      videoEl.muted = muted;
-      videoEl.play().catch(() => {});
-      if (!silent) {
-        setSmoothToast('🎬 已切换为原画直推模式');
+        const opt = QUALITY_OPTIONS.find(q => q.id === qualityId);
+        setSmoothToast(`⚡ 已切换为 ${opt?.shortLabel || qualityId} 转码模式`);
         setTimeout(() => setSmoothToast(''), 3000);
       }
     }
   }, [item?.Id]);
 
-  // Automatic stutter & frame-drop diagnosis loop
+  // Backward compatibility alias for diagnostics
+  const switchToSmoothMode = useCallback((enable = true, silent = false) => {
+    changeStreamQuality(enable ? '4000000' : 'direct', silent);
+  }, [changeStreamQuality]);
+
+  // Automatic stutter & frame-drop diagnosis loop (Tampermonkey original: ONLY when continuously playing with dropped frames)
   useEffect(() => {
     if (!isOpen) return;
     const video = videoRef.current;
@@ -401,20 +414,9 @@ export default function VideoPlayerModal({
 
     let lastDecoded = 0;
     let lastDropped = 0;
-    let waitingCount = 0;
-
-    const onWaiting = () => {
-      waitingCount++;
-      if (!isSmoothMode && waitingCount >= 3) {
-        switchToSmoothMode(true, true);
-        setSmoothToast('⚡ 检测到频繁缓冲，已自动切为流畅模式');
-        setTimeout(() => setSmoothToast(''), 3500);
-      }
-    };
-    video.addEventListener('waiting', onWaiting);
 
     const diagInterval = setInterval(() => {
-      if (!video || video.paused || video.ended || isSmoothMode) return;
+      if (!video || video.paused || video.ended || isDraggingScrubberRef.current || isWheelSeeking || streamQuality !== 'direct') return;
       if (typeof video.getVideoPlaybackQuality === 'function') {
         const q = video.getVideoPlaybackQuality();
         const totalDecoded = q.totalVideoFrames;
@@ -428,7 +430,7 @@ export default function VideoPlayerModal({
           const dropRate = (totalDropped / totalDecoded) * 100;
           if (dropRate > 5.0 || (periodDropped > 8 && periodDecoded > 15)) {
             console.warn(`[Faraday ⚡] 影院播放掉帧率: ${dropRate.toFixed(2)}%，自动切为流畅模式`);
-            switchToSmoothMode(true, true);
+            changeStreamQuality('4000000', true);
             setSmoothToast(`⚡ 检测到网页掉帧 (${dropRate.toFixed(1)}%)，已自动切换为流畅模式`);
             setTimeout(() => setSmoothToast(''), 3500);
           }
@@ -438,9 +440,8 @@ export default function VideoPlayerModal({
 
     return () => {
       clearInterval(diagInterval);
-      video.removeEventListener('waiting', onWaiting);
     };
-  }, [isOpen, isSmoothMode, switchToSmoothMode]);
+  }, [isOpen, streamQuality, isWheelSeeking, changeStreamQuality]);
 
   // Video Ended -> increment play count and next
   const handleEnded = () => {
@@ -536,6 +537,27 @@ export default function VideoPlayerModal({
     window.addEventListener('mousemove', handleWindowMouseMove);
     window.addEventListener('mouseup', handleWindowMouseUp);
   }, [updateScrubberDrag]);
+
+  const handleScrubberTouchStart = useCallback((e) => {
+    if (e.touches.length !== 1) return;
+    isDraggingScrubberRef.current = true;
+    updateScrubberDrag(e.touches[0].clientX);
+  }, [updateScrubberDrag]);
+
+  const handleScrubberTouchMove = useCallback((e) => {
+    if (e.touches.length !== 1) return;
+    if (isDraggingScrubberRef.current) {
+      e.preventDefault();
+      updateScrubberDrag(e.touches[0].clientX);
+    }
+  }, [updateScrubberDrag]);
+
+  const handleScrubberTouchEnd = useCallback(() => {
+    if (isDraggingScrubberRef.current) {
+      isDraggingScrubberRef.current = false;
+      setTimeout(() => setHoverScrubberTime(null), 800);
+    }
+  }, []);
 
   const handleTimeUpdate = () => {
     const video = videoRef.current;
@@ -812,10 +834,14 @@ export default function VideoPlayerModal({
 
             <div
               ref={scrubberRef}
-              className="w-full h-2.5 hover:h-3.5 bg-white/20 rounded-full cursor-pointer transition-all relative overflow-hidden group/bar"
+              className="w-full h-2.5 hover:h-3.5 bg-white/20 rounded-full cursor-pointer transition-all relative overflow-hidden group/bar touch-none"
               onMouseDown={handleScrubberMouseDown}
               onMouseMove={handleScrubberMouseMove}
               onMouseLeave={handleScrubberMouseLeave}
+              onTouchStart={handleScrubberTouchStart}
+              onTouchMove={handleScrubberTouchMove}
+              onTouchEnd={handleScrubberTouchEnd}
+              onTouchCancel={handleScrubberTouchEnd}
             >
               <div
                 className="absolute top-0 left-0 bottom-0 bg-cyan-400 rounded-full transition-all duration-75 relative"
@@ -898,19 +924,46 @@ export default function VideoPlayerModal({
                 <Trash2 size={14} />
               </button>
 
-              {/* Smooth Mode Toggle Button */}
-              <button
-                onClick={() => switchToSmoothMode(!isSmoothMode, false)}
-                className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl border text-xs font-bold transition ${
-                  isSmoothMode 
-                    ? 'bg-cyan-500/30 text-cyan-300 border-cyan-400/50 shadow-sm shadow-cyan-500/30' 
-                    : 'bg-black/40 border-white/5 text-gray-300 hover:text-cyan-300 hover:bg-white/10'
-                }`}
-                title={isSmoothMode ? '当前为 4Mbps HLS 流畅转码模式 (点击切回原画)' : '切换为 4Mbps HLS 流畅模式 (解决掉帧卡顿)'}
-              >
-                <Zap size={14} className={isSmoothMode ? 'fill-cyan-400 text-cyan-400 animate-pulse' : ''} />
-                <span>{isSmoothMode ? '流畅模式' : '原画'}</span>
-              </button>
+              {/* Quality & Transcode Selector Menu */}
+              <div className="relative">
+                <button
+                  onClick={() => setShowQualityMenu(!showQualityMenu)}
+                  className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl border text-xs font-bold transition ${
+                    streamQuality !== 'direct'
+                      ? 'bg-cyan-500/30 text-cyan-300 border-cyan-400/50 shadow-sm shadow-cyan-500/30' 
+                      : 'bg-black/40 border-white/5 text-gray-300 hover:text-cyan-300 hover:bg-white/10'
+                  }`}
+                  title="切换播放画质 / 转码模式"
+                >
+                  <Zap size={14} className={streamQuality !== 'direct' ? 'fill-cyan-400 text-cyan-400' : ''} />
+                  <span>{QUALITY_OPTIONS.find(q => q.id === streamQuality)?.shortLabel || '原画'}</span>
+                </button>
+
+                {showQualityMenu && (
+                  <div 
+                    className="absolute right-0 bottom-10 w-44 glass-panel rounded-xl shadow-2xl py-1 z-50 text-xs text-gray-200 divide-y divide-white/5 animate-in fade-in zoom-in-95 duration-100"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div className="px-3 py-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                      选择画质 / 转码
+                    </div>
+                    {QUALITY_OPTIONS.map(opt => (
+                      <button
+                        key={opt.id}
+                        onClick={() => changeStreamQuality(opt.id, false)}
+                        className={`w-full px-3 py-1.5 text-left flex items-center justify-between transition ${
+                          streamQuality === opt.id
+                            ? 'bg-cyan-500/20 text-cyan-300 font-bold'
+                            : 'hover:bg-white/10 text-gray-300'
+                        }`}
+                      >
+                        <span>{opt.label}</span>
+                        {streamQuality === opt.id && <span className="text-cyan-400 text-xs">✓</span>}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
 
               {/* Speed */}
               <div className="flex items-center bg-black/40 px-2 py-1 rounded-xl border border-white/5 gap-1">

@@ -340,13 +340,9 @@ export default function App() {
     }
   }, [modalNavPool]);
 
-  // Single item playback handler (Mobile -> Full-screen modal; Desktop -> Floating window)
+  // Single item playback handler (Direct floating window playback)
   const handlePlaySingleItem = useCallback((item, startSecond = null) => {
-    if (typeof window !== 'undefined' && window.innerWidth < 768) {
-      setModalPlayingItem(startSecond !== null ? { ...item, startSecond } : item);
-    } else {
-      handleOpenFloatingWindow(item, startSecond);
-    }
+    handleOpenFloatingWindow(item, startSecond);
   }, [handleOpenFloatingWindow]);
 
   // Play a random single video (prioritizes unplayed from current filter pool)
@@ -362,6 +358,32 @@ export default function App() {
       handlePlaySingleItem(randomItem);
     }
   }, [mediaItems, handlePlaySingleItem]);
+
+  // Open 2 random videos simultaneously (Mobile / Tablet / Desktop)
+  const handleOpenRandom2Windows = useCallback(() => {
+    const pool = currentFilteredItemsRef.current.length > 0 ? currentFilteredItemsRef.current : mediaItems;
+    if (pool.length === 0) return;
+
+    const unplayed = pool.filter(it => !it.UserData?.Played);
+    const candidatePool = unplayed.length >= 2 ? unplayed : pool;
+
+    const shuffled = [...candidatePool];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    const selected2 = shuffled.slice(0, 2);
+
+    const now = Date.now();
+    setFloatingWindows(
+      selected2.map((it, idx) => ({
+        id: `win-${now}-${idx}`,
+        slotIndex: idx,
+        item: it,
+        timestamp: now + idx
+      }))
+    );
+  }, [mediaItems]);
 
   // Open 3 random videos simultaneously (from current filtered media pool)
   const handleOpenRandom3Windows = useCallback(() => {
@@ -379,12 +401,13 @@ export default function App() {
     }
     const selected3 = shuffled.slice(0, 3);
 
+    const now = Date.now();
     setFloatingWindows(
       selected3.map((it, idx) => ({
-        id: `win-${Date.now()}-${idx}`,
+        id: `win-${now}-${idx}`,
         slotIndex: idx,
         item: it,
-        timestamp: Date.now() + idx
+        timestamp: now + idx
       }))
     );
   }, [mediaItems]);
@@ -562,6 +585,7 @@ export default function App() {
             autoRefillFloatingWindows={autoRefillFloatingWindows}
             onToggleAutoRefill={handleToggleAutoRefill}
             onFilteredItemsChange={handleFilteredItemsChange}
+            onOpenRandom2Windows={handleOpenRandom2Windows}
             onOpenRandom3Windows={handleOpenRandom3Windows}
             onPlayRandomItem={handlePlayRandomItem}
             onPlaySingleItem={handlePlaySingleItem}
@@ -591,6 +615,7 @@ export default function App() {
         {/* Mobile Bottom Navigation Bar */}
         <MobileNavBar
           onOpenRandomPlay={handlePlayRandomItem}
+          onOpenRandom2Windows={handleOpenRandom2Windows}
           onOpenRandom3Windows={handleOpenRandom3Windows}
           onOpenSearch={() => {
             const searchInput = document.querySelector('input[type="text"]');

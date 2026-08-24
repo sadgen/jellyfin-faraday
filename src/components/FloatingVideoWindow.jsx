@@ -96,6 +96,10 @@ export default function FloatingVideoWindow({
   const [showSubtitleModal, setShowSubtitleModal] = useState(false);
   const [selectedSubtitleIndex, setSelectedSubtitleIndex] = useState(-1);
 
+  // Smooth Mode: HLS 4Mbps transcode stream for 0-drop playback on high-bitrate/stuttering videos
+  const [isSmoothMode, setIsSmoothMode] = useState(false);
+  const [smoothToast, setSmoothToast] = useState('');
+
   // Pinned Poster PIP: ENABLED BY DEFAULT (1X on Mobile, 1.5X on Desktop)
   const [showPinnedPoster, setShowPinnedPoster] = useState(true);
 
@@ -421,6 +425,110 @@ export default function FloatingVideoWindow({
     }
     setIsLoading(false);
   }, [currentPartId, isMuted, playbackSpeed, onUpdateItem, selectedSubtitleIndex, syncSubtitles]);
+
+  // Switch between Direct Play (原画) and 4Mbps HLS Transcode (流畅模式)
+  const switchToSmoothMode = useCallback((enable = true, silent = false) => {
+    const videoEl = videoRef.current;
+    if (!videoEl || !currentPartId) return;
+
+    setIsSmoothMode(enable);
+    const currentPos = videoEl.currentTime || 0;
+    const speed = playbackSpeed;
+    const muted = isMuted;
+
+    if (hlsRef.current) {
+      try { hlsRef.current.destroy(); } catch (e) {}
+      hlsRef.current = null;
+    }
+
+    if (enable) {
+      const smoothUrl = jellyfin.getSmoothHlsUrl(currentPartId);
+      if (Hls.isSupported()) {
+        const hls = new Hls({
+          enableWorker: true,
+          lowLatencyMode: false,
+          backBufferLength: 30
+        });
+        hlsRef.current = hls;
+        hls.loadSource(smoothUrl);
+        hls.attachMedia(videoEl);
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          videoEl.playbackRate = speed;
+          videoEl.muted = muted;
+          if (currentPos > 0) videoEl.currentTime = currentPos;
+          videoEl.play().catch(() => {});
+        });
+      } else if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
+        videoEl.src = smoothUrl;
+        videoEl.currentTime = currentPos;
+        videoEl.playbackRate = speed;
+        videoEl.play().catch(() => {});
+      }
+      if (!silent) {
+        setSmoothToast('⚡ 已切换为 4Mbps HLS 流畅模式');
+        setTimeout(() => setSmoothToast(''), 3000);
+      }
+    } else {
+      // Switch back to Direct Play
+      videoEl.src = jellyfin.getStreamUrl(currentPartId);
+      videoEl.currentTime = currentPos;
+      videoEl.playbackRate = speed;
+      videoEl.muted = muted;
+      videoEl.play().catch(() => {});
+      if (!silent) {
+        setSmoothToast('🎬 已切换为原画直推模式');
+        setTimeout(() => setSmoothToast(''), 3000);
+      }
+    }
+  }, [currentPartId, isMuted, playbackSpeed]);
+
+  // Automatic stutter & frame-drop diagnosis loop (Tampermonkey smooth mode auto-trigger replica)
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    let lastDecoded = 0;
+    let lastDropped = 0;
+    let waitingCount = 0;
+
+    const onWaiting = () => {
+      waitingCount++;
+      if (!isSmoothMode && waitingCount >= 3) {
+        switchToSmoothMode(true, true);
+        setSmoothToast('⚡ 检测到频繁缓冲，已自动切为流畅模式');
+        setTimeout(() => setSmoothToast(''), 3500);
+      }
+    };
+    video.addEventListener('waiting', onWaiting);
+
+    const diagInterval = setInterval(() => {
+      if (!video || video.paused || video.ended || isSmoothMode) return;
+      if (typeof video.getVideoPlaybackQuality === 'function') {
+        const q = video.getVideoPlaybackQuality();
+        const totalDecoded = q.totalVideoFrames;
+        const totalDropped = q.droppedVideoFrames;
+        const periodDropped = totalDropped - lastDropped;
+        const periodDecoded = totalDecoded - lastDecoded;
+        lastDecoded = totalDecoded;
+        lastDropped = totalDropped;
+
+        if (totalDecoded > 30) {
+          const dropRate = (totalDropped / totalDecoded) * 100;
+          if (dropRate > 5.0 || (periodDropped > 8 && periodDecoded > 15)) {
+            console.warn(`[Faraday ⚡] 检测到网页播放掉帧率: ${dropRate.toFixed(2)}%，自动切为流畅模式`);
+            switchToSmoothMode(true, true);
+            setSmoothToast(`⚡ 检测到网页掉帧 (${dropRate.toFixed(1)}%)，已自动切换为流畅模式`);
+            setTimeout(() => setSmoothToast(''), 3500);
+          }
+        }
+      }
+    }, 3000);
+
+    return () => {
+      clearInterval(diagInterval);
+      video.removeEventListener('waiting', onWaiting);
+    };
+  }, [isSmoothMode, switchToSmoothMode]);
 
   const formatTime = (seconds) => {
     if (!seconds || isNaN(seconds)) return '00:00';
@@ -792,6 +900,20 @@ export default function FloatingVideoWindow({
             <Subtitles size={13} />
           </button>
 
+          {/* Smooth Mode Toggle Button (4Mbps HLS 转码流畅模式) */}
+          <button
+            onClick={() => switchToSmoothMode(!isSmoothMode, false)}
+            className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[11px] font-bold transition ${
+              isSmoothMode 
+                ? 'bg-cyan-500/30 text-cyan-300 border border-cyan-400/50 shadow-sm shadow-cyan-500/30' 
+                : 'text-gray-400 hover:text-cyan-300 hover:bg-white/10'
+            }`}
+            title={isSmoothMode ? '当前为 4Mbps HLS 流畅转码模式 (点击切回原画)' : '切换为 4Mbps HLS 流畅模式 (解决掉帧卡顿)'}
+          >
+            <Zap size={12} className={isSmoothMode ? 'fill-cyan-400 text-cyan-400 animate-pulse' : ''} />
+            <span className="hidden xs:inline">{isSmoothMode ? '流畅' : '原画'}</span>
+          </button>
+
           {/* Refresh / Reload Stream (to load newly downloaded subs) */}
           <button
             onClick={handleReloadStream}
@@ -931,6 +1053,13 @@ export default function FloatingVideoWindow({
         style={{ filter: `brightness(${brightness})` }}
         {...touchHandlers}
       >
+        {/* Smooth Mode Notification Toast */}
+        {smoothToast && (
+          <div className="absolute top-2 left-1/2 -translate-x-1/2 z-40 px-3 py-1 bg-black/85 backdrop-blur-md border border-cyan-400/60 rounded-full text-[11px] font-bold text-cyan-300 shadow-xl pointer-events-none animate-in fade-in duration-150">
+            {smoothToast}
+          </div>
+        )}
+
         {coverUrl && (
           <img
             src={coverUrl}

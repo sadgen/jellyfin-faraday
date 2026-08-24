@@ -40,6 +40,10 @@ export default function VideoPlayerModal({
   const [isVrActive, setIsVrActive] = useState(false);
   const [detectedVrMode, setDetectedVrMode] = useState('180_3d_sbs');
 
+  // Smooth Mode: HLS 4Mbps transcode stream for 0 frame drops
+  const [isSmoothMode, setIsSmoothMode] = useState(false);
+  const [smoothToast, setSmoothToast] = useState('');
+
   // Progress & Duration
   const [progress, setProgress] = useState(0);
   const [currentTimeText, setCurrentTimeText] = useState('00:00');
@@ -269,6 +273,111 @@ export default function VideoPlayerModal({
       videoEl.load();
     };
   }, [isOpen, item?.Id]);
+
+  // Switch between Direct Play (原画) and 4Mbps HLS Transcode (流畅模式)
+  const switchToSmoothMode = useCallback((enable = true, silent = false) => {
+    const videoEl = videoRef.current;
+    if (!videoEl || !item?.Id) return;
+
+    setIsSmoothMode(enable);
+    const currentPos = videoEl.currentTime || 0;
+    const speed = playbackSpeedRef.current;
+    const muted = isMutedRef.current;
+
+    if (hlsRef.current) {
+      try { hlsRef.current.destroy(); } catch (e) {}
+      hlsRef.current = null;
+    }
+
+    if (enable) {
+      const smoothUrl = jellyfin.getSmoothHlsUrl(item.Id);
+      if (Hls.isSupported()) {
+        const hls = new Hls({
+          enableWorker: true,
+          lowLatencyMode: false,
+          backBufferLength: 30
+        });
+        hlsRef.current = hls;
+        hls.loadSource(smoothUrl);
+        hls.attachMedia(videoEl);
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          videoEl.playbackRate = speed;
+          videoEl.muted = muted;
+          if (currentPos > 0) videoEl.currentTime = currentPos;
+          videoEl.play().catch(() => {});
+        });
+      } else if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
+        videoEl.src = smoothUrl;
+        videoEl.currentTime = currentPos;
+        videoEl.playbackRate = speed;
+        videoEl.play().catch(() => {});
+      }
+      if (!silent) {
+        setSmoothToast('⚡ 已切换为 4Mbps HLS 流畅模式');
+        setTimeout(() => setSmoothToast(''), 3000);
+      }
+    } else {
+      // Switch back to Direct Play
+      videoEl.src = jellyfin.getStreamUrl(item.Id);
+      videoEl.currentTime = currentPos;
+      videoEl.playbackRate = speed;
+      videoEl.muted = muted;
+      videoEl.play().catch(() => {});
+      if (!silent) {
+        setSmoothToast('🎬 已切换为原画直推模式');
+        setTimeout(() => setSmoothToast(''), 3000);
+      }
+    }
+  }, [item?.Id]);
+
+  // Automatic stutter & frame-drop diagnosis loop
+  useEffect(() => {
+    if (!isOpen) return;
+    const video = videoRef.current;
+    if (!video) return;
+
+    let lastDecoded = 0;
+    let lastDropped = 0;
+    let waitingCount = 0;
+
+    const onWaiting = () => {
+      waitingCount++;
+      if (!isSmoothMode && waitingCount >= 3) {
+        switchToSmoothMode(true, true);
+        setSmoothToast('⚡ 检测到频繁缓冲，已自动切为流畅模式');
+        setTimeout(() => setSmoothToast(''), 3500);
+      }
+    };
+    video.addEventListener('waiting', onWaiting);
+
+    const diagInterval = setInterval(() => {
+      if (!video || video.paused || video.ended || isSmoothMode) return;
+      if (typeof video.getVideoPlaybackQuality === 'function') {
+        const q = video.getVideoPlaybackQuality();
+        const totalDecoded = q.totalVideoFrames;
+        const totalDropped = q.droppedVideoFrames;
+        const periodDropped = totalDropped - lastDropped;
+        const periodDecoded = totalDecoded - lastDecoded;
+        lastDecoded = totalDecoded;
+        lastDropped = totalDropped;
+
+        if (totalDecoded > 30) {
+          const dropRate = (totalDropped / totalDecoded) * 100;
+          if (dropRate > 5.0 || (periodDropped > 8 && periodDecoded > 15)) {
+            console.warn(`[Faraday ⚡] 影院播放掉帧率: ${dropRate.toFixed(2)}%，自动切为流畅模式`);
+            switchToSmoothMode(true, true);
+            setSmoothToast(`⚡ 检测到网页掉帧 (${dropRate.toFixed(1)}%)，已自动切换为流畅模式`);
+            setTimeout(() => setSmoothToast(''), 3500);
+          }
+        }
+      }
+    }, 3000);
+
+    return () => {
+      clearInterval(diagInterval);
+      video.removeEventListener('waiting', onWaiting);
+    };
+  }, [isOpen, isSmoothMode, switchToSmoothMode]);
 
   // Video Ended -> increment play count and next
   const handleEnded = () => {
@@ -625,6 +734,13 @@ export default function VideoPlayerModal({
             initialMode={detectedVrMode}
           />
 
+          {/* Smooth Mode Notification Toast */}
+          {smoothToast && (
+            <div className="absolute top-4 left-1/2 -translate-x-1/2 z-40 px-4 py-1.5 bg-black/85 backdrop-blur-md border border-cyan-400/60 rounded-full text-xs font-bold text-cyan-300 shadow-2xl pointer-events-none animate-in fade-in duration-150">
+              {smoothToast}
+            </div>
+          )}
+
           {/* Touch Gesture HUD Overlay */}
           {gestureState.type && (
             <div className={`absolute inset-0 z-30 flex items-center justify-center pointer-events-none animate-in fade-in zoom-in-95 duration-100 transition-opacity ${gestureState.fading ? 'opacity-0 duration-500' : 'opacity-100'}`}>
@@ -758,6 +874,20 @@ export default function VideoPlayerModal({
                 title="从服务器和磁盘删除"
               >
                 <Trash2 size={14} />
+              </button>
+
+              {/* Smooth Mode Toggle Button */}
+              <button
+                onClick={() => switchToSmoothMode(!isSmoothMode, false)}
+                className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl border text-xs font-bold transition ${
+                  isSmoothMode 
+                    ? 'bg-cyan-500/30 text-cyan-300 border-cyan-400/50 shadow-sm shadow-cyan-500/30' 
+                    : 'bg-black/40 border-white/5 text-gray-300 hover:text-cyan-300 hover:bg-white/10'
+                }`}
+                title={isSmoothMode ? '当前为 4Mbps HLS 流畅转码模式 (点击切回原画)' : '切换为 4Mbps HLS 流畅模式 (解决掉帧卡顿)'}
+              >
+                <Zap size={14} className={isSmoothMode ? 'fill-cyan-400 text-cyan-400 animate-pulse' : ''} />
+                <span>{isSmoothMode ? '流畅模式' : '原画'}</span>
               </button>
 
               {/* Speed */}

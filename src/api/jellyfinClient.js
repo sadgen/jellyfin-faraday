@@ -582,6 +582,28 @@ export class JellyfinClient {
   }
 
   /**
+   * Get Smooth HLS Transcode URL (Forced 4Mbps H.264/AAC for 0 frame drops on stuttering / HEVC videos)
+   */
+  getSmoothHlsUrl(itemId, maxBitrate = 4000000) {
+    if (!this.auth.serverUrl || !itemId) return '';
+    const playSessionId = 'jf_smooth_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);
+    const query = new URLSearchParams({
+      MediaSourceId: itemId,
+      api_key: this.auth.token,
+      PlaySessionId: playSessionId,
+      VideoCodec: 'h264',
+      AudioCodec: 'aac',
+      maxStreamingBitrate: String(maxBitrate),
+      VideoBitrate: String(maxBitrate),
+      AudioBitrate: '128000',
+      TranscodingMaxAudioChannels: '2',
+      SegmentContainer: 'ts',
+      MinSegments: '2'
+    });
+    return `${this.auth.serverUrl}/Videos/${itemId}/master.m3u8?${query.toString()}`;
+  }
+
+  /**
    * Get Poster/Backdrop Image URL (Optimized for instant decoding)
    */
   getImageUrl(itemId, tag = null, type = 'Primary', maxWidth = 360, quality = 80) {

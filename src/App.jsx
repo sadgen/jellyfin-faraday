@@ -340,6 +340,15 @@ export default function App() {
     }
   }, [modalNavPool]);
 
+  // Single item playback handler (Mobile -> Full-screen modal; Desktop -> Floating window)
+  const handlePlaySingleItem = useCallback((item, startSecond = null) => {
+    if (typeof window !== 'undefined' && window.innerWidth < 768) {
+      setModalPlayingItem(startSecond !== null ? { ...item, startSecond } : item);
+    } else {
+      handleOpenFloatingWindow(item, startSecond);
+    }
+  }, [handleOpenFloatingWindow]);
+
   // Play a random single video (prioritizes unplayed from current filter pool)
   const handlePlayRandomItem = useCallback(() => {
     const pool = currentFilteredItemsRef.current.length > 0 ? currentFilteredItemsRef.current : mediaItems;
@@ -480,14 +489,6 @@ export default function App() {
     setTotalRecordCount(prev => Math.max(0, prev - 1));
     deleteItemFromCache(deletedId);
   }, []);
-
-  const handlePlaySingleItem = useCallback((item, startSecond = null) => {
-    if (typeof window !== 'undefined' && window.innerWidth < 768) {
-      setModalPlayingItem(startSecond !== null ? { ...item, startSecond } : item);
-    } else {
-      handleOpenFloatingWindow(item, startSecond);
-    }
-  }, [handleOpenFloatingWindow]);
 
   const handleLoginSuccess = () => {
     setIsAuthenticated(true);

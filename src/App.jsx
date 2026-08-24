@@ -524,7 +524,7 @@ export default function App() {
 
   return (
     <ErrorBoundary>
-      <div className="relative w-screen h-screen bg-[#080b11] text-gray-100 overflow-hidden select-none flex flex-col">
+      <div className="relative w-full h-[100dvh] bg-[#080b11] text-gray-100 overflow-hidden select-none flex flex-col">
         
         {/* Global Error Banner */}
         {errorText && (

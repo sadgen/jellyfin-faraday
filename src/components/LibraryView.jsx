@@ -783,7 +783,13 @@ export default function LibraryView({
     return typeof window !== 'undefined' && window.innerWidth < 640 ? 2 : 4;
   });
 
-  const gridColumns = viewLayout === 'backdrop' ? gridColumnsBackdrop : gridColumnsPoster;
+  const gridColumns = useMemo(() => {
+    const isMobile = typeof window !== 'undefined' && window.innerWidth < 640;
+    if (viewLayout === 'backdrop') {
+      return isMobile ? Math.min(gridColumnsBackdrop, 2) : gridColumnsBackdrop;
+    }
+    return isMobile ? Math.min(gridColumnsPoster, 4) : gridColumnsPoster;
+  }, [viewLayout, gridColumnsBackdrop, gridColumnsPoster]);
 
   const handleGridColumnsChange = (val) => {
     const num = parseInt(val, 10);

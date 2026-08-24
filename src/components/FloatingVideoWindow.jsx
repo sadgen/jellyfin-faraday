@@ -323,26 +323,23 @@ export default function FloatingVideoWindow({
     const directStreamUrl = jellyfin.getStreamUrl(currentPartId);
     const hlsUrl = jellyfin.getHlsUrl(currentPartId);
 
-    const setupDirectPlay = () => {
-      videoEl.src = directStreamUrl;
-      videoEl.playbackRate = playbackSpeedRef.current;
-      videoEl.muted = isMutedRef.current;
-      videoEl.play().catch(() => {
-        videoEl.muted = true;
-        setIsMuted(true);
-        videoEl.play().catch(() => {});
-      });
-    };
+    const setupHlsPlay = (customUrl = null) => {
+      const targetUrl = customUrl || (isSmoothMode ? jellyfin.getSmoothHlsUrl(currentPartId) : hlsUrl);
+      if (hlsRef.current) {
+        try { hlsRef.current.destroy(); } catch (e) {}
+        hlsRef.current = null;
+      }
+      videoEl.removeAttribute('src');
+      videoEl.load();
 
-    const setupHlsPlay = () => {
       if (Hls.isSupported()) {
         const hls = new Hls({
           enableWorker: true,
-          lowLatencyMode: true,
+          lowLatencyMode: false,
           backBufferLength: 30
         });
         hlsRef.current = hls;
-        hls.loadSource(hlsUrl);
+        hls.loadSource(targetUrl);
         hls.attachMedia(videoEl);
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
           videoEl.playbackRate = playbackSpeed;
@@ -359,7 +356,7 @@ export default function FloatingVideoWindow({
           }
         });
       } else if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
-        videoEl.src = hlsUrl;
+        videoEl.src = targetUrl;
         if (initialSeekTime > 0) videoEl.currentTime = initialSeekTime;
         videoEl.play().catch(() => {});
       } else {
@@ -369,6 +366,28 @@ export default function FloatingVideoWindow({
 
     const handleDirectError = () => {
       setupHlsPlay();
+    };
+
+    const setupDirectPlay = () => {
+      const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+      const path = item.Path || item.Name || '';
+      const isMkvOrHevc = /\.(mkv|avi|wmv|flv|ts)$/i.test(path);
+
+      if (isMobile || isMkvOrHevc || isSmoothMode) {
+        setupHlsPlay();
+        return;
+      }
+
+      videoEl.src = directStreamUrl;
+      videoEl.playbackRate = playbackSpeedRef.current;
+      videoEl.muted = isMutedRef.current;
+      videoEl.play().catch(() => {
+        videoEl.muted = true;
+        setIsMuted(true);
+        videoEl.play().catch(() => {
+          setupHlsPlay();
+        });
+      });
     };
 
     videoEl.addEventListener('error', handleDirectError, { once: true });

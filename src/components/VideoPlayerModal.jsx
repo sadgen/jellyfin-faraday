@@ -204,15 +204,24 @@ export default function VideoPlayerModal({
     const directStreamUrl = jellyfin.getStreamUrl(item.Id);
     const hlsUrl = jellyfin.getHlsUrl(item.Id);
 
-    const setupHlsPlay = () => {
+    const setupHlsPlay = (customUrl = null) => {
+      const targetUrl = customUrl || (isSmoothMode ? jellyfin.getSmoothHlsUrl(item.Id) : hlsUrl);
+      
+      if (hlsRef.current) {
+        try { hlsRef.current.destroy(); } catch (e) {}
+        hlsRef.current = null;
+      }
+      videoEl.removeAttribute('src');
+      videoEl.load();
+
       if (Hls.isSupported()) {
         const hls = new Hls({
           enableWorker: true,
-          lowLatencyMode: true,
+          lowLatencyMode: false,
           backBufferLength: 30
         });
         hlsRef.current = hls;
-        hls.loadSource(hlsUrl);
+        hls.loadSource(targetUrl);
         hls.attachMedia(videoEl);
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
           videoEl.playbackRate = playbackSpeedRef.current;
@@ -230,8 +239,13 @@ export default function VideoPlayerModal({
           }
         });
       } else if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
-        videoEl.src = hlsUrl;
-        videoEl.play().catch(() => {});
+        videoEl.src = targetUrl;
+        if (initialSeekTime > 0) videoEl.currentTime = initialSeekTime;
+        videoEl.play().catch(() => {
+          videoEl.muted = true;
+          setIsMuted(true);
+          videoEl.play().catch(() => {});
+        });
       } else {
         setHasError(true);
         setErrorMessage('浏览器不支持此视频流');
@@ -243,6 +257,16 @@ export default function VideoPlayerModal({
     };
 
     const setupDirectPlay = () => {
+      const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+      const path = item.Path || item.Name || '';
+      const isMkvOrHevc = /\.(mkv|avi|wmv|flv|ts)$/i.test(path);
+
+      // On mobile or for MKV/non-mp4 containers, directly use HLS/Smooth to avoid black screen
+      if (isMobile || isMkvOrHevc || isSmoothMode) {
+        setupHlsPlay();
+        return;
+      }
+
       videoEl.src = directStreamUrl;
       videoEl.playbackRate = playbackSpeedRef.current;
       videoEl.muted = isMutedRef.current;
@@ -721,6 +745,8 @@ export default function VideoPlayerModal({
               setIsLoading(false);
               setIsPlaying(true);
             }}
+            onLoadedData={() => setIsLoading(false)}
+            onCanPlay={() => setIsLoading(false)}
             onPause={() => setIsPlaying(false)}
             onEnded={handleEnded}
             onTimeUpdate={handleTimeUpdate}

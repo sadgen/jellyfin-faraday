@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { jellyfin } from '../api/jellyfinClient';
 import { Server, Lock, User, Users, Key, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
 
@@ -8,6 +8,7 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }) {
   const [username, setUsername] = useState(jellyfin.auth.username || '');
   const [password, setPassword] = useState('');
   const [apiKey, setApiKey] = useState(jellyfin.auth.token || '');
+  const [rememberMe, setRememberMe] = useState(true);
   
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
@@ -15,7 +16,7 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }) {
 
   // API Key 多用户选择状态（audit #20）：
   // /Users 返回多个账号时先展示选择列表，点选后才完成登录
-  const [pendingApiKeyLogin, setPendingApiKeyLogin] = useState(null); // { serverUrl, apiKey }
+  const [pendingApiKeyLogin, setPendingApiKeyLogin] = useState(null); // { serverUrl, apiKey, rememberMe }
   const [selectableUsers, setSelectableUsers] = useState([]);
 
   if (!isOpen) return null;
@@ -37,14 +38,14 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }) {
         if (!username.trim()) {
           throw new Error('请输入用户名');
         }
-        await jellyfin.authenticateByName(serverUrl, username, password);
+        await jellyfin.authenticateByName(serverUrl, username, password, rememberMe);
       } else {
         if (!apiKey.trim()) {
           throw new Error('请输入 API Key');
         }
-        const result = await jellyfin.connectWithApiKey(serverUrl, apiKey.trim());
+        const result = await jellyfin.connectWithApiKey(serverUrl, apiKey.trim(), rememberMe);
         if (result.status === 'select_user') {
-          setPendingApiKeyLogin({ serverUrl: result.serverUrl, apiKey: apiKey.trim() });
+          setPendingApiKeyLogin({ serverUrl: result.serverUrl, apiKey: apiKey.trim(), rememberMe });
           setSelectableUsers(result.users);
           setIsLoading(false);
           return; // 等待用户点选，不进入成功流程
@@ -69,7 +70,7 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }) {
     setErrorMsg('');
     setIsLoading(true);
     try {
-      jellyfin.completeApiKeyLogin(pendingApiKeyLogin.serverUrl, pendingApiKeyLogin.apiKey, user);
+      jellyfin.completeApiKeyLogin(pendingApiKeyLogin.serverUrl, pendingApiKeyLogin.apiKey, user, pendingApiKeyLogin.rememberMe);
       setPendingApiKeyLogin(null);
       setSelectableUsers([]);
       setSuccessMsg(`已连接为 ${user.Name}！`);
@@ -249,8 +250,19 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }) {
             </div>
           )}
 
+          {/* Remember Login / Session Only toggle */}
+          <label className="flex items-center gap-2 text-xs text-gray-300 cursor-pointer select-none py-1">
+            <input
+              type="checkbox"
+              checked={rememberMe}
+              onChange={(e) => setRememberMe(e.target.checked)}
+              className="w-3.5 h-3.5 accent-cyan-400 rounded cursor-pointer"
+            />
+            <span>记住登录状态（未勾选则仅在本次浏览器会话有效）</span>
+          </label>
+
           {/* Action buttons */}
-          <div className="flex items-center justify-end gap-2 mt-2">
+          <div className="flex items-center justify-end gap-2 mt-1">
             {jellyfin.auth.isConfigured && onClose && (
               <button
                 type="button"

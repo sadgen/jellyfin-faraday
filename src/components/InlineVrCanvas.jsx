@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { RotateCcw, Glasses, X, Smartphone } from 'lucide-react';
 
@@ -38,7 +38,7 @@ export default function InlineVrCanvas({
   const fovRef = useRef(100);
 
   const [vrMode, setVrMode] = useState(initialMode);
-  const [fov, setFov] = useState(100);
+  const [_fov, setFov] = useState(100);
   const [isGyroActive, setIsGyroActive] = useState(false);
 
   useEffect(() => {
@@ -210,7 +210,7 @@ export default function InlineVrCanvas({
       if (rendererRef.current) rendererRef.current.dispose();
       if (container) container.innerHTML = '';
     };
-  }, [isActive, setupGeometry, vrMode]);
+  }, [isActive, setupGeometry, vrMode, videoRef]);
 
   // Gyroscope / DeviceOrientation Listener on Mobile
   useEffect(() => {

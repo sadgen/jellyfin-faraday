@@ -19,21 +19,27 @@ export class JellyfinClient {
     if (!id) {
       id = 'jf-faraday-' + Math.random().toString(36).substring(2, 15);
       localStorage.setItem('jf_faraday_device_id', id);
+      if (typeof localStorage !== 'undefined') localStorage.setItem('jf_faraday_device_id', id);
     }
     return id;
   }
 
   loadStoredAuth() {
     try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        return JSON.parse(saved);
+      // Check sessionStorage first (for session-only logins), then localStorage
+      const sessionSaved = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(STORAGE_KEY) : null;
+      if (sessionSaved) {
+        return JSON.parse(sessionSaved);
+      }
+      const localSaved = typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null;
+      if (localSaved) {
+        return JSON.parse(localSaved);
       }
     } catch (e) {
       console.warn('Failed to load stored auth:', e);
     }
     return {
-      serverUrl: import.meta.env.VITE_JELLYFIN_SERVER_URL || '',
+      serverUrl: (typeof import.meta !== 'undefined' && import.meta.env?.VITE_JELLYFIN_SERVER_URL) || '',
       token: '',
       userId: '',
       username: '',
@@ -41,16 +47,22 @@ export class JellyfinClient {
     };
   }
 
-  saveAuth(authData) {
+  saveAuth(authData, rememberMe = true) {
     this.auth = {
       ...this.auth,
       ...authData,
       isConfigured: !!(authData.serverUrl && authData.token && authData.userId)
     };
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(this.auth));
+      if (rememberMe) {
+        if (typeof localStorage !== 'undefined') localStorage.setItem(STORAGE_KEY, JSON.stringify(this.auth));
+        if (typeof sessionStorage !== 'undefined') sessionStorage.removeItem(STORAGE_KEY);
+      } else {
+        if (typeof sessionStorage !== 'undefined') sessionStorage.setItem(STORAGE_KEY, JSON.stringify(this.auth));
+        if (typeof localStorage !== 'undefined') localStorage.removeItem(STORAGE_KEY);
+      }
     } catch (e) {
-      console.error('Failed to save auth to localStorage:', e);
+      console.error('Failed to save auth:', e);
     }
     return this.auth;
   }
@@ -63,7 +75,8 @@ export class JellyfinClient {
       username: '',
       isConfigured: false,
     };
-    localStorage.removeItem(STORAGE_KEY);
+    if (typeof localStorage !== 'undefined') localStorage.removeItem(STORAGE_KEY);
+    if (typeof sessionStorage !== 'undefined') sessionStorage.removeItem(STORAGE_KEY);
   }
 
   getAuthHeaders() {
@@ -80,13 +93,31 @@ export class JellyfinClient {
 
   sanitizeServerUrl(url) {
     if (!url) return '';
-    return url.trim().replace(/\/+$/, '');
+    let clean = url.trim().replace(/\/+$/, '');
+    const schemeMatch = clean.match(/^([a-zA-Z][a-zA-Z0-9+.-]*):(\/\/|[^0-9])/);
+    if (schemeMatch) {
+      const scheme = schemeMatch[1].toLowerCase();
+      if (scheme !== 'http' && scheme !== 'https') {
+        throw new Error('仅支持 HTTP 或 HTTPS 协议地址');
+      }
+    } else {
+      clean = 'http://' + clean;
+    }
+    try {
+      const parsed = new URL(clean);
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        throw new Error('仅支持 HTTP 或 HTTPS 协议地址');
+      }
+      return clean;
+    } catch (e) {
+      throw new Error(e.message || '无效的服务器地址', { cause: e });
+    }
   }
 
   /**
    * Authenticate user with Username & Password
    */
-  async authenticateByName(serverUrl, username, password) {
+  async authenticateByName(serverUrl, username, password, rememberMe = true) {
     const cleanUrl = this.sanitizeServerUrl(serverUrl);
     const authHeader = `MediaBrowser Client="${this.clientName}", Device="${this.deviceName}", DeviceId="${this.deviceId}", Version="${this.clientVersion}"`;
 
@@ -118,7 +149,7 @@ export class JellyfinClient {
       serverId: data.ServerId
     };
 
-    return this.saveAuth(authData);
+    return this.saveAuth(authData, rememberMe);
   }
 
   /**
@@ -128,7 +159,7 @@ export class JellyfinClient {
    * - 多用户：返回 { status: 'select_user', users }（不写任何状态），
    *   由 UI 展示用户列表，用户点选后调用 completeApiKeyLogin 完成登录
    */
-  async connectWithApiKey(serverUrl, apiKey) {
+  async connectWithApiKey(serverUrl, apiKey, rememberMe = true) {
     const cleanUrl = this.sanitizeServerUrl(serverUrl);
     const authHeader = `MediaBrowser Client="${this.clientName}", Device="${this.deviceName}", DeviceId="${this.deviceId}", Version="${this.clientVersion}", Token="${apiKey}"`;
 
@@ -157,14 +188,14 @@ export class JellyfinClient {
       };
     }
 
-    const auth = this.completeApiKeyLogin(cleanUrl, apiKey, users[0]);
+    const auth = this.completeApiKeyLogin(cleanUrl, apiKey, users[0], rememberMe);
     return { status: 'connected', auth };
   }
 
   /**
    * 用指定用户完成 API Key 登录（第二阶段，落盘凭据）
    */
-  completeApiKeyLogin(serverUrl, apiKey, user) {
+  completeApiKeyLogin(serverUrl, apiKey, user, rememberMe = true) {
     const authData = {
       serverUrl,
       token: apiKey,
@@ -172,7 +203,7 @@ export class JellyfinClient {
       username: user.Name,
       isConfigured: true
     };
-    return this.saveAuth(authData);
+    return this.saveAuth(authData, rememberMe);
   }
 
   /**
@@ -611,6 +642,9 @@ export class JellyfinClient {
     let url = `${this.auth.serverUrl}/Items/${itemId}/Images/${type}?maxWidth=${maxWidth}&quality=${quality}`;
     if (tag) {
       url += `&tag=${tag}`;
+    }
+    if (this.auth.token) {
+      url += `&api_key=${encodeURIComponent(this.auth.token)}`;
     }
     return url;
   }

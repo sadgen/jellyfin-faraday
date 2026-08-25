@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import { useState, useMemo, useEffect, useRef, useCallback, memo } from 'react';
 import { jellyfin } from '../api/jellyfinClient';
 import { getTrickplayStyle } from '../utils/trickplay';
 import { detectDuplicateMedia } from '../utils/duplicateChecker';
@@ -8,7 +8,7 @@ import { SEEK_SPEED_OPTIONS, getStoredSeekSpeed, setStoredSeekSpeed } from '../u
 import MobileActionSheet from './MobileActionSheet';
 import DeleteConfirmModal from './DeleteConfirmModal';
 import { 
-  Play, Star, Eye, EyeOff, Search, 
+  Play, Star, Eye, Search, 
   Edit3, Sparkles, Trash2, Folder, Film, 
   ArrowUpDown, X, RefreshCw, Layers, LayoutGrid,
   Grid, List, MoreVertical, ExternalLink, Calendar,
@@ -60,7 +60,7 @@ const SORT_OPTIONS = [
  * - In Poster mode (2:3): Pops up a 480x270 2X-enlarged Trickplay preview
  * - Auto-detects top viewport boundary: pops below card if near top, pops above otherwise!
  */
-const MediaCard = React.memo(function MediaCard({
+const MediaCard = memo(function MediaCard({
   item,
   isDuplicate,
   viewLayout = 'poster',
@@ -540,7 +540,7 @@ const MediaCard = React.memo(function MediaCard({
 /**
  * Detailed List Row View
  */
-const MediaListRow = React.memo(function MediaListRow({
+const MediaListRow = memo(function MediaListRow({
   item,
   isDuplicate,
   isSelected = false,
@@ -548,13 +548,12 @@ const MediaListRow = React.memo(function MediaListRow({
   onToggleSelect,
   onPlay,
   onToggleFavorite,
-  onTogglePlayed,
+  onTogglePlayed: _onTogglePlayed,
   onOpenMetadataEditor,
   onOpenActionSheet
 }) {
   const posterUrl = jellyfin.getImageUrl(item.Id, item.ImageTags?.Primary, 'Primary', 150, 80);
   const isFavorite = !!item.UserData?.IsFavorite;
-  const isPlayed = !!item.UserData?.Played;
   const playCount = item.UserData?.PlayCount || 0;
 
   const durationText = useMemo(() => {
@@ -728,7 +727,7 @@ const MediaListRow = React.memo(function MediaListRow({
 
 export default function LibraryView({
   items = [],
-  totalRecordCount = 0,
+  totalRecordCount: _totalRecordCount = 0,
   userViews = [],
   selectedViewId,
   onSelectView,
@@ -741,7 +740,7 @@ export default function LibraryView({
   selectedGenre,
   onSelectGenre,
   selectedYear,
-  onSelectYear,
+  onSelectYear: _onSelectYear,
   autoRefillFloatingWindows = false,
   onToggleAutoRefill,
   onOpenRandom2Windows,

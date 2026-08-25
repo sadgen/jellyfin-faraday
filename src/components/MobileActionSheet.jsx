@@ -1,9 +1,8 @@
-import React from 'react';
 import { jellyfin } from '../api/jellyfinClient';
 import { useExternalPlayer } from '../hooks/useExternalPlayer';
 import { 
   Play, Star, Eye, EyeOff, Edit3, Sparkles, 
-  Trash2, RefreshCw, ExternalLink, X, Film, Info,
+  Trash2, RefreshCw, ExternalLink, X, Film,
   Glasses, Tv
 } from 'lucide-react';
 

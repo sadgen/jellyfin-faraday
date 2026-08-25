@@ -29,6 +29,8 @@ export default [
         ResizeObserver: 'readonly',
         DeviceOrientationEvent: 'readonly',
         URLSearchParams: 'readonly',
+        URL: 'readonly',
+        sessionStorage: 'readonly',
         Image: 'readonly',
         indexedDB: 'readonly',
         __APP_VERSION__: 'readonly'

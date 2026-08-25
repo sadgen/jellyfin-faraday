@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import Hls from 'hls.js';
 import { jellyfin } from '../api/jellyfinClient';
 import { calculateSlotStyle } from '../utils/windowLayout';
@@ -12,8 +12,8 @@ import InlineVrCanvas from './InlineVrCanvas';
 import SubtitleModal from './SubtitleModal';
 import { detectVrVideo } from '../utils/vrDetector';
 import { 
-  Play, Pause, SkipForward, Volume2, VolumeX, Maximize, 
-  X, ExternalLink, Film, Star, Eye, EyeOff, Image as ImageIcon,
+  Play, Pause, SkipForward, Volume2, VolumeX, 
+  X, ExternalLink, Star, Eye, EyeOff, Image as ImageIcon,
   Glasses, Trash2, FastForward, Sun, Zap, Gauge, RefreshCw, Subtitles
 } from 'lucide-react';
 
@@ -38,7 +38,7 @@ export default function FloatingVideoWindow({
   windowData,
   onClose,
   onSkip,
-  onExpand,
+  onExpand: _onExpand,
   onBringToFront,
   onUpdateItem,
   onDeleteItem
@@ -95,7 +95,7 @@ export default function FloatingVideoWindow({
       setPartsList([{ Id: item.Id, Name: item.Name || 'Part 1' }]);
       setCurrentPartIndex(0);
     });
-  }, [item?.Id]);
+  }, [item?.Id, item?.Name]);
 
   // Update layout when slotIndex changes (window promotion / shifting)
   useEffect(() => {
@@ -248,7 +248,7 @@ export default function FloatingVideoWindow({
       const defIdx = getDefaultSubtitleIndex(item, subtitleStreams);
       setSelectedSubtitleIndex(defIdx);
     }
-  }, [item?.Id, item?.Path, item?.Name, subtitleStreams]);
+  }, [item, subtitleStreams]);
 
   // Sync subtitle mode to video.textTracks
   const syncSubtitles = useCallback(() => {
@@ -273,6 +273,8 @@ export default function FloatingVideoWindow({
   playbackSpeedRef.current = playbackSpeed;
   const isMutedRef = useRef(isMuted);
   isMutedRef.current = isMuted;
+  const streamQualityRef = useRef(streamQuality);
+  streamQualityRef.current = streamQuality;
   const itemRef = useRef(item);
   itemRef.current = item;
   const onUpdateItemRef = useRef(onUpdateItem);
@@ -370,7 +372,7 @@ export default function FloatingVideoWindow({
     const setupHlsPlay = (customUrl = null) => {
       const targetUrl = customUrl || (isSmoothMode ? jellyfin.getSmoothHlsUrl(currentPartId) : hlsUrl);
       if (hlsRef.current) {
-        try { hlsRef.current.destroy(); } catch (e) {}
+        try { hlsRef.current.destroy(); } catch {}
         hlsRef.current = null;
       }
       videoEl.removeAttribute('src');
@@ -413,8 +415,9 @@ export default function FloatingVideoWindow({
     };
 
     const setupDirectPlay = () => {
-      if (streamQuality !== 'direct') {
-        const bitrate = parseInt(streamQuality, 10) || 4000000;
+      const currentQuality = streamQualityRef.current;
+      if (currentQuality !== 'direct') {
+        const bitrate = parseInt(currentQuality, 10) || 4000000;
         setupHlsPlay(jellyfin.getSmoothHlsUrl(currentPartId, bitrate));
         return;
       }
@@ -498,7 +501,7 @@ export default function FloatingVideoWindow({
     const muted = isMuted;
 
     if (hlsRef.current) {
-      try { hlsRef.current.destroy(); } catch (e) {}
+      try { hlsRef.current.destroy(); } catch {}
       hlsRef.current = null;
     }
 
@@ -891,7 +894,7 @@ export default function FloatingVideoWindow({
   }, [item?.Id, item?.ImageTags]);
 
   const isFavorite = !!item?.UserData?.IsFavorite;
-  const playCount = item?.UserData?.PlayCount || 0;
+  const _playCount = item?.UserData?.PlayCount || 0;
 
   return (
     <div

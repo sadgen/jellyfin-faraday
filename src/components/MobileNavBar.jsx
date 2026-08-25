@@ -1,4 +1,3 @@
-import React from 'react';
 import { Film, Play, Search, Settings } from 'lucide-react';
 
 export default function MobileNavBar({

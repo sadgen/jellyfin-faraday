@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { jellyfin } from '../api/jellyfinClient';
 import { Edit3, Save, X, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
 
@@ -21,12 +21,22 @@ export default function MetadataEditorModal({
   const [statusMsg, setStatusMsg] = useState({ type: '', text: '' });
 
   useEffect(() => {
+    let isCancelled = false;
+
     if (isOpen && item?.Id) {
       setIsLoading(true);
       setStatusMsg({ type: '', text: '' });
+      setName(item.Name || '');
+      setOriginalTitle(item.OriginalTitle || '');
+      setProductionYear(item.ProductionYear ? item.ProductionYear.toString() : '');
+      setCommunityRating(item.CommunityRating ? item.CommunityRating.toString() : '');
+      setOverview(item.Overview || '');
+      setGenres((item.Genres || []).join(', '));
+      setTags((item.Tags || []).join(', '));
 
       jellyfin.getItemDetails(item.Id)
         .then(details => {
+          if (isCancelled || !details) return;
           setName(details.Name || '');
           setOriginalTitle(details.OriginalTitle || '');
           setProductionYear(details.ProductionYear ? details.ProductionYear.toString() : '');
@@ -36,12 +46,19 @@ export default function MetadataEditorModal({
           setTags((details.Tags || []).join(', '));
         })
         .catch(err => {
+          if (isCancelled) return;
           console.error('Failed to load item details:', err);
           setName(item.Name || '');
         })
-        .finally(() => setIsLoading(false));
+        .finally(() => {
+          if (!isCancelled) setIsLoading(false);
+        });
     }
-  }, [isOpen, item?.Id]);
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [isOpen, item]);
 
   if (!isOpen || !item) return null;
 

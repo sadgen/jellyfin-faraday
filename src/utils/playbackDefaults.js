@@ -34,7 +34,7 @@ export function getPlaybackDefaults() {
         autoRefill: !!parsed.autoRefill
       };
     }
-  } catch (_) {}
+  } catch {}
   return {
     quality: 'direct',
     speed: 1.0,

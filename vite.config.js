@@ -1,6 +1,6 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
-import pkg from './package.json';
+import pkg from './package.json' with { type: 'json' };
 
 // https://vitejs.dev/config/
 export default defineConfig({
@@ -16,5 +16,9 @@ export default defineConfig({
   preview: {
     port: 3000,
     host: true
+  },
+  test: {
+    environment: 'happy-dom',
+    globals: true
   }
 });

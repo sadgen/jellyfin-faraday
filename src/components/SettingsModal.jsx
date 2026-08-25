@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { jellyfin } from '../api/jellyfinClient';
 import { clearLibraryCache } from '../utils/mediaCache';
 import { SEEK_SPEED_OPTIONS, getStoredSeekSpeed, setStoredSeekSpeed } from '../utils/seekSettings';
@@ -150,9 +150,11 @@ export default function SettingsModal({
           <button
             onClick={async () => {
               if (confirm('确定要清除本地缓存并退出登录吗？')) {
+                const s = jellyfin.auth.serverUrl;
+                const u = jellyfin.auth.userId;
                 jellyfin.clearAuth();
-                // 清空 IndexedDB 媒体库缓存与 jf_* 本地键，防止换账号后冷启动泄露上一账号媒体库
-                await clearLibraryCache();
+                // 清空当前账号 IndexedDB 媒体库缓存与视图缓存，防止换账号后冷启动泄露上一账号媒体库
+                await clearLibraryCache(s, u);
                 localStorage.removeItem('jf_last_selected_view');
                 if (onLogout) onLogout();
                 onClose();

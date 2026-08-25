@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import { useMemo } from 'react';
 import { getTrickplayStyle } from '../utils/trickplay';
 
 export default function TrickplayScrubberThumbnail({

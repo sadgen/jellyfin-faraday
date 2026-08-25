@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { jellyfin } from './api/jellyfinClient';
 import { 
   loadFullCache, 
   saveFullCache, 
   updateItemInCache, 
-  deleteItemFromCache 
+  deleteItemFromCache,
+  clearLibraryCache
 } from './utils/mediaCache';
 import { sortMediaItems } from './utils/mediaSorter';
 import { getPlaybackDefaults, setPlaybackDefaults } from './utils/playbackDefaults';
@@ -18,7 +19,7 @@ import VideoPlayerModal from './components/VideoPlayerModal';
 import VrPlayerModal from './components/VrPlayerModal';
 import MobileNavBar from './components/MobileNavBar';
 import ErrorBoundary from './components/ErrorBoundary';
-import { Film, AlertCircle } from 'lucide-react';
+import { AlertCircle } from 'lucide-react';
 
 const STORAGE_KEY_VIEW = 'jf_last_selected_view';
 const STORAGE_KEY_SORT = 'jf_faraday_sort_method';
@@ -532,9 +533,13 @@ export default function App() {
     fetchAllMedia(selectedViewId, searchKeyword, statusFilter, sortMethod, selectedGenre, selectedYear, '');
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     // 递增请求序号使所有在途 fetch 响应失效（登出后不再写入状态/缓存）
     fetchRequestIdRef.current++;
+    const prevServer = jellyfin.auth.serverUrl;
+    const prevUser = jellyfin.auth.userId;
+    jellyfin.clearAuth();
+    await clearLibraryCache(prevServer, prevUser);
     setIsAuthenticated(false);
     setMediaItems([]);
     setTotalRecordCount(0);

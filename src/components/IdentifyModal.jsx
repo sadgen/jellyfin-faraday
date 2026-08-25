@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { jellyfin } from '../api/jellyfinClient';
 import { Search, Sparkles, Check, X, Loader2, AlertCircle, Film } from 'lucide-react';
 

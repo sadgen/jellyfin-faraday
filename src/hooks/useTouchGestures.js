@@ -142,7 +142,7 @@ export function useTouchGestures({
             if (typeof navigator !== 'undefined' && navigator.vibrate) {
               navigator.vibrate([40, 30, 40]);
             }
-          } catch (_) {}
+          } catch {}
           isDraggingWindowRef.current = true;
           touchActionRef.current = 'window_drag';
           if (onLongPressDragStart) {

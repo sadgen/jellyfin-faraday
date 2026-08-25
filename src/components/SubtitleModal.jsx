@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { jellyfin } from '../api/jellyfinClient';
 import { 
   Subtitles, Download, Check, Search, 
@@ -14,9 +14,9 @@ export default function SubtitleModal({
   onClose
 }) {
   const [activeTab, setActiveTab] = useState('local'); // 'local' | 'remote'
-  const [selectedLanguage, setSelectedLanguage] = useState('chi');
-  const [isSearching, setIsSearching] = useState(false);
+  const [selectedLanguage, setSelectedLanguage] = useState('chi'); // 'chi' | 'eng' | 'jpn' | 'all'
   const [remoteSubtitles, setRemoteSubtitles] = useState([]);
+  const [isSearching, setIsSearching] = useState(false);
   const [downloadingId, setDownloadingId] = useState(null);
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
@@ -36,7 +36,7 @@ export default function SubtitleModal({
   const mediaStreams = mediaSource?.MediaStreams || playbackData?.MediaStreams || item?.MediaStreams || [];
   const localSubtitles = mediaStreams.filter(s => s.Type === 'Subtitle' && !['pgssub', 'dvdsub', 'dvbsub'].includes(s.Codec?.toLowerCase()));
 
-  const handleSearchRemote = async (lang = selectedLanguage) => {
+  const handleSearchRemote = useCallback(async (lang = selectedLanguage) => {
     if (!item?.Id) return;
     setIsSearching(true);
     setErrorMsg('');
@@ -52,13 +52,13 @@ export default function SubtitleModal({
     } finally {
       setIsSearching(false);
     }
-  };
+  }, [item?.Id, selectedLanguage]);
 
   useEffect(() => {
     if (isOpen && activeTab === 'remote' && remoteSubtitles.length === 0) {
       handleSearchRemote(selectedLanguage);
     }
-  }, [isOpen, activeTab]);
+  }, [isOpen, activeTab, remoteSubtitles.length, handleSearchRemote, selectedLanguage]);
 
   const handleDownload = async (sub) => {
     if (!item?.Id || !sub?.Id) return;

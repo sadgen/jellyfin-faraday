@@ -1,7 +1,6 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import Hls from 'hls.js';
 import { jellyfin } from '../api/jellyfinClient';
-import { getTrickplayStyle } from '../utils/trickplay';
 import { useExternalPlayer } from '../hooks/useExternalPlayer';
 import { useTouchGestures } from '../hooks/useTouchGestures';
 import TrickplayScrubberThumbnail from './TrickplayScrubberThumbnail';
@@ -43,7 +42,7 @@ export default function VideoPlayerModal({
   onPrev,
   onUpdateItem,
   onDeleteItem,
-  onOpenVr
+  onOpenVr: _onOpenVr
 }) {
   const videoRef = useRef(null);
   const hlsRef = useRef(null);
@@ -96,7 +95,7 @@ export default function VideoPlayerModal({
   const isDraggingScrubberRef = useRef(false);
 
   // Mouse Wheel Seek State
-  const [isWheelSeeking, setIsWheelSeeking] = useState(false);
+  const [_isWheelSeeking, setIsWheelSeeking] = useState(false);
   const wheelTimerRef = useRef(null);
   const wheelSeekingTimeRef = useRef(null);
 
@@ -174,6 +173,8 @@ export default function VideoPlayerModal({
   playbackSpeedRef.current = playbackSpeed;
   const isMutedRef = useRef(isMuted);
   isMutedRef.current = isMuted;
+  const streamQualityRef = useRef(streamQuality);
+  streamQualityRef.current = streamQuality;
   const itemRef = useRef(item);
   itemRef.current = item;
   const onUpdateItemRef = useRef(onUpdateItem);
@@ -274,7 +275,7 @@ export default function VideoPlayerModal({
       const targetUrl = customUrl || (isSmoothMode ? jellyfin.getSmoothHlsUrl(item.Id) : hlsUrl);
       
       if (hlsRef.current) {
-        try { hlsRef.current.destroy(); } catch (e) {}
+        try { hlsRef.current.destroy(); } catch {}
         hlsRef.current = null;
       }
       videoEl.removeAttribute('src');
@@ -323,8 +324,9 @@ export default function VideoPlayerModal({
     };
 
     const setupDirectPlay = () => {
-      if (streamQuality !== 'direct') {
-        const bitrate = parseInt(streamQuality, 10) || 4000000;
+      const currentQuality = streamQualityRef.current;
+      if (currentQuality !== 'direct') {
+        const bitrate = parseInt(currentQuality, 10) || 4000000;
         setupHlsPlay(jellyfin.getSmoothHlsUrl(item.Id, bitrate));
         return;
       }
@@ -372,7 +374,7 @@ export default function VideoPlayerModal({
     const muted = isMutedRef.current;
 
     if (hlsRef.current) {
-      try { hlsRef.current.destroy(); } catch (e) {}
+      try { hlsRef.current.destroy(); } catch {}
       hlsRef.current = null;
     }
 
@@ -614,7 +616,7 @@ export default function VideoPlayerModal({
 
   const posterUrl = item?.Id ? (jellyfin.getImageUrl(item.Id, item.ImageTags?.Backdrop || item.ImageTags?.Primary, 'Backdrop', 800, 80) || jellyfin.getImageUrl(item.Id, item.ImageTags?.Primary, 'Primary', 800, 80)) : null;
   const isFavorite = !!item?.UserData?.IsFavorite;
-  const playCount = item?.UserData?.PlayCount || 0;
+  const _playCount = item?.UserData?.PlayCount || 0;
 
   return (
     <div 

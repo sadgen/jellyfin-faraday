@@ -1,4 +1,3 @@
-import React from 'react';
 import FloatingVideoWindow from './FloatingVideoWindow';
 
 export default function FloatingWindowsContainer({

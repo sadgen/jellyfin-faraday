@@ -843,6 +843,9 @@ export default function FloatingVideoWindow({
       await jellyfin.toggleFavorite(item.Id, nextFav);
     } catch (err) {
       console.error('Failed to toggle favorite:', err);
+      if (onUpdateItem) {
+        onUpdateItem(item);
+      }
     }
   };
 

@@ -659,7 +659,10 @@ export class JellyfinClient {
       method,
       headers: this.getAuthHeaders()
     });
-    return res.ok;
+    if (!res.ok) {
+      throw new Error(`更新收藏状态失败 (HTTP ${res.status})`);
+    }
+    return true;
   }
 
   /**

@@ -89,11 +89,12 @@ export async function loadFullCache(serverUrl = null, userId = null) {
       metaReq.onsuccess = () => { meta = metaReq.result || null; };
 
       tx.oncomplete = () => {
-        // Also fallback to localStorage views if any
+        // Only read the current user/server key. The legacy global key is not
+        // safe to reuse because its original owner cannot be determined.
         if (views.length === 0 && typeof localStorage !== 'undefined') {
           try {
             const viewsKey = getViewsStorageKey(serverUrl, userId);
-            views = JSON.parse(localStorage.getItem(viewsKey) || localStorage.getItem('jf_cached_views') || '[]');
+            views = JSON.parse(localStorage.getItem(viewsKey) || '[]');
           } catch {}
         }
         resolve({
@@ -114,7 +115,7 @@ export async function loadFullCache(serverUrl = null, userId = null) {
     if (typeof localStorage !== 'undefined') {
       try {
         const viewsKey = getViewsStorageKey(serverUrl, userId);
-        views = JSON.parse(localStorage.getItem(viewsKey) || localStorage.getItem('jf_cached_views') || '[]');
+        views = JSON.parse(localStorage.getItem(viewsKey) || '[]');
       } catch {}
     }
     return { items: [], views, lastSyncTime: null, count: 0 };

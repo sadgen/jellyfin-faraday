@@ -947,6 +947,10 @@ export default function LibraryView({
       await jellyfin.toggleFavorite(item.Id, nextFav);
     } catch (err) {
       console.error('Failed to toggle favorite:', err);
+      if (onUpdateItem) {
+        onUpdateItem(item);
+      }
+      alert(err.message || '更新收藏状态失败');
     }
   }, [onUpdateItem]);
 
@@ -1016,11 +1020,13 @@ export default function LibraryView({
   const handleBatchFavorite = useCallback(async (isFav) => {
     const ids = Array.from(selectedItemIds);
     if (ids.length === 0) return;
+    const targetItems = ids
+      .map(id => items.find(item => item.Id === id))
+      .filter(Boolean);
 
     // Optimistically update local items in UI
-    ids.forEach(id => {
-      const it = items.find(x => x.Id === id);
-      if (it && onUpdateItem) {
+    targetItems.forEach(it => {
+      if (onUpdateItem) {
         onUpdateItem({
           ...it,
           UserData: { ...it.UserData, IsFavorite: isFav }
@@ -1028,10 +1034,19 @@ export default function LibraryView({
       }
     });
 
-    try {
-      await Promise.allSettled(ids.map(id => jellyfin.toggleFavorite(id, isFav)));
-    } catch (err) {
-      console.error('Batch favorite error:', err);
+    const results = await Promise.allSettled(
+      targetItems.map(item => jellyfin.toggleFavorite(item.Id, isFav))
+    );
+    const failedItems = targetItems.filter((_, index) => results[index].status === 'rejected');
+
+    // Roll back only the items that the server rejected.
+    failedItems.forEach(item => {
+      if (onUpdateItem) onUpdateItem(item);
+    });
+
+    if (failedItems.length > 0) {
+      const succeeded = targetItems.length - failedItems.length;
+      alert(`批量收藏完成：成功 ${succeeded} 项，失败 ${failedItems.length} 项。失败项目已恢复原状态。`);
     }
   }, [selectedItemIds, items, onUpdateItem]);
 
@@ -1049,20 +1064,26 @@ export default function LibraryView({
 
   const handleConfirmDelete = useCallback(async (target) => {
     const list = Array.isArray(target) ? target : [target];
-    try {
-      const results = await Promise.allSettled(list.map(it => jellyfin.deleteItem(it.Id)));
-      list.forEach((it, idx) => {
-        if (results[idx].status === 'fulfilled' && onDeleteItem) {
-          onDeleteItem(it.Id);
-        }
-      });
-      setSelectedItemIds(prev => {
-        const next = new Set(prev);
-        list.forEach(it => next.delete(it.Id));
-        return next;
-      });
-    } catch (err) {
-      alert(err.message || '删除失败');
+    const results = await Promise.allSettled(list.map(it => jellyfin.deleteItem(it.Id)));
+    const succeededItems = list.filter((_, index) => results[index].status === 'fulfilled');
+    const failedItems = list.filter((_, index) => results[index].status === 'rejected');
+
+    succeededItems.forEach(item => {
+      if (onDeleteItem) onDeleteItem(item.Id);
+    });
+
+    // Remove only successful deletions from selection so failed items remain
+    // selected and can be retried immediately.
+    setSelectedItemIds(prev => {
+      const next = new Set(prev);
+      succeededItems.forEach(item => next.delete(item.Id));
+      return next;
+    });
+
+    if (failedItems.length > 0) {
+      const failedNames = failedItems.slice(0, 3).map(item => item.Name).join('、');
+      const suffix = failedItems.length > 3 ? ` 等 ${failedItems.length} 项` : '';
+      alert(`删除完成：成功 ${succeededItems.length} 项，失败 ${failedItems.length} 项（${failedNames}${suffix}）。失败项目仍保持选中，可重试。`);
     }
   }, [onDeleteItem]);
 

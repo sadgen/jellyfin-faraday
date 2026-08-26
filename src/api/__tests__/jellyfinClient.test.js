@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { JellyfinClient } from '../jellyfinClient';
 
 describe('JellyfinClient authentication and URL generation', () => {
@@ -8,6 +8,11 @@ describe('JellyfinClient authentication and URL generation', () => {
     localStorage.clear();
     sessionStorage.clear();
     client = new JellyfinClient();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it('sanitizes valid HTTP/HTTPS URLs and rejects invalid protocols', () => {
@@ -61,5 +66,17 @@ describe('JellyfinClient authentication and URL generation', () => {
     expect(localStorage.getItem('jellyfin_faraday_auth')).toBeNull();
     expect(sessionStorage.getItem('jellyfin_faraday_auth')).toBeNull();
     expect(client.auth.isConfigured).toBe(false);
+  });
+
+  it('rejects favorite updates when the server returns an error', async () => {
+    client.auth = {
+      serverUrl: 'https://jellyfin.example.com',
+      token: 'secret_token_123',
+      userId: 'user_1',
+      isConfigured: true
+    };
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 403 }));
+
+    await expect(client.toggleFavorite('item_999', true)).rejects.toThrow('HTTP 403');
   });
 });

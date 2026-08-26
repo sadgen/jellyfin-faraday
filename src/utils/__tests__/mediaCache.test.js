@@ -17,6 +17,7 @@ describe('mediaCache multi-user isolation and operations', () => {
   const user2 = 'user_222';
 
   beforeEach(async () => {
+    localStorage.clear();
     await clearLibraryCache(serverA, user1);
     await clearLibraryCache(serverB, user2);
   });
@@ -93,5 +94,15 @@ describe('mediaCache multi-user isolation and operations', () => {
     const loaded = await loadFullCache(serverA, user1);
     expect(loaded.count).toBe(0);
     expect(loaded.items.length).toBe(0);
+  });
+
+  it('does not expose legacy global views to a different account', async () => {
+    localStorage.setItem('jf_cached_views', JSON.stringify([
+      { Id: 'legacy-private-view', Name: 'Previous User Library' }
+    ]));
+
+    const loaded = await loadFullCache(serverB, user2);
+
+    expect(loaded.views).toEqual([]);
   });
 });

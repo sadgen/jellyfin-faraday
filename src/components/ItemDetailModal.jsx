@@ -312,21 +312,21 @@ export default function ItemDetailModal({
                 <Users size={13} className="text-cyan-400" />
                 <span>演员</span>
               </div>
-              <div className="flex gap-2.5 overflow-x-auto pb-1 no-scrollbar">
+              <div className="flex gap-3 overflow-x-auto pb-1 no-scrollbar">
                 {cast.map(person => {
-                  const imgUrl = person.Id ? jellyfin.getImageUrl(person.Id, person.PrimaryImageTag, 'Primary', 150, 80) : '';
+                  const imgUrl = person.Id ? jellyfin.getImageUrl(person.Id, person.PrimaryImageTag, 'Primary', 200, 85) : '';
                   return (
                     <button
                       key={person.Id || person.Name}
                       onClick={() => onSearchPerson && onSearchPerson(person.Name)}
-                      className="flex flex-col items-center gap-1 w-14 flex-shrink-0 group"
+                      className="flex flex-col items-center gap-1 w-16 flex-shrink-0 group"
                       title={`搜索 ${person.Name} 的作品`}
                     >
-                      <div className="w-12 h-12 rounded-full overflow-hidden bg-black/60 border border-white/10 group-hover:border-cyan-400/60 transition">
+                      <div className="w-16 h-16 rounded-full overflow-hidden bg-black/60 border border-white/10 group-hover:border-cyan-400/60 transition">
                         {imgUrl ? (
                           <img src={imgUrl} alt={person.Name} className="w-full h-full object-cover" />
                         ) : (
-                          <div className="w-full h-full flex items-center justify-center text-gray-500"><Users size={16} /></div>
+                          <div className="w-full h-full flex items-center justify-center text-gray-500"><Users size={20} /></div>
                         )}
                       </div>
                       <span className="text-[10px] text-gray-300 truncate w-full text-center group-hover:text-cyan-300">{person.Name}</span>

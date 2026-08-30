@@ -32,6 +32,22 @@ const SUB_TABS = [
 // A-Z 字母索引（# 代表非字母开头）
 const LETTER_INDEXES = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', '#'];
 
+// 其他网格视图（继续观看 / NextUp / 历史 / 演员 / 类型 / 年份 / 合集）的默认每行列数
+const SECONDARY_GRID_DEFAULT_COLUMNS = {
+  genres: 6, persons: 5, years: 8, collections: 6, resume: 6, nextup: 6, history: 6
+};
+
+// 按标签页读取持久化的每行列数（1-12），无记录时使用默认值
+function getSecondaryGridColumns(tab) {
+  try {
+    const saved = parseInt(localStorage.getItem(`jf_library_grid_cols_${tab}`) || '', 10);
+    if (!isNaN(saved) && saved >= 1 && saved <= 12) return saved;
+  } catch {
+    // ignore storage errors
+  }
+  return SECONDARY_GRID_DEFAULT_COLUMNS[tab] || 6;
+}
+
 const STATUS_OPTIONS = [
   { id: 'all', label: '全部' },
   { id: 'unplayed', label: '👀 未播完' },
@@ -824,6 +840,28 @@ export default function LibraryView({
       localStorage.setItem('jf_library_grid_cols_poster', String(num));
     }
   };
+
+  const [secondaryGridColumns, setSecondaryGridColumnsState] = useState(() => getSecondaryGridColumns(activeSubTab));
+
+  useEffect(() => {
+    setSecondaryGridColumnsState(getSecondaryGridColumns(activeSubTab));
+  }, [activeSubTab]);
+
+  const handleSecondaryGridColumnsChange = (val) => {
+    const num = parseInt(val, 10);
+    if (isNaN(num) || num < 1 || num > 12) return;
+    setSecondaryGridColumnsState(num);
+    try {
+      localStorage.setItem(`jf_library_grid_cols_${activeSubTab}`, String(num));
+    } catch {
+      // ignore storage errors
+    }
+  };
+
+  // 当前子视图实际生效的每行列数与滑块可见性
+  const isMediaGridTab = activeSubTab === 'items' || activeSubTab === 'duplicates';
+  const effectiveGridColumns = isMediaGridTab ? gridColumns : secondaryGridColumns;
+  const showColumnsSlider = isMediaGridTab ? viewLayout !== 'list' : true;
   
   // Secondary metadata state
   const [genresList, setGenresList] = useState([]);
@@ -1389,7 +1427,7 @@ export default function LibraryView({
           </div>
         </div>
 
-        {/* Row 2: Secondary Sub-Tabs（移动端亦可见，横向滚动；列数/布局切换仅桌面） */}
+        {/* Row 2: Secondary Sub-Tabs + 视图布局切换（常驻可见，窄屏下标签区横向滚动） */}
         <div className="flex items-center justify-between gap-2 border-t border-white/5 pt-2 text-xs min-w-0">
           <div className="flex items-center gap-1 overflow-x-auto flex-1 min-w-0 no-scrollbar">
             {SUB_TABS.map(tab => {
@@ -1417,9 +1455,9 @@ export default function LibraryView({
             })}
           </div>
 
-          <div className="hidden md:flex items-center gap-2 flex-shrink-0">
-            {/* Poster Size / Columns Slider */}
-            {viewLayout !== 'list' && (
+          <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
+            {/* 每行列数滑块（当前网格视图，按标签页独立记忆） */}
+            {showColumnsSlider && (
               <div className="flex items-center gap-1.5 bg-black/50 px-2 py-1 rounded-xl border border-white/10 text-xs text-gray-300 flex-shrink-0">
                 <SlidersHorizontal size={12} className="text-cyan-400 flex-shrink-0" />
                 <input
@@ -1427,49 +1465,51 @@ export default function LibraryView({
                   min={1}
                   max={12}
                   step={1}
-                  value={gridColumns}
-                  onChange={(e) => handleGridColumnsChange(e.target.value)}
+                  value={effectiveGridColumns}
+                  onChange={(e) => isMediaGridTab ? handleGridColumnsChange(e.target.value) : handleSecondaryGridColumnsChange(e.target.value)}
                   className="w-14 sm:w-20 accent-cyan-400 h-1.5 bg-white/20 rounded-lg cursor-pointer appearance-none"
-                  title={`拖拽滑块调整每行海报大小与列数 (当前: ${gridColumns} 列)`}
+                  title={`拖拽滑块调整当前视图每行数量 (当前: ${effectiveGridColumns} 列)`}
                 />
                 <span className="text-[10px] font-mono text-cyan-300 font-bold min-w-[24px] text-right">
-                  {gridColumns}列
+                  {effectiveGridColumns}列
                 </span>
               </div>
             )}
 
-            {/* View Layout Switcher */}
-            <div className="flex items-center bg-black/50 p-0.5 rounded-xl border border-white/10 gap-0.5 flex-shrink-0">
-              <button
-                onClick={() => setViewLayout('poster')}
-                className={`p-1.5 rounded-lg transition ${
-                  viewLayout === 'poster' ? 'bg-slate-700 text-cyan-300 shadow' : 'text-gray-400 hover:text-white'
-                }`}
-                title="海报网格 (2:3)"
-              >
-                <LayoutGrid size={13} />
-              </button>
+            {/* 视图布局切换：海报 / 剧照缩略图 / 列表（影片/查重视图） */}
+            {['items', 'duplicates'].includes(activeSubTab) && (
+              <div className="flex items-center bg-black/50 p-0.5 rounded-xl border border-white/10 gap-0.5 flex-shrink-0">
+                <button
+                  onClick={() => setViewLayout('poster')}
+                  className={`p-1.5 rounded-lg transition ${
+                    viewLayout === 'poster' ? 'bg-slate-700 text-cyan-300 shadow' : 'text-gray-400 hover:text-white'
+                  }`}
+                  title="海报网格 (2:3)"
+                >
+                  <LayoutGrid size={13} />
+                </button>
 
-              <button
-                onClick={() => setViewLayout('backdrop')}
-                className={`p-1.5 rounded-lg transition ${
-                  viewLayout === 'backdrop' ? 'bg-slate-700 text-cyan-300 shadow' : 'text-gray-400 hover:text-white'
-                }`}
-                title="剧照网格 (16:9)"
-              >
-                <Grid size={13} />
-              </button>
+                <button
+                  onClick={() => setViewLayout('backdrop')}
+                  className={`p-1.5 rounded-lg transition ${
+                    viewLayout === 'backdrop' ? 'bg-slate-700 text-cyan-300 shadow' : 'text-gray-400 hover:text-white'
+                  }`}
+                  title="剧照缩略图网格 (16:9)"
+                >
+                  <Grid size={13} />
+                </button>
 
-              <button
-                onClick={() => setViewLayout('list')}
-                className={`p-1.5 rounded-lg transition ${
-                  viewLayout === 'list' ? 'bg-slate-700 text-cyan-300 shadow' : 'text-gray-400 hover:text-white'
-                }`}
-                title="列表视图"
-              >
-                <List size={13} />
-              </button>
-            </div>
+                <button
+                  onClick={() => setViewLayout('list')}
+                  className={`p-1.5 rounded-lg transition ${
+                    viewLayout === 'list' ? 'bg-slate-700 text-cyan-300 shadow' : 'text-gray-400 hover:text-white'
+                  }`}
+                  title="列表视图"
+                >
+                  <List size={13} />
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
@@ -1707,7 +1747,7 @@ export default function LibraryView({
 
         {/* SUB-VIEW 1: Genres */}
         {activeSubTab === 'genres' && (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2.5 sm:gap-3">
+          <div className="grid gap-2.5 sm:gap-3" style={{ gridTemplateColumns: `repeat(${effectiveGridColumns}, minmax(0, 1fr))` }}>
             {genresList.map(genre => (
               <div
                 key={genre.Id}
@@ -1727,11 +1767,11 @@ export default function LibraryView({
           </div>
         )}
 
-        {/* SUB-VIEW 2: Persons（仅演员，按出演数量排序） */}
+        {/* SUB-VIEW 2: Persons（仅演员，按出演数量排序，大图卡片） */}
         {activeSubTab === 'persons' && (
-          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-2.5 sm:gap-3.5">
+          <div className="grid gap-3 sm:gap-4" style={{ gridTemplateColumns: `repeat(${effectiveGridColumns}, minmax(0, 1fr))` }}>
             {personsDisplayList.map(person => {
-              const imgUrl = jellyfin.getImageUrl(person.Id, person.ImageTags?.Primary, 'Primary', 200, 80);
+              const imgUrl = jellyfin.getImageUrl(person.Id, person.ImageTags?.Primary, 'Primary', 400, 85);
               return (
                 <div
                   key={person.Id}
@@ -1739,24 +1779,26 @@ export default function LibraryView({
                     onSearchChange(person.Name);
                     setActiveSubTab('items');
                   }}
-                  className="group flex flex-col items-center bg-slate-900/40 p-2.5 rounded-2xl border border-white/5 hover:border-cyan-500/40 transition cursor-pointer"
+                  className="group flex flex-col bg-slate-900/50 rounded-2xl overflow-hidden border border-white/5 hover:border-cyan-500/40 hover:-translate-y-1 hover:shadow-xl hover:shadow-cyan-500/10 transition cursor-pointer"
                   title={`查看 ${person.Name} 的作品${person.count ? `（出演 ${person.count} 部）` : ''}`}
                 >
-                  <div className="relative w-16 h-16 sm:w-20 sm:h-20 rounded-full overflow-hidden bg-black/60 border border-white/10 mb-1.5 group-hover:scale-105 transition">
+                  <div className="relative aspect-square bg-black/60 overflow-hidden">
                     {imgUrl ? (
-                      <img src={imgUrl} alt={person.Name} className="w-full h-full object-cover" />
+                      <img src={imgUrl} alt={person.Name} className="w-full h-full object-cover group-hover:scale-105 transition" />
                     ) : (
-                      <div className="w-full h-full flex items-center justify-center text-gray-500"><Users size={20} /></div>
+                      <div className="w-full h-full flex items-center justify-center text-gray-600"><Users size={36} /></div>
                     )}
                     {person.count > 0 && (
-                      <div className="absolute bottom-0 inset-x-0 bg-black/75 text-[9px] font-mono text-cyan-300 text-center py-0.5">
+                      <div className="absolute bottom-1.5 right-1.5 px-2 py-0.5 rounded-full bg-black/80 backdrop-blur-md border border-cyan-500/40 text-[10px] font-mono font-bold text-cyan-300 shadow-lg">
                         {person.count} 部
                       </div>
                     )}
                   </div>
-                  <span className="text-[11px] sm:text-xs font-semibold text-white truncate max-w-full text-center group-hover:text-cyan-300">
-                    {person.Name}
-                  </span>
+                  <div className="p-2 sm:p-2.5 text-center">
+                    <span className="text-xs sm:text-sm font-semibold text-white truncate w-full block group-hover:text-cyan-300 transition">
+                      {person.Name}
+                    </span>
+                  </div>
                 </div>
               );
             })}
@@ -1765,7 +1807,7 @@ export default function LibraryView({
 
         {/* SUB-VIEW 3: Collections */}
         {activeSubTab === 'collections' && (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+          <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${effectiveGridColumns}, minmax(0, 1fr))` }}>
             {collectionsList.map(col => {
               const imgUrl = jellyfin.getImageUrl(col.Id, col.ImageTags?.Primary, 'Primary', 300, 80);
               return (
@@ -1802,7 +1844,7 @@ export default function LibraryView({
               <div className="text-sm">暂无年份数据</div>
             </div>
           ) : (
-            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-2.5 sm:gap-3">
+            <div className="grid gap-2.5 sm:gap-3" style={{ gridTemplateColumns: `repeat(${effectiveGridColumns}, minmax(0, 1fr))` }}>
               {yearsList.map(year => (
                 <div
                   key={year.Id}
@@ -1832,7 +1874,7 @@ export default function LibraryView({
               <div className="text-sm">暂未观看 / 没有看到一半的影片</div>
             </div>
           ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2.5 sm:gap-3.5">
+            <div className="grid gap-2.5 sm:gap-3.5" style={{ gridTemplateColumns: `repeat(${effectiveGridColumns}, minmax(0, 1fr))` }}>
               {resumeList.map(item => {
                 const resumePercent = item.UserData?.PlaybackPositionTicks && item.RunTimeTicks
                   ? Math.min(100, (item.UserData.PlaybackPositionTicks / item.RunTimeTicks) * 100)
@@ -1884,7 +1926,7 @@ export default function LibraryView({
               <div className="text-sm">暂无待看的下一集</div>
             </div>
           ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2.5 sm:gap-3.5">
+            <div className="grid gap-2.5 sm:gap-3.5" style={{ gridTemplateColumns: `repeat(${effectiveGridColumns}, minmax(0, 1fr))` }}>
               {nextUpList.map(item => {
                 const poster = jellyfin.getImageUrl(item.Id, item.ImageTags?.Primary, 'Primary', 360, 80);
                 const epLabel = `${item.ParentIndexNumber !== undefined && item.ParentIndexNumber !== null ? `S${String(item.ParentIndexNumber).padStart(2, '0')}` : ''}${item.IndexNumber !== undefined && item.IndexNumber !== null ? `E${String(item.IndexNumber).padStart(2, '0')}` : ''}`;
@@ -1925,7 +1967,7 @@ export default function LibraryView({
               <div className="text-sm">暂无观看历史</div>
             </div>
           ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2.5 sm:gap-3.5">
+            <div className="grid gap-2.5 sm:gap-3.5" style={{ gridTemplateColumns: `repeat(${effectiveGridColumns}, minmax(0, 1fr))` }}>
               {historyList.map(item => {
                 const lastPlayed = item.UserData?.LastPlayedDate
                   ? new Date(item.UserData.LastPlayedDate)

@@ -104,6 +104,10 @@ export function getTrickplayStyle(item, timeInSeconds) {
   if (!item || !jellyfin.auth.serverUrl) return null;
 
   const tp = getTrickplayInfo(item);
+  // 无 Trickplay 清单时不返回样式（组件回退显示"无 Trickplay 帧"提示），
+  // 避免拼出指向 404 的 URL 显示坏图
+  if (!tp.hasTrickplay) return null;
+
   const targetId = tp.id || item.Id;
   const time = Math.max(0, timeInSeconds || 0);
 

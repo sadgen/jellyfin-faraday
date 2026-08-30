@@ -67,33 +67,25 @@ export default function FloatingVideoWindow({
   const [currentPartIndex, setCurrentPartIndex] = useState(0);
   const currentPartId = partsList[currentPartIndex]?.Id || item?.Id;
 
-  // Media playback info (MediaSources, Container, Bitrate, SubtitleStreams) — 共享 hook
-  const { playbackData, setPlaybackData } = useMediaPlaybackInfo(item?.Id);
+  // Media playback info（音轨/字幕流来源）——跟随当前播放分段，
+  // 否则 Part 2+ 会沿用第一个切片的字幕/音轨信息
+  const { playbackData, setPlaybackData } = useMediaPlaybackInfo(currentPartId);
 
-  // Fetch multi-part items on mount or item change
+  // 非主条目的分段：拉取分段自身详情（含 Trickplay 清单），
+  // 否则进度条缩略图会沿用第一个切片的 trickplay，帧画面对应错误
+  const [partDetail, setPartDetail] = useState(null);
+
+  // Fetch multi-part items on mount or item change（分段列表随后在下方 effect 中构建）
   useEffect(() => {
-    if (!item?.Id) return;
-    jellyfin.getAdditionalParts(item.Id).then(additional => {
-      if (additional && additional.length > 0) {
-        setPartsList([
-          { Id: item.Id, Name: item.Name || 'Part 1' },
-          ...additional.map((part, idx) => ({
-            Id: part.Id,
-            Name: part.Name || `Part ${idx + 2}`,
-            RunTimeTicks: part.RunTimeTicks,
-            MediaSources: part.MediaSources,
-            MediaStreams: part.MediaStreams
-          }))
-        ]);
-      } else {
-        setPartsList([{ Id: item.Id, Name: item.Name || 'Part 1' }]);
-      }
-      setCurrentPartIndex(0);
-    }).catch(() => {
-      setPartsList([{ Id: item.Id, Name: item.Name || 'Part 1' }]);
-      setCurrentPartIndex(0);
-    });
-  }, [item?.Id, item?.Name]);
+    setPartDetail(null);
+    if (!currentPartId || currentPartId === item?.Id || !jellyfin.auth.isConfigured) return;
+    let cancelled = false;
+    jellyfin.queryMediaPage({ ids: currentPartId, limit: 1 }).then(data => {
+      const detail = data?.Items?.[0];
+      if (!cancelled && detail) setPartDetail(detail);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [currentPartId, item?.Id]);
 
   // Update layout when slotIndex changes (window promotion / shifting)
   useEffect(() => {
@@ -254,6 +246,31 @@ export default function FloatingVideoWindow({
   const volumeRef = useRef(volume);
   volumeRef.current = volume;
 
+  // Fetch multi-part items on mount or item change.
+  // 经 ref 读取 item：收藏/元数据更新会生成新 item 对象，若依赖整个对象，
+  // 会导致分段列表重取并跳回 Part 1。
+  useEffect(() => {
+    const currentItem = itemRef.current;
+    if (!currentItem?.Id) return;
+    jellyfin.getAdditionalParts(currentItem.Id).then(additional => {
+      if (additional && additional.length > 0) {
+        setPartsList([
+          { ...currentItem, Name: currentItem.Name || 'Part 1' },
+          ...additional.map((part, idx) => ({
+            ...part,
+            Name: part.Name || `Part ${idx + 2}`
+          }))
+        ]);
+      } else {
+        setPartsList([{ ...currentItem, Name: currentItem.Name || 'Part 1' }]);
+      }
+      setCurrentPartIndex(0);
+    }).catch(() => {
+      setPartsList([{ ...currentItem, Name: currentItem.Name || 'Part 1' }]);
+      setCurrentPartIndex(0);
+    });
+  }, [item?.Id]);
+
   // Cleanup timers on component unmount
   useEffect(() => {
     return () => {
@@ -263,6 +280,14 @@ export default function FloatingVideoWindow({
   }, []);
 
   const currentPlayingPart = partsList[currentPartIndex] || item;
+
+  // 进度条缩略图必须使用"当前播放分段"的条目数据：主条目用 item，
+  // 其他分段用拉取到的分段详情（分段详情到达前暂无 trickplay 帧，
+  // 避免错误沿用第一个切片的画面导致帧与时间对应错位）
+  const trickplayItem = useMemo(() => {
+    if (currentPartId === item?.Id) return item;
+    return partDetail || currentPlayingPart;
+  }, [currentPartId, item, partDetail, currentPlayingPart]);
 
   // Load and play video when item/part changes + Report Playback to Jellyfin
   useEffect(() => {
@@ -923,7 +948,7 @@ export default function FloatingVideoWindow({
       {/* Mobile Window-level Centered Trickplay Thumbnail (Adaptive Above / Below entire window) */}
       {isMobileViewport && (
         <TrickplayScrubberThumbnail
-          item={item}
+          item={trickplayItem}
           hoverTime={hoverScrubberTime}
           hoverPercent={hoverScrubberPercent}
           containerWidth={layout.width}
@@ -1237,10 +1262,10 @@ export default function FloatingVideoWindow({
         >
           {subtitleStreams.map(s => (
             <track
-              key={`${item.Id}-${s.Index}`}
+              key={`${currentPartId}-${s.Index}`}
               kind="subtitles"
               label={s.Title || s.Language || `Subtitle ${s.Index}`}
-              src={jellyfin.getSubtitleTrackUrl(item.Id, mediaSourceId, s.Index)}
+              src={jellyfin.getSubtitleTrackUrl(currentPartId, mediaSourceId, s.Index)}
               srcLang={s.Language || 'zh'}
               data-index={s.Index}
             />
@@ -1325,7 +1350,7 @@ export default function FloatingVideoWindow({
           {/* Desktop Scrubber-level Trickplay Thumbnail */}
           {!isMobileViewport && (
             <TrickplayScrubberThumbnail
-              item={item}
+              item={trickplayItem}
               hoverTime={hoverScrubberTime}
               hoverPercent={hoverScrubberPercent}
               containerWidth={scrubberWidth}

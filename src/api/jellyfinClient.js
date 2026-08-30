@@ -253,6 +253,7 @@ export class JellyfinClient {
     genre = '',
     year = '',
     nameStartsWithOrGreater = '',
+    ids = '',
     startIndex = 0,
     limit = 0
   } = {}) {
@@ -272,6 +273,10 @@ export class JellyfinClient {
 
     if (parentId && parentId !== 'all') {
       query.set('ParentId', parentId);
+    }
+
+    if (ids) {
+      query.set('Ids', ids);
     }
 
     if (searchTerm && searchTerm.trim()) {

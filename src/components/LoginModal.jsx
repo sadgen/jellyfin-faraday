@@ -1,18 +1,22 @@
 import { useState } from 'react';
 import { jellyfin } from '../api/jellyfinClient';
-import { Server, Lock, User, Users, Key, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
+import { getSavedAccounts } from '../utils/accountStore';
+import { Server, Lock, User, Users, Key, CheckCircle2, AlertCircle, Loader2, ArrowLeftRight } from 'lucide-react';
 
-export default function LoginModal({ isOpen, onClose, onLoginSuccess }) {
+export default function LoginModal({ isOpen, onClose, onLoginSuccess, onQuickLogin }) {
   const [serverUrl, setServerUrl] = useState(jellyfin.auth.serverUrl || '');
   const [authMode, setAuthMode] = useState('password'); // 'password' | 'apikey'
   const [username, setUsername] = useState(jellyfin.auth.username || '');
   const [password, setPassword] = useState('');
   const [apiKey, setApiKey] = useState(jellyfin.auth.token || '');
   const [rememberMe, setRememberMe] = useState(true);
-  
+
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
+
+  // 已保存账号（P14 多账号）：一键登录
+  const [savedAccounts] = useState(() => (isOpen ? getSavedAccounts() : []));
 
   // API Key 多用户选择状态（audit #20）：
   // /Users 返回多个账号时先展示选择列表，点选后才完成登录
@@ -108,6 +112,31 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }) {
             <p className="text-xs text-gray-400">输入服务器信息与凭据以启动随机播放看板</p>
           </div>
         </div>
+
+        {/* Saved accounts quick login (P14 多账号) */}
+        {savedAccounts.length > 0 && (
+          <div className="flex flex-col gap-2 text-xs">
+            <div className="flex items-center gap-2 text-gray-400 font-medium">
+              <Users size={14} className="text-cyan-400" />
+              <span>已保存的账号（点击直接登录）</span>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {savedAccounts.map(acc => (
+                <button
+                  key={`${acc.serverUrl}-${acc.userId}`}
+                  type="button"
+                  onClick={() => onQuickLogin && onQuickLogin(acc)}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-black/40 hover:bg-cyan-500/10 border border-white/10 hover:border-cyan-400/50 text-gray-200 hover:text-cyan-300 transition"
+                  title={acc.serverUrl}
+                >
+                  <ArrowLeftRight size={11} className="text-cyan-400" />
+                  <span className="font-bold">{acc.username}</span>
+                </button>
+              ))}
+            </div>
+            <div className="h-px bg-white/5" />
+          </div>
+        )}
 
         {/* Tab Switcher */}
         <div className="flex bg-black/40 p-1 rounded-xl border border-white/5 text-xs">

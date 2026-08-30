@@ -1,14 +1,15 @@
-import { Film, Play, Search, Settings } from 'lucide-react';
+import { Film, Play, Search, Settings, BarChart3 } from 'lucide-react';
 
 export default function MobileNavBar({
   onOpenRandomPlay,
   onOpenRandom2Windows,
   onOpenRandom3Windows,
   onOpenSearch,
-  onOpenSettings
+  onOpenSettings,
+  onOpenStats
 }) {
   return (
-    <div className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-slate-950/95 backdrop-blur-lg border-t border-white/10 px-3 py-1 pb-[max(0.5rem,env(safe-area-inset-bottom))] flex items-center justify-around text-[10px] text-gray-400 select-none shadow-2xl">
+    <div className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-slate-950/95 backdrop-blur-lg border-t border-white/10 px-2 py-1 pb-[max(0.5rem,env(safe-area-inset-bottom))] flex items-center justify-around text-[10px] text-gray-400 select-none shadow-2xl">
       {/* Tab 1: Library */}
       <button
         onClick={() => {
@@ -51,7 +52,17 @@ export default function MobileNavBar({
         <span>搜索</span>
       </button>
 
-      {/* Tab 5: Settings */}
+      {/* Tab 5: Watch Stats */}
+      <button
+        onClick={onOpenStats}
+        className="flex flex-col items-center gap-0.5 p-1 text-violet-400 hover:text-violet-300 active:scale-95 transition"
+        title="观影统计"
+      >
+        <BarChart3 size={17} />
+        <span>统计</span>
+      </button>
+
+      {/* Tab 6: Settings */}
       <button
         onClick={onOpenSettings}
         className="flex flex-col items-center gap-0.5 p-1 hover:text-white active:scale-95 transition"

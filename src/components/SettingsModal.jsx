@@ -1,8 +1,12 @@
 import { useState } from 'react';
 import { jellyfin } from '../api/jellyfinClient';
 import { clearLibraryCache } from '../utils/mediaCache';
+import { getSavedAccounts, removeAccount } from '../utils/accountStore';
 import { SEEK_SPEED_OPTIONS, getStoredSeekSpeed, setStoredSeekSpeed } from '../utils/seekSettings';
-import { Settings, Server, User, LogOut, RefreshCw, ShieldCheck, X, HardDrive, Clock, FastForward } from 'lucide-react';
+import {
+  Settings, Server, User, LogOut, RefreshCw, ShieldCheck, X, HardDrive, Clock,
+  FastForward, Users as UsersIcon, ArrowLeftRight, Trash2, BarChart3, Check
+} from 'lucide-react';
 
 export default function SettingsModal({
   isOpen,
@@ -11,9 +15,12 @@ export default function SettingsModal({
   onRefreshLibrary,
   isRefreshing,
   totalItemsCount,
-  lastSyncTime
+  lastSyncTime,
+  onOpenStats,
+  onSwitchAccount
 }) {
   const [seekSpeed, setSeekSpeed] = useState(() => getStoredSeekSpeed());
+  const [accounts, setAccounts] = useState(() => getSavedAccounts());
 
   if (!isOpen) return null;
 
@@ -23,10 +30,17 @@ export default function SettingsModal({
     return `${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
   };
 
+  const isCurrentAccount = (acc) =>
+    acc.serverUrl === jellyfin.auth.serverUrl && acc.userId === jellyfin.auth.userId;
+
+  const handleRemoveAccount = (acc) => {
+    setAccounts(removeAccount(acc.serverUrl, acc.userId));
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in duration-200">
-      <div 
-        className="w-full max-w-md glass-panel rounded-2xl shadow-2xl p-6 border border-white/10 flex flex-col gap-5 text-gray-200"
+      <div
+        className="w-full max-w-md max-h-[92vh] overflow-y-auto glass-panel rounded-2xl shadow-2xl p-6 border border-white/10 flex flex-col gap-5 text-gray-200"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -51,7 +65,7 @@ export default function SettingsModal({
         {/* Current Connection Info */}
         <div className="bg-black/40 rounded-xl p-4 border border-white/5 flex flex-col gap-2.5 text-xs">
           <div className="text-gray-400 font-medium mb-1">当前连接与磁盘缓存</div>
-          
+
           <div className="flex items-center justify-between">
             <span className="text-gray-400 flex items-center gap-1.5">
               <Server size={13} className="text-cyan-400" />
@@ -93,7 +107,80 @@ export default function SettingsModal({
               </span>
             </div>
           )}
+
+          {/* 观影统计入口 */}
+          {onOpenStats && (
+            <button
+              onClick={() => { onOpenStats(); onClose(); }}
+              className="mt-1 w-full px-4 py-2.5 rounded-xl bg-violet-500/15 hover:bg-violet-500/25 border border-violet-500/30 text-xs text-violet-300 font-medium flex items-center justify-center gap-2 transition"
+            >
+              <BarChart3 size={14} />
+              <span>查看观影统计（今日已看 / 总时长 / 类型偏好）</span>
+            </button>
+          )}
         </div>
+
+        {/* 多账号管理（P14） */}
+        {accounts.length > 0 && (
+          <div className="bg-black/40 rounded-xl p-4 border border-white/5 flex flex-col gap-2.5 text-xs">
+            <div className="flex items-center gap-1.5 text-gray-400 font-medium">
+              <UsersIcon size={13} className="text-cyan-400" />
+              <span>已保存账号（一键切换）</span>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              {accounts.map(acc => {
+                const isCurrent = isCurrentAccount(acc);
+                return (
+                  <div
+                    key={`${acc.serverUrl}-${acc.userId}`}
+                    className={`flex items-center justify-between gap-2 p-2 rounded-xl border transition ${
+                      isCurrent
+                        ? 'bg-cyan-500/10 border-cyan-400/40'
+                        : 'bg-black/40 border-white/5 hover:border-cyan-500/30'
+                    }`}
+                  >
+                    <div className="flex flex-col min-w-0">
+                      <span className="font-bold text-white truncate flex items-center gap-1.5">
+                        {acc.username}
+                        {isCurrent && (
+                          <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-cyan-500/20 border border-cyan-400/40 text-[9px] text-cyan-300 font-bold">
+                            <Check size={9} />
+                            当前
+                          </span>
+                        )}
+                      </span>
+                      <span className="text-[10px] text-gray-500 font-mono truncate" title={acc.serverUrl}>
+                        {acc.serverUrl}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                      {!isCurrent && onSwitchAccount && (
+                        <button
+                          onClick={() => onSwitchAccount(acc)}
+                          className="px-2.5 py-1 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/40 text-cyan-300 font-bold flex items-center gap-1 transition"
+                          title="切换到此账号（媒体缓存按账号隔离，切换后自动加载其库）"
+                        >
+                          <ArrowLeftRight size={12} />
+                          <span>切换</span>
+                        </button>
+                      )}
+                      <button
+                        onClick={() => handleRemoveAccount(acc)}
+                        className="p-1.5 rounded-lg hover:bg-red-500/20 text-gray-500 hover:text-red-400 transition"
+                        title="从此浏览器的保存列表中移除（不影响服务器）"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="text-[10px] text-gray-500">
+              登录成功的账号会自动保存于此；媒体库缓存按「服务器 + 用户」物理隔离，切换后无需重新同步。
+            </div>
+          </div>
+        )}
 
         {/* Seek Speed Tier Setting (慢 5s / 中 15s / 快 30s) */}
         <div className="bg-black/40 rounded-xl p-4 border border-white/5 flex flex-col gap-2.5 text-xs">
@@ -122,12 +209,12 @@ export default function SettingsModal({
                 }`}
               >
                 <span className="text-xs font-bold">{opt.label.split(' ')[0]}</span>
-                <span className="text-[10px] font-mono opacity-80">{opt.seconds}秒 / 步</span>
+                <span className="text-[10px] font-mono opacity-80">{opt.stepSeconds}秒 / 步</span>
               </button>
             ))}
           </div>
           <div className="text-[10px] text-gray-500">
-            影响电脑版滚轮寻轨步长、手机版滑动手势跨度与播放窗口快进快退。
+            影响电脑版滚轮寻轨步长、手机版滑动手势跨度、键盘 ←/→ 快进快退与播放窗口快进快退。
           </div>
         </div>
 

@@ -1,6 +1,6 @@
 /**
  * Jellyfin Trickplay Engine & Parser
- * Supports both modern Jellyfin 10.9+ Trickplay Manifests and legacy BIF/sprite sheets.
+ * Supports Jellyfin 10.9+ Trickplay Manifests (sprite sheets).
  */
 
 import { jellyfin } from '../api/jellyfinClient';

@@ -44,7 +44,9 @@ export function detectVrVideo(item, videoElement = null) {
     }
   }
 
-  const isVr = hasVrTag || isExplicitVrKeyword || (isVrDimension && isExplicitVrKeyword);
+  // 1:1（≥1920px）与 2:1（≥4000px）本身就是强 VR 特征，无需再叠加关键词条件，
+  // 否则无关键词的方形 VR 视频永远不会自动进入 VR 模式（原实现该分支为死代码）
+  const isVr = hasVrTag || isExplicitVrKeyword || isVrDimension;
 
   if (!isVr) {
     return { isVr: false, mode: '180_3d_sbs', confidence: 0 };

@@ -33,4 +33,13 @@ describe('mediaSorter sorting utilities', () => {
     const desc = sortMediaItems(items, 'playcount_desc');
     expect(desc.map(i => i.Id)).toEqual(['2', '1', '3']);
   });
+
+  it('shuffles items for random sort while preserving the multiset', () => {
+    const many = Array.from({ length: 60 }, (_, i) => ({ Id: String(i), Name: `V${i}` }));
+    const shuffled = sortMediaItems(many, 'random');
+    expect(shuffled.map(i => i.Id).sort((a, b) => Number(a) - Number(b)))
+      .toEqual(many.map(i => i.Id));
+    // 不修改原数组
+    expect(many[0].Id).toBe('0');
+  });
 });

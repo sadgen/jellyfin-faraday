@@ -834,6 +834,35 @@ export default function LibraryView({
   const [nextUpList, setNextUpList] = useState([]);
   const [historyList, setHistoryList] = useState([]);
 
+  // 演职员：从本地缓存聚合"只统计演员"（/Persons 接口会混入导演/编剧等幕后人员）。
+  // 依据条目 People 中的 Type 过滤（Actor / GuestStar / 无 Type 视为演员），按出演数量排序。
+  const localActorList = useMemo(() => {
+    if (!items || items.length === 0) return [];
+    const hasPeopleData = items.some(it => Array.isArray(it.People));
+    if (!hasPeopleData) return [];
+    const map = new Map();
+    items.forEach(it => {
+      (it.People || []).forEach(p => {
+        if (!p?.Id || !p?.Name) return;
+        if (p.Type && !['Actor', 'GuestStar'].includes(p.Type)) return;
+        const entry = map.get(p.Id) || {
+          Id: p.Id,
+          Name: p.Name,
+          ImageTags: { Primary: p.PrimaryImageTag || undefined },
+          count: 0
+        };
+        entry.count += 1;
+        map.set(p.Id, entry);
+      });
+    });
+    return Array.from(map.values())
+      .sort((a, b) => b.count - a.count || a.Name.localeCompare(b.Name, 'zh-CN'))
+      .slice(0, 300);
+  }, [items]);
+
+  // 优先使用本地演员聚合；缓存尚无 People 数据时回退服务器 /Persons
+  const personsDisplayList = localActorList.length > 0 ? localActorList : personsList;
+
   // Progressive Lazy Loading (80 initial + 60 on scroll)
   const [visibleCount, setVisibleCount] = useState(80);
 
@@ -1698,10 +1727,10 @@ export default function LibraryView({
           </div>
         )}
 
-        {/* SUB-VIEW 2: Persons */}
+        {/* SUB-VIEW 2: Persons（仅演员，按出演数量排序） */}
         {activeSubTab === 'persons' && (
           <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-2.5 sm:gap-3.5">
-            {personsList.map(person => {
+            {personsDisplayList.map(person => {
               const imgUrl = jellyfin.getImageUrl(person.Id, person.ImageTags?.Primary, 'Primary', 200, 80);
               return (
                 <div
@@ -1711,12 +1740,18 @@ export default function LibraryView({
                     setActiveSubTab('items');
                   }}
                   className="group flex flex-col items-center bg-slate-900/40 p-2.5 rounded-2xl border border-white/5 hover:border-cyan-500/40 transition cursor-pointer"
+                  title={`查看 ${person.Name} 的作品${person.count ? `（出演 ${person.count} 部）` : ''}`}
                 >
-                  <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full overflow-hidden bg-black/60 border border-white/10 mb-1.5 group-hover:scale-105 transition">
+                  <div className="relative w-16 h-16 sm:w-20 sm:h-20 rounded-full overflow-hidden bg-black/60 border border-white/10 mb-1.5 group-hover:scale-105 transition">
                     {imgUrl ? (
                       <img src={imgUrl} alt={person.Name} className="w-full h-full object-cover" />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center text-gray-500"><Users size={20} /></div>
+                    )}
+                    {person.count > 0 && (
+                      <div className="absolute bottom-0 inset-x-0 bg-black/75 text-[9px] font-mono text-cyan-300 text-center py-0.5">
+                        {person.count} 部
+                      </div>
                     )}
                   </div>
                   <span className="text-[11px] sm:text-xs font-semibold text-white truncate max-w-full text-center group-hover:text-cyan-300">
@@ -1882,7 +1917,7 @@ export default function LibraryView({
           )
         )}
 
-        {/* SUB-VIEW 3.8: 观看历史 */}
+        {/* SUB-VIEW 3.8: 观看历史（海报模式，按最后播放时间排序） */}
         {activeSubTab === 'history' && (
           historyList.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-gray-500 gap-3 py-20">
@@ -1890,41 +1925,64 @@ export default function LibraryView({
               <div className="text-sm">暂无观看历史</div>
             </div>
           ) : (
-            <div className="flex flex-col gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2.5 sm:gap-3.5">
               {historyList.map(item => {
                 const lastPlayed = item.UserData?.LastPlayedDate
                   ? new Date(item.UserData.LastPlayedDate)
                   : null;
-                const poster = jellyfin.getImageUrl(item.Id, item.ImageTags?.Primary, 'Primary', 150, 80);
+                const poster = jellyfin.getImageUrl(item.Id, item.ImageTags?.Primary, 'Primary', 360, 80);
                 const epLabel = `${item.ParentIndexNumber !== undefined && item.ParentIndexNumber !== null ? `S${String(item.ParentIndexNumber).padStart(2, '0')}` : ''}${item.IndexNumber !== undefined && item.IndexNumber !== null ? `E${String(item.IndexNumber).padStart(2, '0')}` : ''}`;
+                const playedText = lastPlayed
+                  ? `${lastPlayed.toLocaleDateString()} ${lastPlayed.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+                  : '';
+                const isToday = lastPlayed ? new Date().toDateString() === lastPlayed.toDateString() : false;
                 return (
                   <div
                     key={`${item.Id}-${item.UserData?.LastPlayedDate || ''}`}
                     onClick={() => onPlayModal && onPlayModal(item)}
-                    className="group flex items-center justify-between p-2.5 px-3 rounded-xl bg-slate-900/40 hover:bg-slate-800/80 border border-white/5 hover:border-cyan-500/40 transition cursor-pointer text-xs"
+                    className="group cursor-pointer rounded-xl overflow-hidden bg-slate-900/50 border border-white/5 hover:border-cyan-500/40 hover:-translate-y-1 transition"
+                    title={`播放 ${item.SeriesName && epLabel ? `${item.SeriesName} ${epLabel} · ${item.Name}` : item.Name}`}
                   >
-                    <div className="flex items-center gap-3 min-w-0 flex-1 pr-2">
-                      <div className="relative w-8 h-12 sm:w-9 sm:h-[52px] rounded-lg overflow-hidden bg-black/60 border border-white/10 flex-shrink-0">
-                        {poster ? (
-                          <img src={poster} alt={item.Name} className="w-full h-full object-cover" />
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center text-gray-600"><Film size={14} /></div>
+                    <div className="relative aspect-[2/3] bg-black overflow-hidden">
+                      {poster ? (
+                        <img src={poster} alt={item.Name} className="w-full h-full object-cover group-hover:scale-105 transition" />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-gray-600"><Film size={28} /></div>
+                      )}
+                      {epLabel && (
+                        <div className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded bg-black/75 border border-cyan-500/40 text-cyan-300 text-[9px] font-mono font-black">
+                          {epLabel}
+                        </div>
+                      )}
+                      {/* 悬停播放遮罩 + 最后播放时间 */}
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition flex flex-col items-center justify-center gap-1.5">
+                        <div className="w-10 h-10 rounded-full bg-cyan-500/90 flex items-center justify-center text-white shadow-xl">
+                          <Play size={18} className="ml-0.5 fill-white" />
+                        </div>
+                        {playedText && (
+                          <div className="px-2 py-0.5 rounded-full bg-black/85 border border-white/20 text-[9px] font-mono text-cyan-200">
+                            {playedText}
+                          </div>
                         )}
-                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center">
-                          <Play size={16} className="fill-white text-white" />
-                        </div>
                       </div>
-                      <div className="flex flex-col min-w-0">
-                        <div className="font-semibold text-white truncate group-hover:text-cyan-300">
-                          {item.SeriesName && epLabel ? `${item.SeriesName} ${epLabel} · ${item.Name}` : item.Name}
+                      {/* 观看次数角标 */}
+                      {(item.UserData?.PlayCount || 0) > 1 && (
+                        <div className="absolute top-1.5 right-1.5 px-1.5 py-0.5 rounded bg-black/70 border border-white/10 text-[9px] font-mono text-amber-300">
+                          {item.UserData.PlayCount}次
                         </div>
-                        <div className="text-[11px] text-gray-400 flex items-center gap-2 mt-0.5">
-                          {item.ProductionYear && <span>{item.ProductionYear}</span>}
-                          <span className="font-mono text-cyan-300">
-                            {lastPlayed ? `${lastPlayed.toLocaleDateString()} ${lastPlayed.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}
-                          </span>
-                          {(item.UserData?.PlayCount || 0) > 0 && <span className="font-mono">看过 {item.UserData.PlayCount} 次</span>}
-                        </div>
+                      )}
+                    </div>
+                    <div className="p-2">
+                      <div className="text-xs font-semibold text-white truncate group-hover:text-cyan-300">
+                        {item.SeriesName && epLabel ? item.Name : item.Name}
+                      </div>
+                      <div className="text-[10px] text-gray-400 flex items-center gap-1 mt-0.5">
+                        {isToday ? (
+                          <span className="text-cyan-300 font-bold">今天看过</span>
+                        ) : (
+                          <span className="font-mono">{lastPlayed ? lastPlayed.toLocaleDateString() : ''}</span>
+                        )}
+                        {item.SeriesName && <span className="truncate text-amber-300/80">· {item.SeriesName}</span>}
                       </div>
                     </div>
                   </div>

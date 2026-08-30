@@ -261,7 +261,7 @@ export class JellyfinClient {
     const query = new URLSearchParams({
       IncludeItemTypes: 'Movie,Video,Episode',
       Recursive: 'true',
-      Fields: 'PrimaryImageAspectRatio,UserData,CommunityRating,DateCreated,RunTimeTicks,ProductionYear,OfficialRating,ParentId,ImageTags,Trickplay,Genres,Overview',
+      Fields: 'PrimaryImageAspectRatio,UserData,CommunityRating,DateCreated,RunTimeTicks,ProductionYear,OfficialRating,ParentId,ImageTags,Trickplay,Genres,Overview,People',
       EnableImages: 'true',
       StartIndex: startIndex.toString()
     });

@@ -123,7 +123,10 @@ export default function ItemDetailModal({
   const posterUrl = current?.ImageTags?.Primary
     ? jellyfin.getImageUrl(current.Id, current.ImageTags.Primary, 'Primary', 400, 85)
     : null;
-  const cast = (current?.People || []).filter(p => p.Type === 'Actor' || !p.Type).slice(0, 8);
+  const cast = (current?.People || [])
+    // 只保留演员（Actor / GuestStar；无 Type 的条目按演员兜底），过滤导演/编剧等幕后人员
+    .filter(p => !p.Type || ['Actor', 'GuestStar'].includes(p.Type))
+    .slice(0, 8);
   const videoStream = (current?.MediaStreams || []).find(s => s.Type === 'Video');
   const audioStreams = (current?.MediaStreams || []).filter(s => s.Type === 'Audio');
   const subtitleCount = (current?.MediaStreams || []).filter(s => s.Type === 'Subtitle').length;
@@ -302,12 +305,12 @@ export default function ItemDetailModal({
             </div>
           )}
 
-          {/* Cast */}
+          {/* Cast（仅演员） */}
           {cast.length > 0 && (
             <div className="flex flex-col gap-2">
               <div className="flex items-center gap-1.5 text-gray-400 font-bold">
                 <Users size={13} className="text-cyan-400" />
-                <span>演职员</span>
+                <span>演员</span>
               </div>
               <div className="flex gap-2.5 overflow-x-auto pb-1 no-scrollbar">
                 {cast.map(person => {
@@ -327,6 +330,9 @@ export default function ItemDetailModal({
                         )}
                       </div>
                       <span className="text-[10px] text-gray-300 truncate w-full text-center group-hover:text-cyan-300">{person.Name}</span>
+                      {person.Role && (
+                        <span className="text-[9px] text-gray-500 truncate w-full text-center" title={person.Role}>{person.Role}</span>
+                      )}
                     </button>
                   );
                 })}

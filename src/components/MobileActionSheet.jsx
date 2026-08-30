@@ -1,9 +1,9 @@
 import { jellyfin } from '../api/jellyfinClient';
 import { useExternalPlayer } from '../hooks/useExternalPlayer';
-import { 
-  Play, Star, Eye, EyeOff, Edit3, Sparkles, 
+import {
+  Play, Star, Eye, EyeOff, Edit3, Sparkles,
   Trash2, RefreshCw, ExternalLink, X, Film,
-  Glasses, Tv
+  Glasses, Tv, Info
 } from 'lucide-react';
 
 export default function MobileActionSheet({
@@ -13,6 +13,7 @@ export default function MobileActionSheet({
   onPlay,
   onPlayVr,
   onOpenFloating,
+  onOpenDetail,
   onToggleFavorite,
   onTogglePlayed,
   onOpenMetadataEditor,
@@ -91,6 +92,17 @@ export default function MobileActionSheet({
             >
               <Tv size={15} />
               <span>开启悬浮播放窗 (3 窗模式)</span>
+            </button>
+          )}
+
+          {/* Detail / Similar */}
+          {onOpenDetail && (
+            <button
+              onClick={() => { onOpenDetail(item); onClose(); }}
+              className="p-3 rounded-xl bg-black/40 border border-white/5 text-gray-300 flex items-center gap-2.5"
+            >
+              <Info size={15} />
+              <span>详情 / 相似推荐</span>
             </button>
           )}
 

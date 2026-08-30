@@ -2,28 +2,35 @@ import { useState, useMemo, useEffect, useRef, useCallback, memo } from 'react';
 import { jellyfin } from '../api/jellyfinClient';
 import { getTrickplayStyle } from '../utils/trickplay';
 import { detectDuplicateMedia } from '../utils/duplicateChecker';
-import { useExternalPlayer } from '../hooks/useExternalPlayer';
+import { useViewport } from '../hooks/useViewport';
 import { getPlaybackDefaults, setPlaybackDefaults, QUALITY_OPTIONS, SPEED_PRESETS } from '../utils/playbackDefaults';
 import { SEEK_SPEED_OPTIONS, getStoredSeekSpeed, setStoredSeekSpeed } from '../utils/seekSettings';
 import MobileActionSheet from './MobileActionSheet';
 import DeleteConfirmModal from './DeleteConfirmModal';
-import { 
-  Play, Star, Eye, Search, 
-  Edit3, Sparkles, Trash2, Folder, Film, 
+import CardContextMenu from './CardContextMenu';
+import {
+  Play, Star, Eye, Search,
+  Trash2, Folder, Film,
   ArrowUpDown, X, RefreshCw, Layers, LayoutGrid,
-  Grid, List, MoreVertical, ExternalLink, Calendar,
-  Users, Tag, Check, ChevronRight, Tv, Glasses,
-  SlidersHorizontal
+  Grid, List, MoreVertical, Calendar,
+  Users, Tag, Check, ChevronRight,
+  SlidersHorizontal, Info, RotateCcw, History, Zap
 } from 'lucide-react';
 
 const SUB_TABS = [
   { id: 'items', label: '影片', icon: Film },
+  { id: 'resume', label: '继续观看', icon: RotateCcw },
+  { id: 'nextup', label: 'NextUp', icon: Zap },
+  { id: 'history', label: '历史', icon: History },
   { id: 'genres', label: '类型', icon: Tag },
   { id: 'persons', label: '演职员', icon: Users },
   { id: 'years', label: '年份', icon: Calendar },
   { id: 'collections', label: '合集', icon: Layers },
   { id: 'duplicates', label: '查重清理', icon: Layers }
 ];
+
+// A-Z 字母索引（# 代表非字母开头）
+const LETTER_INDEXES = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', '#'];
 
 const STATUS_OPTIONS = [
   { id: 'all', label: '全部' },
@@ -66,12 +73,14 @@ const MediaCard = memo(function MediaCard({
   viewLayout = 'poster',
   isSelected = false,
   isSelecting = false,
+  isMobileViewport = false,
   onToggleSelect,
   onPlay,
   onPlayModal,
   onPlayVr,
   onToggleFavorite,
   onTogglePlayed,
+  onOpenDetail,
   onOpenMetadataEditor,
   onOpenIdentify,
   onRefreshMetadata,
@@ -79,11 +88,10 @@ const MediaCard = memo(function MediaCard({
   onOpenActionSheet
 }) {
   const [isHovered, setIsHovered] = useState(false);
-  const [showContextMenu, setShowContextMenu] = useState(false);
+  const [menuAnchor, setMenuAnchor] = useState(null);
   const [trickplayTime, setTrickplayTime] = useState(null);
   const [hoverPercent, setHoverPercent] = useState(0);
   const [isNearTop, setIsNearTop] = useState(false);
-  const { launchPlayer } = useExternalPlayer();
 
   const isBackdrop = viewLayout === 'backdrop';
   const posterUrl = isBackdrop 
@@ -209,9 +217,11 @@ const MediaCard = memo(function MediaCard({
       rafIdRef.current = null;
     }
     setIsHovered(false);
-    setShowContextMenu(false);
     setTrickplayTime(null);
     setHoverPercent(0);
+    // 注意：不在这里关闭 Portal 菜单（menuAnchor）——菜单渲染在 body 上，
+    // 鼠标移出卡片进入菜单会触发本回调，若在此关闭则菜单无法点击。
+    // 菜单的关闭由 CardContextMenu 的外部点击 / Esc / 滚动 / 选中项处理。
   }, []);
 
   const tpStyle = useMemo(() => {
@@ -389,26 +399,56 @@ const MediaCard = memo(function MediaCard({
 
         {/* Hover Action Buttons */}
         <div className="absolute inset-x-2 bottom-2 z-30 flex items-center justify-between opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-          <button
-            onClick={(e) => { e.stopPropagation(); onToggleFavorite(item); }}
-            className={`p-1.5 rounded-lg backdrop-blur-md border transition ${
-              isFavorite 
-                ? 'bg-amber-500/30 border-amber-500/50 text-amber-400' 
-                : 'bg-black/70 border-white/10 text-gray-300 hover:text-amber-400'
-            }`}
-            title={isFavorite ? '取消收藏' : '加入最爱'}
-          >
-            <Star size={14} className={isFavorite ? 'fill-amber-400' : ''} />
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={(e) => { e.stopPropagation(); onToggleFavorite(item); }}
+              className={`p-1.5 rounded-lg backdrop-blur-md border transition ${
+                isFavorite
+                  ? 'bg-amber-500/30 border-amber-500/50 text-amber-400'
+                  : 'bg-black/70 border-white/10 text-gray-300 hover:text-amber-400'
+              }`}
+              title={isFavorite ? '取消收藏' : '加入最爱'}
+            >
+              <Star size={14} className={isFavorite ? 'fill-amber-400' : ''} />
+            </button>
+
+            {/* 查看详情 / 相似推荐 */}
+            {onOpenDetail && (
+              <button
+                onClick={(e) => { e.stopPropagation(); onOpenDetail(item); }}
+                className="p-1.5 rounded-lg bg-black/70 hover:bg-black/90 border border-white/10 text-gray-300 hover:text-cyan-300 backdrop-blur-md transition"
+                title="查看详情 / 相似推荐"
+              >
+                <Info size={14} />
+              </button>
+            )}
+
+            {/* 刷新元数据（一键直达） */}
+            {onRefreshMetadata && (
+              <button
+                onClick={(e) => { e.stopPropagation(); onRefreshMetadata(item); }}
+                className="p-1.5 rounded-lg bg-black/70 hover:bg-black/90 border border-white/10 text-gray-300 hover:text-cyan-300 backdrop-blur-md transition"
+                title="刷新媒体信息"
+              >
+                <RefreshCw size={14} />
+              </button>
+            )}
+          </div>
 
           <div className="relative">
             <button
+              data-contextmenu-trigger
               onClick={(e) => {
                 e.stopPropagation();
-                if (window.innerWidth < 768 && onOpenActionSheet) {
+                if (menuAnchor) {
+                  setMenuAnchor(null); // 再次点击触发按钮 = 关闭菜单
+                  return;
+                }
+                if (isMobileViewport && onOpenActionSheet) {
                   onOpenActionSheet(item);
                 } else {
-                  setShowContextMenu(!showContextMenu);
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  setMenuAnchor({ left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom });
                 }
               }}
               className="p-1.5 rounded-lg bg-black/70 hover:bg-black/90 border border-white/10 text-gray-300 hover:text-white backdrop-blur-md transition"
@@ -416,100 +456,23 @@ const MediaCard = memo(function MediaCard({
             >
               <MoreVertical size={14} />
             </button>
-
-            {/* Desktop Context Menu */}
-            {showContextMenu && (
-              <div 
-                className="hidden md:block absolute right-0 bottom-8 w-44 glass-panel rounded-xl shadow-2xl py-1 z-50 text-xs text-gray-200 divide-y divide-white/5 animate-in fade-in zoom-in-95 duration-150"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div className="py-1">
-                  <button 
-                    onClick={() => { onPlay(item); setShowContextMenu(false); }}
-                    className="w-full px-3 py-1.5 text-left hover:bg-white/10 flex items-center gap-2 text-cyan-300 font-medium"
-                  >
-                    <Tv size={13} />
-                    <span>悬浮窗播放 (3窗)</span>
-                  </button>
-
-                  <button 
-                    onClick={() => { if (onPlayModal) onPlayModal(item); setShowContextMenu(false); }}
-                    className="w-full px-3 py-1.5 text-left hover:bg-white/10 flex items-center gap-2 text-gray-300"
-                  >
-                    <Play size={13} />
-                    <span>影院全屏模式</span>
-                  </button>
-
-                  <button 
-                    onClick={() => { if (onPlayVr) onPlayVr(item); setShowContextMenu(false); }}
-                    className="w-full px-3 py-1.5 text-left hover:bg-white/10 flex items-center gap-2 text-amber-300 font-medium"
-                  >
-                    <Glasses size={13} />
-                    <span>🥽 VR 全景播放</span>
-                  </button>
-
-                  <button 
-                    onClick={() => { launchPlayer('mpv', item); setShowContextMenu(false); }}
-                    className="w-full px-3 py-1.5 text-left hover:bg-white/10 flex items-center justify-between text-gray-300"
-                  >
-                    <span className="flex items-center gap-2"><ExternalLink size={12} /> MPV 播放器</span>
-                    <span className="text-[10px] text-cyan-400">mpv://</span>
-                  </button>
-                  <button 
-                    onClick={() => { launchPlayer('potplayer', item); setShowContextMenu(false); }}
-                    className="w-full px-3 py-1.5 text-left hover:bg-white/10 flex items-center justify-between text-gray-300"
-                  >
-                    <span className="flex items-center gap-2"><ExternalLink size={12} /> PotPlayer</span>
-                    <span className="text-[10px] text-amber-400">pot://</span>
-                  </button>
-                  <button 
-                    onClick={() => { launchPlayer('vlc', item); setShowContextMenu(false); }}
-                    className="w-full px-3 py-1.5 text-left hover:bg-white/10 flex items-center justify-between text-gray-300"
-                  >
-                    <span className="flex items-center gap-2"><ExternalLink size={12} /> VLC 播放器</span>
-                    <span className="text-[10px] text-orange-400">vlc://</span>
-                  </button>
-                </div>
-
-                <div className="py-1">
-                  <button 
-                    onClick={() => { onOpenMetadataEditor(item); setShowContextMenu(false); }}
-                    className="w-full px-3 py-1.5 text-left hover:bg-white/10 flex items-center gap-2 text-gray-300"
-                  >
-                    <Edit3 size={12} />
-                    <span>编辑元数据</span>
-                  </button>
-
-                  <button 
-                    onClick={() => { onOpenIdentify(item); setShowContextMenu(false); }}
-                    className="w-full px-3 py-1.5 text-left hover:bg-white/10 flex items-center gap-2 text-cyan-300"
-                  >
-                    <Sparkles size={12} />
-                    <span>重新识别 / 刮削</span>
-                  </button>
-
-                  <button 
-                    onClick={() => { onRefreshMetadata(item); setShowContextMenu(false); }}
-                    className="w-full px-3 py-1.5 text-left hover:bg-white/10 flex items-center gap-2 text-gray-300"
-                  >
-                    <RefreshCw size={12} />
-                    <span>刷新媒体信息</span>
-                  </button>
-                </div>
-
-                <div className="py-1">
-                  <button 
-                    onClick={() => { onDelete(item); setShowContextMenu(false); }}
-                    className="w-full px-3 py-1.5 text-left hover:bg-red-900/40 flex items-center gap-2 text-red-400"
-                  >
-                    <Trash2 size={12} />
-                    <span>从磁盘删除</span>
-                  </button>
-                </div>
-              </div>
-            )}
           </div>
         </div>
+
+        {/* 卡片操作菜单：Portal 渲染到 body，避免被海报容器 overflow-hidden 裁剪 */}
+        <CardContextMenu
+          item={item}
+          anchorRect={menuAnchor}
+          onClose={() => setMenuAnchor(null)}
+          onPlayFloating={onPlay}
+          onPlayTheater={onPlayModal}
+          onPlayVr={onPlayVr}
+          onOpenDetail={onOpenDetail}
+          onOpenMetadataEditor={onOpenMetadataEditor}
+          onOpenIdentify={onOpenIdentify}
+          onRefreshMetadata={onRefreshMetadata}
+          onDelete={onDelete}
+        />
       </div>
 
       {/* Title & Metadata Footer */}
@@ -545,13 +508,21 @@ const MediaListRow = memo(function MediaListRow({
   isDuplicate,
   isSelected = false,
   isSelecting = false,
+  isMobileViewport = false,
   onToggleSelect,
   onPlay,
+  onPlayModal,
+  onPlayVr,
   onToggleFavorite,
   onTogglePlayed: _onTogglePlayed,
+  onOpenDetail,
   onOpenMetadataEditor,
+  onOpenIdentify,
+  onRefreshMetadata,
+  onDelete,
   onOpenActionSheet
 }) {
+  const [menuAnchor, setMenuAnchor] = useState(null);
   const posterUrl = jellyfin.getImageUrl(item.Id, item.ImageTags?.Primary, 'Primary', 150, 80);
   const isFavorite = !!item.UserData?.IsFavorite;
   const playCount = item.UserData?.PlayCount || 0;
@@ -701,11 +672,18 @@ const MediaListRow = memo(function MediaListRow({
         </button>
 
         <button
-          onClick={() => {
-            if (window.innerWidth < 768 && onOpenActionSheet) {
+          data-contextmenu-trigger
+          onClick={(e) => {
+            e.stopPropagation();
+            if (menuAnchor) {
+              setMenuAnchor(null); // 再次点击触发按钮 = 关闭菜单
+              return;
+            }
+            if (isMobileViewport && onOpenActionSheet) {
               onOpenActionSheet(item);
             } else {
-              onOpenMetadataEditor(item);
+              const rect = e.currentTarget.getBoundingClientRect();
+              setMenuAnchor({ left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom });
             }
           }}
           className="p-1.5 rounded-lg bg-black/40 hover:bg-white/10 border border-white/5 text-gray-400 hover:text-white transition"
@@ -721,6 +699,21 @@ const MediaListRow = memo(function MediaListRow({
           <span className="hidden sm:inline">播放</span>
         </button>
       </div>
+
+      {/* 行操作菜单（与卡片菜单一致，Portal 渲染） */}
+      <CardContextMenu
+        item={item}
+        anchorRect={menuAnchor}
+        onClose={() => setMenuAnchor(null)}
+        onPlayFloating={onPlay}
+        onPlayTheater={onPlayModal}
+        onPlayVr={onPlayVr}
+        onOpenDetail={onOpenDetail}
+        onOpenMetadataEditor={onOpenMetadataEditor}
+        onOpenIdentify={onOpenIdentify}
+        onRefreshMetadata={onRefreshMetadata}
+        onDelete={onDelete}
+      />
     </div>
   );
 });
@@ -740,7 +733,9 @@ export default function LibraryView({
   selectedGenre,
   onSelectGenre,
   selectedYear,
-  onSelectYear: _onSelectYear,
+  onSelectYear,
+  selectedLetter,
+  onSelectLetter,
   autoRefillFloatingWindows = false,
   onToggleAutoRefill,
   onOpenRandom2Windows,
@@ -754,6 +749,7 @@ export default function LibraryView({
   onDeleteItem,
   onOpenMetadataEditor,
   onOpenIdentify,
+  onOpenDetail,
   onRefreshLibrary,
   onFilteredItemsChange,
   isRefreshing
@@ -762,9 +758,14 @@ export default function LibraryView({
   const [viewLayout, setViewLayout] = useState('poster');
   const [favoriteFilter, setFavoriteFilter] = useState('all');
   const [playCountFilter, setPlayCountFilter] = useState('all');
+  const [showDuplicatesOnly, setShowDuplicatesOnly] = useState(false);
   const [selectedItemIds, setSelectedItemIds] = useState(() => new Set());
   const [actionSheetItem, setActionSheetItem] = useState(null);
   const [deleteTargetItem, setDeleteTargetItem] = useState(null);
+
+  // 响应式视口（替代渲染期直读 window.innerWidth）
+  const { width: vpWidth } = useViewport();
+  const isMobileViewport = vpWidth < 768;
 
   // Default Playback Settings State & Quick Popover
   const [showPlaybackDefaultsMenu, setShowPlaybackDefaultsMenu] = useState(false);
@@ -793,7 +794,7 @@ export default function LibraryView({
       const num = parseInt(saved, 10);
       if (!isNaN(num) && num >= 1 && num <= 12) return num;
     }
-    return typeof window !== 'undefined' && window.innerWidth < 640 ? 3 : 6;
+    return vpWidth < 640 ? 3 : 6;
   });
 
   const [gridColumnsBackdrop, setGridColumnsBackdrop] = useState(() => {
@@ -802,16 +803,16 @@ export default function LibraryView({
       const num = parseInt(saved, 10);
       if (!isNaN(num) && num >= 1 && num <= 12) return num;
     }
-    return typeof window !== 'undefined' && window.innerWidth < 640 ? 2 : 4;
+    return vpWidth < 640 ? 2 : 4;
   });
 
   const gridColumns = useMemo(() => {
-    const isMobile = typeof window !== 'undefined' && window.innerWidth < 640;
+    const isMobile = vpWidth < 640;
     if (viewLayout === 'backdrop') {
       return isMobile ? Math.min(gridColumnsBackdrop, 2) : gridColumnsBackdrop;
     }
     return isMobile ? Math.min(gridColumnsPoster, 4) : gridColumnsPoster;
-  }, [viewLayout, gridColumnsBackdrop, gridColumnsPoster]);
+  }, [vpWidth, viewLayout, gridColumnsBackdrop, gridColumnsPoster]);
 
   const handleGridColumnsChange = (val) => {
     const num = parseInt(val, 10);
@@ -828,13 +829,17 @@ export default function LibraryView({
   const [genresList, setGenresList] = useState([]);
   const [personsList, setPersonsList] = useState([]);
   const [collectionsList, setCollectionsList] = useState([]);
+  const [yearsList, setYearsList] = useState([]);
+  const [resumeList, setResumeList] = useState([]);
+  const [nextUpList, setNextUpList] = useState([]);
+  const [historyList, setHistoryList] = useState([]);
 
   // Progressive Lazy Loading (80 initial + 60 on scroll)
   const [visibleCount, setVisibleCount] = useState(80);
 
   useEffect(() => {
     setVisibleCount(80);
-  }, [selectedViewId, statusFilter, favoriteFilter, playCountFilter, selectedGenre, selectedYear, searchKeyword, activeSubTab]);
+  }, [selectedViewId, statusFilter, favoriteFilter, playCountFilter, selectedGenre, selectedYear, selectedLetter, showDuplicatesOnly, searchKeyword, activeSubTab]);
 
   // Duplicate detection across current items
   const { duplicateItemIds, duplicateCount } = useMemo(() => {
@@ -861,6 +866,22 @@ export default function LibraryView({
       jellyfin.getCollections(selectedViewId).then(list => {
         if (reqId === subTabReqIdRef.current) setCollectionsList(list || []);
       });
+    } else if (activeSubTab === 'years') {
+      jellyfin.getYears(selectedViewId).then(list => {
+        if (reqId === subTabReqIdRef.current) setYearsList(list || []);
+      });
+    } else if (activeSubTab === 'resume') {
+      jellyfin.getResumeItems(selectedViewId).then(list => {
+        if (reqId === subTabReqIdRef.current) setResumeList(list || []);
+      });
+    } else if (activeSubTab === 'nextup') {
+      jellyfin.getNextUp(selectedViewId).then(list => {
+        if (reqId === subTabReqIdRef.current) setNextUpList(list || []);
+      });
+    } else if (activeSubTab === 'history') {
+      jellyfin.getPlayedHistory(selectedViewId).then(list => {
+        if (reqId === subTabReqIdRef.current) setHistoryList(list || []);
+      });
     }
   }, [activeSubTab, selectedViewId]);
 
@@ -869,6 +890,11 @@ export default function LibraryView({
     let result = items;
     if (activeSubTab === 'duplicates') {
       result = items.filter(it => duplicateItemIds.has(it.Id));
+    }
+
+    // 0. 仅显示重复影片（U4：与查重清理标签页同源的判定，可叠加其它筛选）
+    if (showDuplicatesOnly && activeSubTab !== 'duplicates') {
+      result = result.filter(it => duplicateItemIds.has(it.Id));
     }
 
     // 1. Playback status filter (unplayed vs played)
@@ -907,7 +933,7 @@ export default function LibraryView({
     }
 
     return result;
-  }, [items, activeSubTab, duplicateItemIds, statusFilter, favoriteFilter, playCountFilter]);
+  }, [items, activeSubTab, duplicateItemIds, showDuplicatesOnly, statusFilter, favoriteFilter, playCountFilter]);
 
   // Sync filtered items to parent container (for auto-refilling floating windows)
   useEffect(() => {
@@ -954,7 +980,7 @@ export default function LibraryView({
     }
   }, [onUpdateItem]);
 
-  // Played toggle
+  // Played toggle（失败回滚 + 提示，与收藏操作行为一致）
   const handleTogglePlayed = useCallback(async (item) => {
     const nextPlayed = !item.UserData?.Played;
     const playCount = nextPlayed ? (item.UserData?.PlayCount || 0) + 1 : Math.max(0, (item.UserData?.PlayCount || 1) - 1);
@@ -968,6 +994,10 @@ export default function LibraryView({
       await jellyfin.markPlayed(item.Id, nextPlayed);
     } catch (err) {
       console.error('Failed to toggle played:', err);
+      if (onUpdateItem) {
+        onUpdateItem(item);
+      }
+      alert(err.message || '更新播放状态失败');
     }
   }, [onUpdateItem]);
 
@@ -1128,9 +1158,9 @@ export default function LibraryView({
           <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
             {/* Quick Random Windows Button: Mobile shows 随机 2 窗, Desktop shows 随机 3 窗 */}
             <button
-              onClick={typeof window !== 'undefined' && window.innerWidth < 768 ? (onOpenRandom2Windows || onPlayRandomItem) : (onOpenRandom3Windows || onPlayRandomItem)}
+              onClick={isMobileViewport ? (onOpenRandom2Windows || onPlayRandomItem) : (onOpenRandom3Windows || onPlayRandomItem)}
               className="flex items-center gap-1 px-2.5 sm:px-3.5 py-1 sm:py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 text-xs font-bold shadow-lg transition transform hover:scale-[1.02]"
-              title={typeof window !== 'undefined' && window.innerWidth < 768 ? "随机挑选 2 部视频开启双窗播放" : "随机挑选 3 部视频开启 1大+2小 悬浮 3 窗"}
+              title={isMobileViewport ? "随机挑选 2 部视频开启双窗播放" : "随机挑选 3 部视频开启 1大+2小 悬浮 3 窗"}
             >
               <Play size={12} className="fill-amber-400 text-amber-400" />
               <span className="sm:hidden">随机 2 窗</span>
@@ -1330,9 +1360,9 @@ export default function LibraryView({
           </div>
         </div>
 
-        {/* Row 2 (Desktop Only): Secondary Sub-Tabs, Sliders, Layout Switcher */}
-        <div className="hidden md:flex items-center justify-between gap-2 border-t border-white/5 pt-2 text-xs">
-          <div className="flex items-center gap-1 overflow-x-auto flex-1 min-w-0">
+        {/* Row 2: Secondary Sub-Tabs（移动端亦可见，横向滚动；列数/布局切换仅桌面） */}
+        <div className="flex items-center justify-between gap-2 border-t border-white/5 pt-2 text-xs min-w-0">
+          <div className="flex items-center gap-1 overflow-x-auto flex-1 min-w-0 no-scrollbar">
             {SUB_TABS.map(tab => {
               const Icon = tab.icon;
               const isDup = tab.id === 'duplicates';
@@ -1340,7 +1370,7 @@ export default function LibraryView({
                 <button
                   key={tab.id}
                   onClick={() => setActiveSubTab(tab.id)}
-                  className={`flex items-center gap-1 px-2.5 py-1 rounded-lg font-medium transition flex-shrink-0 text-xs ${
+                  className={`flex items-center gap-1 px-2 py-1 sm:px-2.5 rounded-lg font-medium transition flex-shrink-0 text-xs ${
                     activeSubTab === tab.id
                       ? isDup ? 'bg-red-600/90 text-white shadow' : 'bg-slate-800 text-cyan-300 shadow'
                       : isDup && duplicateCount > 0 ? 'text-red-400 hover:bg-red-950/40' : 'text-gray-400 hover:text-white'
@@ -1358,57 +1388,59 @@ export default function LibraryView({
             })}
           </div>
 
-          {/* Poster Size / Columns Slider */}
-          {viewLayout !== 'list' && (
-            <div className="flex items-center gap-1.5 bg-black/50 px-2 py-1 rounded-xl border border-white/10 text-xs text-gray-300 flex-shrink-0">
-              <SlidersHorizontal size={12} className="text-cyan-400 flex-shrink-0" />
-              <input
-                type="range"
-                min={1}
-                max={12}
-                step={1}
-                value={gridColumns}
-                onChange={(e) => handleGridColumnsChange(e.target.value)}
-                className="w-14 sm:w-20 accent-cyan-400 h-1.5 bg-white/20 rounded-lg cursor-pointer appearance-none"
-                title={`拖拽滑块调整每行海报大小与列数 (当前: ${gridColumns} 列)`}
-              />
-              <span className="text-[10px] font-mono text-cyan-300 font-bold min-w-[24px] text-right">
-                {gridColumns}列
-              </span>
+          <div className="hidden md:flex items-center gap-2 flex-shrink-0">
+            {/* Poster Size / Columns Slider */}
+            {viewLayout !== 'list' && (
+              <div className="flex items-center gap-1.5 bg-black/50 px-2 py-1 rounded-xl border border-white/10 text-xs text-gray-300 flex-shrink-0">
+                <SlidersHorizontal size={12} className="text-cyan-400 flex-shrink-0" />
+                <input
+                  type="range"
+                  min={1}
+                  max={12}
+                  step={1}
+                  value={gridColumns}
+                  onChange={(e) => handleGridColumnsChange(e.target.value)}
+                  className="w-14 sm:w-20 accent-cyan-400 h-1.5 bg-white/20 rounded-lg cursor-pointer appearance-none"
+                  title={`拖拽滑块调整每行海报大小与列数 (当前: ${gridColumns} 列)`}
+                />
+                <span className="text-[10px] font-mono text-cyan-300 font-bold min-w-[24px] text-right">
+                  {gridColumns}列
+                </span>
+              </div>
+            )}
+
+            {/* View Layout Switcher */}
+            <div className="flex items-center bg-black/50 p-0.5 rounded-xl border border-white/10 gap-0.5 flex-shrink-0">
+              <button
+                onClick={() => setViewLayout('poster')}
+                className={`p-1.5 rounded-lg transition ${
+                  viewLayout === 'poster' ? 'bg-slate-700 text-cyan-300 shadow' : 'text-gray-400 hover:text-white'
+                }`}
+                title="海报网格 (2:3)"
+              >
+                <LayoutGrid size={13} />
+              </button>
+
+              <button
+                onClick={() => setViewLayout('backdrop')}
+                className={`p-1.5 rounded-lg transition ${
+                  viewLayout === 'backdrop' ? 'bg-slate-700 text-cyan-300 shadow' : 'text-gray-400 hover:text-white'
+                }`}
+                title="剧照网格 (16:9)"
+              >
+                <Grid size={13} />
+              </button>
+
+              <button
+                onClick={() => setViewLayout('list')}
+                className={`p-1.5 rounded-lg transition ${
+                  viewLayout === 'list' ? 'bg-slate-700 text-cyan-300 shadow' : 'text-gray-400 hover:text-white'
+                }`}
+                title="列表视图"
+              >
+                <List size={13} />
+              </button>
             </div>
-          )}
-
-          {/* View Layout Switcher */}
-          <div className="flex items-center bg-black/50 p-0.5 rounded-xl border border-white/10 gap-0.5 flex-shrink-0">
-            <button
-              onClick={() => setViewLayout('poster')}
-              className={`p-1.5 rounded-lg transition ${
-                viewLayout === 'poster' ? 'bg-slate-700 text-cyan-300 shadow' : 'text-gray-400 hover:text-white'
-              }`}
-              title="海报网格 (2:3)"
-            >
-              <LayoutGrid size={13} />
-            </button>
-
-            <button
-              onClick={() => setViewLayout('backdrop')}
-              className={`p-1.5 rounded-lg transition ${
-                viewLayout === 'backdrop' ? 'bg-slate-700 text-cyan-300 shadow' : 'text-gray-400 hover:text-white'
-              }`}
-              title="剧照网格 (16:9)"
-            >
-              <Grid size={13} />
-            </button>
-
-            <button
-              onClick={() => setViewLayout('list')}
-              className={`p-1.5 rounded-lg transition ${
-                viewLayout === 'list' ? 'bg-slate-700 text-cyan-300 shadow' : 'text-gray-400 hover:text-white'
-              }`}
-              title="列表视图"
-            >
-              <List size={13} />
-            </button>
           </div>
         </div>
 
@@ -1507,7 +1539,68 @@ export default function LibraryView({
                 );
               })}
             </div>
+
+            <div className="h-3.5 w-px bg-white/10 mx-0.5 flex-shrink-0" />
+
+            {/* 仅显示重复影片 (U4) */}
+            <button
+              onClick={() => setShowDuplicatesOnly(prev => !prev)}
+              className={`px-1.5 sm:px-2 py-1 rounded-lg transition flex-shrink-0 text-xs flex items-center gap-1 ${
+                showDuplicatesOnly
+                  ? 'bg-red-600/90 text-white font-bold shadow'
+                  : duplicateCount > 0
+                    ? 'text-red-400 hover:text-red-300'
+                    : 'text-gray-400 hover:text-white'
+              }`}
+              title={showDuplicatesOnly ? '取消仅显示重复影片' : `仅在当前列表中显示重复影片 (${duplicateCount} 部)`}
+            >
+              <Layers size={11} />
+              <span>仅重复</span>
+              {showDuplicatesOnly && duplicateCount > 0 && (
+                <span className="px-1 py-0.5 rounded-full bg-red-500 text-[9px] text-white font-mono">
+                  {duplicateCount}
+                </span>
+              )}
+            </button>
           </div>
+
+          {/* Active Filter Chips（类型 / 年份 / 字母索引） */}
+          {(selectedGenre || selectedYear || selectedLetter) && (
+            <div className="flex items-center gap-1 flex-shrink-0">
+              {selectedGenre && (
+                <button
+                  onClick={() => onSelectGenre('')}
+                  className="flex items-center gap-1 px-2 py-1 rounded-xl bg-cyan-950/60 border border-cyan-500/40 text-cyan-300 text-xs font-medium hover:bg-cyan-900/60 transition"
+                  title="清除类型筛选"
+                >
+                  <Tag size={10} />
+                  <span>{selectedGenre}</span>
+                  <X size={11} />
+                </button>
+              )}
+              {selectedYear && (
+                <button
+                  onClick={() => onSelectYear('')}
+                  className="flex items-center gap-1 px-2 py-1 rounded-xl bg-cyan-950/60 border border-cyan-500/40 text-cyan-300 text-xs font-medium hover:bg-cyan-900/60 transition"
+                  title="清除年份筛选"
+                >
+                  <Calendar size={10} />
+                  <span className="font-mono">{selectedYear}</span>
+                  <X size={11} />
+                </button>
+              )}
+              {selectedLetter && (
+                <button
+                  onClick={() => onSelectLetter('')}
+                  className="flex items-center gap-1 px-2 py-1 rounded-xl bg-cyan-950/60 border border-cyan-500/40 text-cyan-300 text-xs font-medium hover:bg-cyan-900/60 transition"
+                  title="清除字母索引"
+                >
+                  <span className="font-mono font-bold">{selectedLetter}</span>
+                  <X size={11} />
+                </button>
+              )}
+            </div>
+          )}
 
           {/* Filtered Total Count Badge */}
           <div 
@@ -1548,10 +1641,41 @@ export default function LibraryView({
       </div>
 
       {/* Main Content Viewport with Infinite Progressive Loading */}
-      <div 
+      <div
         onScroll={handleScroll}
         className="flex-1 overflow-y-auto p-2 sm:p-5 pb-24 md:pb-20"
       >
+        {/* A-Z 字母索引（仅影片视图） */}
+        {activeSubTab === 'items' && (
+          <div className="flex items-center gap-0.5 flex-wrap mb-2.5 sm:mb-3 bg-black/30 border border-white/5 rounded-xl px-1.5 py-1">
+            <button
+              onClick={() => onSelectLetter && onSelectLetter('')}
+              className={`px-1.5 py-0.5 rounded-md text-[10px] font-bold transition flex-shrink-0 ${
+                !selectedLetter ? 'bg-slate-700 text-cyan-300' : 'text-gray-400 hover:text-white'
+              }`}
+              title="全部 (清除字母索引)"
+            >
+              全部
+            </button>
+            {LETTER_INDEXES.map(letter => {
+              const active = selectedLetter === letter;
+              return (
+                <button
+                  key={letter}
+                  onClick={() => onSelectLetter && onSelectLetter(active ? '' : letter)}
+                  className={`w-6 h-5 rounded-md text-[10px] font-mono font-bold transition flex-shrink-0 ${
+                    active
+                      ? 'bg-jf-accent text-slate-950 shadow'
+                      : 'text-gray-400 hover:text-cyan-300 hover:bg-white/10'
+                  }`}
+                >
+                  {letter}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
         {/* SUB-VIEW 1: Genres */}
         {activeSubTab === 'genres' && (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2.5 sm:gap-3">
@@ -1635,6 +1759,181 @@ export default function LibraryView({
           </div>
         )}
 
+        {/* SUB-VIEW 3.5: Years（年份标签页，点击按年份筛选影片） */}
+        {activeSubTab === 'years' && (
+          yearsList.length === 0 ? (
+            <div className="h-full flex flex-col items-center justify-center text-gray-500 gap-3 py-20">
+              <Calendar size={40} className="text-gray-700" />
+              <div className="text-sm">暂无年份数据</div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-2.5 sm:gap-3">
+              {yearsList.map(year => (
+                <div
+                  key={year.Id}
+                  onClick={() => {
+                    onSelectYear && onSelectYear(year.Name);
+                    setActiveSubTab('items');
+                  }}
+                  className={`p-3 sm:p-4 rounded-xl border flex items-center justify-between cursor-pointer transition shadow-lg ${
+                    String(selectedYear) === String(year.Name)
+                      ? 'bg-cyan-950/80 border-cyan-400 text-cyan-200'
+                      : 'bg-slate-900/60 hover:bg-slate-800/90 border-white/5 hover:border-cyan-500/40'
+                  }`}
+                >
+                  <span className="font-bold font-mono text-sm sm:text-base text-white">{year.Name}</span>
+                  <ChevronRight size={14} className="text-gray-500" />
+                </div>
+              ))}
+            </div>
+          )
+        )}
+
+        {/* SUB-VIEW 3.6: 继续观看（带进度条的断点续播列表） */}
+        {activeSubTab === 'resume' && (
+          resumeList.length === 0 ? (
+            <div className="h-full flex flex-col items-center justify-center text-gray-500 gap-3 py-20">
+              <RotateCcw size={40} className="text-gray-700" />
+              <div className="text-sm">暂未观看 / 没有看到一半的影片</div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2.5 sm:gap-3.5">
+              {resumeList.map(item => {
+                const resumePercent = item.UserData?.PlaybackPositionTicks && item.RunTimeTicks
+                  ? Math.min(100, (item.UserData.PlaybackPositionTicks / item.RunTimeTicks) * 100)
+                  : 0;
+                const poster = jellyfin.getImageUrl(item.Id, item.ImageTags?.Primary, 'Primary', 360, 80);
+                return (
+                  <div
+                    key={item.Id}
+                    onClick={() => onPlayModal && onPlayModal(item)}
+                    className="group cursor-pointer rounded-xl overflow-hidden bg-slate-900/50 border border-white/5 hover:border-cyan-500/40 hover:-translate-y-1 transition"
+                    title={`继续播放 ${item.Name}`}
+                  >
+                    <div className="relative aspect-[2/3] bg-black overflow-hidden">
+                      {poster ? (
+                        <img src={poster} alt={item.Name} className="w-full h-full object-cover group-hover:scale-105 transition" />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-gray-600"><Film size={28} /></div>
+                      )}
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition flex items-center justify-center">
+                        <div className="w-10 h-10 rounded-full bg-cyan-500/90 flex items-center justify-center text-white shadow-xl">
+                          <Play size={18} className="ml-0.5 fill-white" />
+                        </div>
+                      </div>
+                      {/* Resume Progress Line */}
+                      {resumePercent > 0 && (
+                        <div className="absolute bottom-0 inset-x-0 h-1.5 bg-white/20">
+                          <div className="h-full bg-cyan-400" style={{ width: `${resumePercent}%` }} />
+                        </div>
+                      )}
+                    </div>
+                    <div className="p-2">
+                      <div className="text-xs font-semibold text-white truncate group-hover:text-cyan-300">{item.Name}</div>
+                      <div className="text-[10px] text-cyan-300 font-mono mt-0.5">
+                        看到 {Math.round(resumePercent)}%
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )
+        )}
+
+        {/* SUB-VIEW 3.7: NextUp（下一集待看） */}
+        {activeSubTab === 'nextup' && (
+          nextUpList.length === 0 ? (
+            <div className="h-full flex flex-col items-center justify-center text-gray-500 gap-3 py-20">
+              <Zap size={40} className="text-gray-700" />
+              <div className="text-sm">暂无待看的下一集</div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2.5 sm:gap-3.5">
+              {nextUpList.map(item => {
+                const poster = jellyfin.getImageUrl(item.Id, item.ImageTags?.Primary, 'Primary', 360, 80);
+                const epLabel = `${item.ParentIndexNumber !== undefined && item.ParentIndexNumber !== null ? `S${String(item.ParentIndexNumber).padStart(2, '0')}` : ''}${item.IndexNumber !== undefined && item.IndexNumber !== null ? `E${String(item.IndexNumber).padStart(2, '0')}` : ''}`;
+                return (
+                  <div
+                    key={item.Id}
+                    onClick={() => onPlayModal && onPlayModal(item)}
+                    className="group cursor-pointer rounded-xl overflow-hidden bg-slate-900/50 border border-white/5 hover:border-amber-500/40 hover:-translate-y-1 transition"
+                  >
+                    <div className="relative aspect-[2/3] bg-black overflow-hidden">
+                      {poster ? (
+                        <img src={poster} alt={item.Name} className="w-full h-full object-cover group-hover:scale-105 transition" />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-gray-600"><Film size={28} /></div>
+                      )}
+                      {epLabel && (
+                        <div className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded bg-amber-500/90 text-slate-950 text-[9px] font-mono font-black">
+                          {epLabel}
+                        </div>
+                      )}
+                    </div>
+                    <div className="p-2">
+                      <div className="text-[10px] text-amber-300 font-bold truncate">{item.SeriesName || '剧集'}</div>
+                      <div className="text-xs font-semibold text-white truncate group-hover:text-amber-300 mt-0.5">{item.Name}</div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )
+        )}
+
+        {/* SUB-VIEW 3.8: 观看历史 */}
+        {activeSubTab === 'history' && (
+          historyList.length === 0 ? (
+            <div className="h-full flex flex-col items-center justify-center text-gray-500 gap-3 py-20">
+              <History size={40} className="text-gray-700" />
+              <div className="text-sm">暂无观看历史</div>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {historyList.map(item => {
+                const lastPlayed = item.UserData?.LastPlayedDate
+                  ? new Date(item.UserData.LastPlayedDate)
+                  : null;
+                const poster = jellyfin.getImageUrl(item.Id, item.ImageTags?.Primary, 'Primary', 150, 80);
+                const epLabel = `${item.ParentIndexNumber !== undefined && item.ParentIndexNumber !== null ? `S${String(item.ParentIndexNumber).padStart(2, '0')}` : ''}${item.IndexNumber !== undefined && item.IndexNumber !== null ? `E${String(item.IndexNumber).padStart(2, '0')}` : ''}`;
+                return (
+                  <div
+                    key={`${item.Id}-${item.UserData?.LastPlayedDate || ''}`}
+                    onClick={() => onPlayModal && onPlayModal(item)}
+                    className="group flex items-center justify-between p-2.5 px-3 rounded-xl bg-slate-900/40 hover:bg-slate-800/80 border border-white/5 hover:border-cyan-500/40 transition cursor-pointer text-xs"
+                  >
+                    <div className="flex items-center gap-3 min-w-0 flex-1 pr-2">
+                      <div className="relative w-8 h-12 sm:w-9 sm:h-[52px] rounded-lg overflow-hidden bg-black/60 border border-white/10 flex-shrink-0">
+                        {poster ? (
+                          <img src={poster} alt={item.Name} className="w-full h-full object-cover" />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center text-gray-600"><Film size={14} /></div>
+                        )}
+                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center">
+                          <Play size={16} className="fill-white text-white" />
+                        </div>
+                      </div>
+                      <div className="flex flex-col min-w-0">
+                        <div className="font-semibold text-white truncate group-hover:text-cyan-300">
+                          {item.SeriesName && epLabel ? `${item.SeriesName} ${epLabel} · ${item.Name}` : item.Name}
+                        </div>
+                        <div className="text-[11px] text-gray-400 flex items-center gap-2 mt-0.5">
+                          {item.ProductionYear && <span>{item.ProductionYear}</span>}
+                          <span className="font-mono text-cyan-300">
+                            {lastPlayed ? `${lastPlayed.toLocaleDateString()} ${lastPlayed.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}
+                          </span>
+                          {(item.UserData?.PlayCount || 0) > 0 && <span className="font-mono">看过 {item.UserData.PlayCount} 次</span>}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )
+        )}
+
         {/* SUB-VIEW 4: Items Grid / List View */}
         {['items', 'duplicates'].includes(activeSubTab) && (
           <>
@@ -1652,11 +1951,18 @@ export default function LibraryView({
                     isDuplicate={duplicateItemIds.has(item.Id)}
                     isSelected={selectedItemIds.has(item.Id)}
                     isSelecting={isSelecting}
+                    isMobileViewport={isMobileViewport}
                     onToggleSelect={handleToggleSelect}
                     onPlay={onPlaySingleItem}
+                    onPlayModal={onPlayModal}
+                    onPlayVr={onPlayVr}
                     onToggleFavorite={handleToggleFavorite}
                     onTogglePlayed={handleTogglePlayed}
+                    onOpenDetail={onOpenDetail}
                     onOpenMetadataEditor={onOpenMetadataEditor}
+                    onOpenIdentify={onOpenIdentify}
+                    onRefreshMetadata={handleRefreshMetadata}
+                    onDelete={handleDelete}
                     onOpenActionSheet={(it) => setActionSheetItem(it)}
                   />
                 ))}
@@ -1676,12 +1982,14 @@ export default function LibraryView({
                     viewLayout={viewLayout}
                     isSelected={selectedItemIds.has(item.Id)}
                     isSelecting={isSelecting}
+                    isMobileViewport={isMobileViewport}
                     onToggleSelect={handleToggleSelect}
                     onPlay={onPlaySingleItem}
                     onPlayModal={onPlayModal}
                     onPlayVr={onPlayVr}
                     onToggleFavorite={handleToggleFavorite}
                     onTogglePlayed={handleTogglePlayed}
+                    onOpenDetail={onOpenDetail}
                     onOpenMetadataEditor={onOpenMetadataEditor}
                     onOpenIdentify={onOpenIdentify}
                     onRefreshMetadata={handleRefreshMetadata}
@@ -1761,9 +2069,10 @@ export default function LibraryView({
         isOpen={!!actionSheetItem}
         item={actionSheetItem}
         onClose={() => setActionSheetItem(null)}
-        onPlay={onPlaySingleItem}
+        onPlay={onPlayModal || onPlaySingleItem}
         onPlayVr={onPlayVr}
         onOpenFloating={onOpenFloatingWindow || onPlaySingleItem}
+        onOpenDetail={onOpenDetail}
         onToggleFavorite={handleToggleFavorite}
         onTogglePlayed={handleTogglePlayed}
         onOpenMetadataEditor={onOpenMetadataEditor}

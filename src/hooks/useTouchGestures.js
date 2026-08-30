@@ -1,11 +1,12 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { getSeekSwipeSpan } from '../utils/seekSettings';
+import { TOUCH_SPEED_STEPS } from '../utils/qualityPresets';
 
 /**
- * 倍速档位（与 ControlHUD 全局倍速下拉菜单保持同一语义）
+ * 倍速档位统一引自 qualityPresets（与播放器下拉菜单同一来源）
  * 右侧竖直滑动：上滑升档 / 下滑降档
  */
-export const SPEED_OPTIONS = [1.0, 1.25, 1.5, 2.0, 2.5, 3.0];
+export const SPEED_OPTIONS = TOUCH_SPEED_STEPS;
 
 function formatSec(seconds) {
   if (!seconds || isNaN(seconds)) return '00:00';

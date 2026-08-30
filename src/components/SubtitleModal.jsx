@@ -75,8 +75,18 @@ export default function SubtitleModal({
         if (updatedPlayback) {
           setPlaybackData(updatedPlayback);
           const streams = updatedPlayback?.MediaSources?.[0]?.MediaStreams || updatedPlayback?.MediaStreams || [];
-          const newSubs = streams.filter(s => s.Type === 'Subtitle');
-          const targetSub = newSubs[newSubs.length - 1]; // Pick latest downloaded subtitle
+          // 只在可渲染的文本字幕流中挑选（排除 PGS/DVD/DVB 等图像字幕流），
+          // 并优先选择本次新下载出现的流，而不是盲目取"最后一个"
+          const previousIndexes = new Set(localSubtitles.map(s => s.Index));
+          const textSubs = streams.filter(s =>
+            s.Type === 'Subtitle' &&
+            !['pgssub', 'dvdsub', 'dvbsub'].includes(String(s.Codec || '').toLowerCase())
+          );
+          const newStreams = textSubs.filter(s => !previousIndexes.has(s.Index));
+          const targetSub = newStreams[0]
+            || textSubs.find(s => s.IsDefault)
+            || textSubs[textSubs.length - 1]
+            || null;
           const subIdx = targetSub ? targetSub.Index : 0;
           if (onSelectSubtitle) onSelectSubtitle(subIdx);
           if (onSubtitleDownloaded) onSubtitleDownloaded(updatedPlayback, subIdx);

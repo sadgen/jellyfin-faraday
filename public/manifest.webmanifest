@@ -1,0 +1,26 @@
+{
+  "name": "Jellyfin Faraday - 随机连播看板",
+  "short_name": "Faraday",
+  "description": "专为高效观影与极速浏览打造的现代轻量级 Jellyfin Web 客户端：多窗随机连播、Trickplay、VR 全景、离线秒开。",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#080b11",
+  "theme_color": "#0d1117",
+  "lang": "zh-CN",
+  "icons": [
+    {
+      "src": "./faraday.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "./faraday.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}

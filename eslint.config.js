@@ -6,6 +6,19 @@ export default [
   { ignores: ['dist', 'node_modules', '*.config.js'] },
   js.configs.recommended,
   {
+    // Service Worker 运行在独立全局环境（self / caches 等）
+    files: ['public/**/*.js'],
+    languageOptions: {
+      globals: {
+        self: 'readonly',
+        caches: 'readonly',
+        clients: 'readonly',
+        skipWaiting: 'readonly',
+        importScripts: 'readonly'
+      }
+    }
+  },
+  {
     files: ['**/*.{js,jsx}'],
     languageOptions: {
       ecmaVersion: 2020,

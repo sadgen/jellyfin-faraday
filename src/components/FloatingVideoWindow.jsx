@@ -4,26 +4,23 @@ import { jellyfin } from '../api/jellyfinClient';
 import { calculateSlotStyle } from '../utils/windowLayout';
 import { useExternalPlayer } from '../hooks/useExternalPlayer';
 import { useTouchGestures } from '../hooks/useTouchGestures';
+import { useVolumeControl } from '../hooks/useVolumeControl';
+import { useMediaPlaybackInfo } from '../hooks/useMediaPlaybackInfo';
+import { useSubtitleTracks } from '../hooks/useSubtitleTracks';
+import { useViewport } from '../hooks/useViewport';
 import { SEEK_SPEED_OPTIONS, getStoredSeekSpeed, setStoredSeekSpeed, getSeekStepSeconds, getSeekSwipeSpan } from '../utils/seekSettings';
 import { getPlaybackDefaults } from '../utils/playbackDefaults';
-import { getDefaultSubtitleIndex } from '../utils/subtitleHelper';
+import { QUALITY_OPTIONS, PLAYBACK_SPEED_OPTIONS } from '../utils/qualityPresets';
 import TrickplayScrubberThumbnail from './TrickplayScrubberThumbnail';
 import InlineVrCanvas from './InlineVrCanvas';
 import SubtitleModal from './SubtitleModal';
+import DeleteConfirmModal from './DeleteConfirmModal';
 import { detectVrVideo } from '../utils/vrDetector';
-import { 
-  Play, Pause, SkipForward, Volume2, VolumeX, 
+import {
+  Play, Pause, SkipForward, Volume2, VolumeX,
   X, ExternalLink, Star, Eye, EyeOff, Image as ImageIcon,
   Glasses, Trash2, FastForward, Sun, Zap, Gauge, RefreshCw, Subtitles
 } from 'lucide-react';
-
-export const QUALITY_OPTIONS = [
-  { id: 'direct', label: '🎬 原画直推 (原始码率)', shortLabel: '原画', bitrate: 0 },
-  { id: '8000000', label: '🌟 极清 8 Mbps (1080p)', shortLabel: '8M', bitrate: 8000000 },
-  { id: '4000000', label: '⚡ 流畅 4 Mbps (1080p)', shortLabel: '4M', bitrate: 4000000 },
-  { id: '2000000', label: '🚀 标清 2 Mbps (720p)', shortLabel: '2M', bitrate: 2000000 },
-  { id: '1000000', label: '📱 省流 1 Mbps (480p)', shortLabel: '1M', bitrate: 1000000 }
-];
 
 function formatTime(seconds) {
   if (!seconds || isNaN(seconds)) return '00:00';
@@ -41,7 +38,8 @@ export default function FloatingVideoWindow({
   onExpand: _onExpand,
   onBringToFront,
   onUpdateItem,
-  onDeleteItem
+  onDeleteItem,
+  onSwitchItem
 }) {
   const { id, slotIndex, item } = windowData;
 
@@ -60,21 +58,21 @@ export default function FloatingVideoWindow({
   // Long-press Drag state & tactile feedback for mobile
   const [isLongPressDragging, setIsLongPressDragging] = useState(false);
 
+  // 响应式视口（替代渲染期直读 window.innerWidth / innerHeight）
+  const { width: vpWidth, height: vpHeight } = useViewport();
+  const isMobileViewport = vpWidth < 768;
+
   // Multi-part video list (e.g. Part 1, 2, 3 / CD1, CD2)
   const [partsList, setPartsList] = useState(() => [{ Id: item?.Id, Name: item?.Name || 'Part 1' }]);
   const [currentPartIndex, setCurrentPartIndex] = useState(0);
   const currentPartId = partsList[currentPartIndex]?.Id || item?.Id;
 
-  // Media playback info (MediaSources, Container, Bitrate, SubtitleStreams)
-  const [playbackData, setPlaybackData] = useState(null);
+  // Media playback info (MediaSources, Container, Bitrate, SubtitleStreams) — 共享 hook
+  const { playbackData, setPlaybackData } = useMediaPlaybackInfo(item?.Id);
 
-  // Fetch multi-part items & detailed playback info on mount or item change
+  // Fetch multi-part items on mount or item change
   useEffect(() => {
     if (!item?.Id) return;
-    jellyfin.getItemPlaybackInfo(item.Id).then(info => {
-      if (info) setPlaybackData(info);
-    }).catch(() => {});
-
     jellyfin.getAdditionalParts(item.Id).then(additional => {
       if (additional && additional.length > 0) {
         setPartsList([
@@ -121,7 +119,6 @@ export default function FloatingVideoWindow({
 
   // Playback state
   const [isPlaying, setIsPlaying] = useState(true);
-  const [isMuted, setIsMuted] = useState(true);
   const [playbackSpeed, setPlaybackSpeed] = useState(() => playbackDefaults.speed || 1.0);
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
@@ -129,7 +126,14 @@ export default function FloatingVideoWindow({
   const [showPosterModal, setShowPosterModal] = useState(false);
   const [showSubtitleModal, setShowSubtitleModal] = useState(false);
   const [showQualityMenu, setShowQualityMenu] = useState(false);
-  const [selectedSubtitleIndex, setSelectedSubtitleIndex] = useState(-1);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+
+  // 音量控制（浮窗默认静音启动，音量等级记忆并随播放上报）
+  const { volume, setVolume, isMuted, setIsMuted, toggleMute } = useVolumeControl(videoRef, { initialMuted: true });
+
+  // 字幕流管理（共享 hook：提取文本字幕流 + 硬字幕识别默认选择 + textTracks 同步）
+  const { subtitleStreams, mediaSourceId, selectedSubtitleIndex, selectSubtitle, syncSubtitleModes } =
+    useSubtitleTracks({ item, playbackData, videoRef });
 
   // Fast Forward / Rewind / Seek Step Tier: 'slow' (5s) | 'medium' (15s, default) | 'fast' (30s)
   const [seekSpeed, setSeekSpeed] = useState(() => getStoredSeekSpeed());
@@ -177,6 +181,9 @@ export default function FloatingVideoWindow({
   // Playback reporting & PlayCount Tracking
   const playReportTimerRef = useRef(null);
   const hasCountedPlayRef = useRef(false);
+
+  // 播放会话 ID（切换画质前上报 Stopped，防孤儿转码会话）
+  const playSessionIdRef = useRef(null);
 
   const { launchPlayer } = useExternalPlayer();
 
@@ -234,41 +241,6 @@ export default function FloatingVideoWindow({
     }
   });
 
-  // Extract subtitle streams
-  const mediaSource = playbackData?.MediaSources?.[0] || item?.MediaSources?.[0];
-  const mediaSourceId = mediaSource?.Id || item?.Id;
-  const subtitleStreams = useMemo(() => {
-    const streams = mediaSource?.MediaStreams || playbackData?.MediaStreams || item?.MediaStreams || [];
-    return streams.filter(s => s.Type === 'Subtitle' && !['pgssub', 'dvdsub', 'dvbsub'].includes(s.Codec?.toLowerCase()));
-  }, [item, playbackData, mediaSource]);
-
-  // Auto-detect default subtitle (or disable if hardsub flag in name e.g. C / UC)
-  useEffect(() => {
-    if (subtitleStreams.length > 0) {
-      const defIdx = getDefaultSubtitleIndex(item, subtitleStreams);
-      setSelectedSubtitleIndex(defIdx);
-    }
-  }, [item, subtitleStreams]);
-
-  // Sync subtitle mode to video.textTracks
-  const syncSubtitles = useCallback(() => {
-    const videoEl = videoRef.current;
-    if (!videoEl || !videoEl.textTracks) return;
-    for (let i = 0; i < videoEl.textTracks.length; i++) {
-      const track = videoEl.textTracks[i];
-      const trackIndex = subtitleStreams[i]?.Index;
-      if (selectedSubtitleIndex !== -1 && trackIndex === selectedSubtitleIndex) {
-        track.mode = 'showing';
-      } else {
-        track.mode = 'hidden';
-      }
-    }
-  }, [selectedSubtitleIndex, subtitleStreams]);
-
-  useEffect(() => {
-    syncSubtitles();
-  }, [syncSubtitles]);
-
   const playbackSpeedRef = useRef(playbackSpeed);
   playbackSpeedRef.current = playbackSpeed;
   const isMutedRef = useRef(isMuted);
@@ -279,6 +251,8 @@ export default function FloatingVideoWindow({
   itemRef.current = item;
   const onUpdateItemRef = useRef(onUpdateItem);
   onUpdateItemRef.current = onUpdateItem;
+  const volumeRef = useRef(volume);
+  volumeRef.current = volume;
 
   // Cleanup timers on component unmount
   useEffect(() => {
@@ -312,6 +286,10 @@ export default function FloatingVideoWindow({
       hlsRef.current = null;
     }
 
+    // 为本次播放创建会话 ID
+    const sessionId = jellyfin.createPlaySessionId();
+    playSessionIdRef.current = sessionId;
+
     // Determine initial seek time: Trickplay click time > server resumeTicks > 0
     const initialSeekTime = (windowData.startSecond !== undefined && windowData.startSecond !== null)
       ? windowData.startSecond
@@ -342,15 +320,21 @@ export default function FloatingVideoWindow({
       videoEl.currentTime = initialSeekTime;
     }
 
-    // Report playback start to Jellyfin
-    jellyfin.reportPlayback(currentPartId, initialSeekTime, false, 'Started');
+    // Report playback start to Jellyfin (携带会话 ID 与真实音量)
+    jellyfin.reportPlayback(currentPartId, initialSeekTime, false, 'Started', {
+      playSessionId: sessionId,
+      volumeLevel: volumeRef.current * 100
+    });
 
     // Periodic progress reporting (every 10s)
     if (playReportTimerRef.current) clearInterval(playReportTimerRef.current);
     playReportTimerRef.current = setInterval(() => {
       if (videoEl && !videoEl.paused && videoEl.currentTime > 0) {
-        jellyfin.reportPlayback(currentPartId, videoEl.currentTime, false, 'Progress');
-        
+        jellyfin.reportPlayback(currentPartId, videoEl.currentTime, false, 'Progress', {
+          playSessionId: playSessionIdRef.current,
+          volumeLevel: volumeRef.current * 100
+        });
+
         // Count playback if played for >= 10s
         if (!hasCountedPlayRef.current && videoEl.currentTime >= 10) {
           hasCountedPlayRef.current = true;
@@ -367,10 +351,12 @@ export default function FloatingVideoWindow({
     }, 10000);
 
     const directStreamUrl = jellyfin.getStreamUrl(currentPartId);
-    const hlsUrl = jellyfin.getHlsUrl(currentPartId);
+    const hlsUrl = jellyfin.getHlsUrl(currentPartId, { playSessionId: sessionId });
 
     const setupHlsPlay = (customUrl = null) => {
-      const targetUrl = customUrl || (isSmoothMode ? jellyfin.getSmoothHlsUrl(currentPartId) : hlsUrl);
+      const targetUrl = customUrl || (isSmoothMode
+        ? jellyfin.getSmoothHlsUrl(currentPartId, parseInt(streamQualityRef.current, 10) || 4000000, { playSessionId: playSessionIdRef.current })
+        : hlsUrl);
       if (hlsRef.current) {
         try { hlsRef.current.destroy(); } catch {}
         hlsRef.current = null;
@@ -388,7 +374,7 @@ export default function FloatingVideoWindow({
         hls.loadSource(targetUrl);
         hls.attachMedia(videoEl);
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
-          videoEl.playbackRate = playbackSpeed;
+          videoEl.playbackRate = playbackSpeedRef.current;
           if (initialSeekTime > 0) videoEl.currentTime = initialSeekTime;
           videoEl.play().catch(() => {
             videoEl.muted = true;
@@ -418,7 +404,7 @@ export default function FloatingVideoWindow({
       const currentQuality = streamQualityRef.current;
       if (currentQuality !== 'direct') {
         const bitrate = parseInt(currentQuality, 10) || 4000000;
-        setupHlsPlay(jellyfin.getSmoothHlsUrl(currentPartId, bitrate));
+        setupHlsPlay(jellyfin.getSmoothHlsUrl(currentPartId, bitrate, { playSessionId: playSessionIdRef.current }));
         return;
       }
 
@@ -440,7 +426,10 @@ export default function FloatingVideoWindow({
     return () => {
       if (playReportTimerRef.current) clearInterval(playReportTimerRef.current);
       if (videoEl && videoEl.currentTime > 0) {
-        jellyfin.reportPlayback(currentPartId, videoEl.currentTime, true, 'Stopped');
+        jellyfin.reportPlayback(currentPartId, videoEl.currentTime, true, 'Stopped', {
+          playSessionId: playSessionIdRef.current,
+          volumeLevel: volumeRef.current * 100
+        });
       }
       videoEl.removeEventListener('error', handleDirectError);
       videoEl.removeEventListener('loadedmetadata', onLoadedMetadata);
@@ -451,10 +440,10 @@ export default function FloatingVideoWindow({
       videoEl.removeAttribute('src');
       videoEl.load();
     };
-  }, [currentPartId, windowData.startSecond]);
+  }, [currentPartId, windowData.startSecond, setIsMuted]);
 
   // Reload Video Stream & Metadata (to fetch newly downloaded subtitles)
-  const handleReloadStream = useCallback(async (customPlaybackData = null, targetSubIdx = null) => {
+  const handleReloadStream = useCallback(async (customPlaybackData = null) => {
     setIsLoading(true);
     const videoEl = videoRef.current;
     const currentPos = videoEl?.currentTime || 0;
@@ -462,15 +451,6 @@ export default function FloatingVideoWindow({
       const freshInfo = customPlaybackData || await jellyfin.getItemPlaybackInfo(currentPartId);
       if (freshInfo) {
         setPlaybackData(freshInfo);
-        if (onUpdateItem) onUpdateItem(freshInfo);
-        const streams = freshInfo?.MediaSources?.[0]?.MediaStreams || freshInfo?.MediaStreams || [];
-        const newSubs = streams.filter(s => s.Type === 'Subtitle' && !['pgssub', 'dvdsub', 'dvbsub'].includes(s.Codec?.toLowerCase()));
-        if (targetSubIdx !== null && targetSubIdx !== undefined) {
-          setSelectedSubtitleIndex(targetSubIdx);
-        } else if (newSubs.length > 0 && selectedSubtitleIndex === -1) {
-          const def = newSubs.find(s => s.IsDefault) || newSubs[newSubs.length - 1];
-          if (def) setSelectedSubtitleIndex(def.Index);
-        }
       }
     } catch (e) {
       console.warn('Failed to reload item metadata:', e);
@@ -482,21 +462,30 @@ export default function FloatingVideoWindow({
       videoEl.addEventListener('loadedmetadata', () => {
         if (currentPos > 0) videoEl.currentTime = currentPos;
         videoEl.play().catch(() => {});
-        syncSubtitles();
+        syncSubtitleModes();
       }, { once: true });
       videoEl.load();
     }
     setIsLoading(false);
-  }, [currentPartId, isMuted, playbackSpeed, onUpdateItem, selectedSubtitleIndex, syncSubtitles]);
+  }, [currentPartId, isMuted, playbackSpeed, setPlaybackData, syncSubtitleModes]);
 
   // Switch Stream Quality / Transcode Bitrate seamlessly
   const changeStreamQuality = useCallback((qualityId, silent = false) => {
     const videoEl = videoRef.current;
     if (!videoEl || !currentPartId) return;
 
+    const currentPos = videoEl.currentTime || 0;
+
+    // 以旧会话上报 Stopped，让服务器结束当前转码任务（防孤儿转码会话）
+    jellyfin.reportPlayback(currentPartId, currentPos, true, 'Stopped', {
+      playSessionId: playSessionIdRef.current,
+      volumeLevel: volumeRef.current * 100
+    });
+    const newSessionId = jellyfin.createPlaySessionId();
+    playSessionIdRef.current = newSessionId;
+
     setStreamQuality(qualityId);
     setShowQualityMenu(false);
-    const currentPos = videoEl.currentTime || 0;
     const speed = playbackSpeed;
     const muted = isMuted;
 
@@ -512,7 +501,7 @@ export default function FloatingVideoWindow({
       videoEl.addEventListener('loadedmetadata', () => {
         if (currentPos > 0) videoEl.currentTime = currentPos;
         videoEl.play().catch(() => {});
-        syncSubtitles();
+        syncSubtitleModes();
       }, { once: true });
       videoEl.load();
       if (!silent) {
@@ -521,7 +510,7 @@ export default function FloatingVideoWindow({
       }
     } else {
       const bitrate = parseInt(qualityId, 10) || 4000000;
-      const smoothUrl = jellyfin.getSmoothHlsUrl(currentPartId, bitrate);
+      const smoothUrl = jellyfin.getSmoothHlsUrl(currentPartId, bitrate, { playSessionId: newSessionId });
       if (Hls.isSupported()) {
         const hls = new Hls({
           enableWorker: true,
@@ -549,7 +538,7 @@ export default function FloatingVideoWindow({
         setTimeout(() => setSmoothToast(''), 3000);
       }
     }
-  }, [currentPartId, isMuted, playbackSpeed, syncSubtitles]);
+  }, [currentPartId, isMuted, playbackSpeed, syncSubtitleModes]);
 
   const handleTimeUpdate = () => {
     const video = videoRef.current;
@@ -561,7 +550,7 @@ export default function FloatingVideoWindow({
     setDurationText(formatTime(video.duration));
   };
 
-  // Video Ended -> increment play count and play next part or skip (trigger promotion)
+  // Video Ended -> increment play count and play next part / next episode / skip
   const handleEnded = () => {
     if (!hasCountedPlayRef.current) {
       hasCountedPlayRef.current = true;
@@ -573,11 +562,27 @@ export default function FloatingVideoWindow({
         });
       }
     }
-    jellyfin.reportPlayback(currentPartId, videoRef.current?.duration || 0, true, 'Stopped');
-    
+    jellyfin.reportPlayback(currentPartId, videoRef.current?.duration || 0, true, 'Stopped', {
+      playSessionId: playSessionIdRef.current,
+      volumeLevel: volumeRef.current * 100
+    });
+
     // Multi-part check: if more parts exist in this video, play next part!
     if (partsList.length > 1 && currentPartIndex < partsList.length - 1) {
       setCurrentPartIndex(prev => prev + 1);
+    } else if (item?.SeriesId && jellyfin.auth.isConfigured) {
+      // 剧集：自动连播下一集（无下一集时回退到随机换片）
+      jellyfin.getEpisodes(item.SeriesId).then(list => {
+        const idx = list.findIndex(ep => ep.Id === item.Id);
+        const nextEp = (idx >= 0 && idx + 1 < list.length) ? list[idx + 1] : null;
+        if (nextEp && onSwitchItem) {
+          onSwitchItem(item.Id, nextEp);
+        } else if (onSkip) {
+          onSkip(slotIndex);
+        }
+      }).catch(() => {
+        if (onSkip) onSkip(slotIndex);
+      });
     } else {
       // No more parts, skip to next video (promote next windows forward)
       if (onSkip) onSkip(slotIndex);
@@ -702,10 +707,10 @@ export default function FloatingVideoWindow({
     const duration = video.duration;
     const step = getSeekStepSeconds(seekSpeed);
     const delta = e.deltaY > 0 ? step : -step;
-    
+
     const baseTime = wheelSeekingTimeRef.current !== null ? wheelSeekingTimeRef.current : video.currentTime;
     const nextTime = Math.max(0, Math.min(duration, baseTime + delta));
-    
+
     wheelSeekingTimeRef.current = nextTime;
     video.currentTime = nextTime;
 
@@ -797,7 +802,7 @@ export default function FloatingVideoWindow({
     const rect = e.currentTarget.getBoundingClientRect();
     const p = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
     const duration = videoRef.current?.duration || (item?.RunTimeTicks ? item.RunTimeTicks / 10000000 : 0);
-    
+
     setHoverScrubberTime(duration * p);
     setHoverScrubberPercent(p);
     setScrubberWidth(rect.width);
@@ -821,15 +826,6 @@ export default function FloatingVideoWindow({
     }
   };
 
-  const toggleMute = (e) => {
-    if (e) e.stopPropagation();
-    const video = videoRef.current;
-    if (!video) return;
-    const nextMuted = !video.muted;
-    video.muted = nextMuted;
-    setIsMuted(nextMuted);
-  };
-
   // Toggle Favorite
   const handleToggleFavorite = async (e) => {
     if (e) e.stopPropagation();
@@ -849,7 +845,7 @@ export default function FloatingVideoWindow({
     }
   };
 
-  // Toggle Played Status
+  // Toggle Played Status（失败回滚，避免 UI 与服务器状态不一致）
   const handleTogglePlayed = async (e) => {
     if (e) e.stopPropagation();
     if (!item?.Id) return;
@@ -863,18 +859,17 @@ export default function FloatingVideoWindow({
       await jellyfin.markPlayed(item.Id, nextPlayed);
     } catch (err) {
       console.error('Failed to toggle played:', err);
+      if (onUpdateItem) {
+        onUpdateItem(item);
+      }
     }
   };
 
-  // Delete Video from Disk (Tampermonkey Replica)
-  const handleDeleteVideo = async (e) => {
-    if (e) e.stopPropagation();
-    if (!item?.Id) return;
-    if (!confirm(`确定要从服务器和物理磁盘中永久删除「${item.Name}」吗？\n警告：这将从物理硬盘上永久删除该文件且无法撤销！`)) {
-      return;
-    }
+  // Delete Video from Disk — 使用统一样式化确认弹窗（与影院/媒体库一致）
+  const handleConfirmDelete = async () => {
     try {
       await jellyfin.deleteItem(item.Id);
+      setShowDeleteModal(false);
       if (onDeleteItem) onDeleteItem(item.Id);
       if (onSkip) onSkip(slotIndex); // Triggers shift & slot promotion!
     } catch (err) {
@@ -897,7 +892,6 @@ export default function FloatingVideoWindow({
   }, [item?.Id, item?.ImageTags]);
 
   const isFavorite = !!item?.UserData?.IsFavorite;
-  const _playCount = item?.UserData?.PlayCount || 0;
 
   return (
     <div
@@ -912,29 +906,29 @@ export default function FloatingVideoWindow({
         width: `${layout.width}px`,
         zIndex: hoverScrubberTime !== null ? 9999 : (isDragging || isResizing ? 500 : 50 + (slotIndex === 1 ? 5 : (slotIndex === 0 ? 1 : 0))),
         transition: (isDragging || isResizing)
-          ? 'none' 
+          ? 'none'
           : 'left 0.3s cubic-bezier(0.2, 0, 0, 1), top 0.3s cubic-bezier(0.2, 0, 0, 1), width 0.3s cubic-bezier(0.2, 0, 0, 1), height 0.3s cubic-bezier(0.2, 0, 0, 1), box-shadow 0.2s',
         WebkitTouchCallout: 'none',
         userSelect: 'none',
         WebkitUserSelect: 'none'
       }}
       className={`fixed rounded-2xl overflow-visible shadow-2xl border bg-[#0d1117] flex flex-col group select-none ${
-        slotIndex === 0 
-          ? 'border-cyan-400/70 shadow-cyan-500/25' 
+        slotIndex === 0
+          ? 'border-cyan-400/70 shadow-cyan-500/25'
           : 'border-white/15 shadow-black/80'
       } ${
         (isDragging || isResizing) ? 'ring-2 ring-cyan-400 shadow-cyan-500/50 opacity-95 scale-[1.01]' : 'hover:border-cyan-400'
       }`}
     >
       {/* Mobile Window-level Centered Trickplay Thumbnail (Adaptive Above / Below entire window) */}
-      {typeof window !== 'undefined' && window.innerWidth < 768 && (
+      {isMobileViewport && (
         <TrickplayScrubberThumbnail
           item={item}
           hoverTime={hoverScrubberTime}
           hoverPercent={hoverScrubberPercent}
           containerWidth={layout.width}
           mode="window"
-          position={layout.top > (window.innerHeight * 0.42) ? 'above' : 'below'}
+          position={layout.top > (vpHeight * 0.42) ? 'above' : 'below'}
         />
       )}
 
@@ -953,7 +947,7 @@ export default function FloatingVideoWindow({
           </span>
           {/* Multi-part Video Part Selector */}
           {partsList.length > 1 && (
-            <div 
+            <div
               className="flex items-center gap-1 bg-black/50 px-1.5 py-0.5 rounded border border-amber-500/40 flex-shrink-0"
               onMouseDown={(e) => e.stopPropagation()}
               onTouchStart={(e) => e.stopPropagation()}
@@ -1124,7 +1118,7 @@ export default function FloatingVideoWindow({
 
           {/* Delete Video */}
           <button
-            onClick={handleDeleteVideo}
+            onClick={() => setShowDeleteModal(true)}
             className="p-1 rounded text-gray-400 hover:text-red-400 transition"
             title="从服务器和磁盘删除"
           >
@@ -1142,18 +1136,18 @@ export default function FloatingVideoWindow({
             </button>
 
             {showPlayerMenu && (
-              <div 
+              <div
                 className="absolute right-0 top-7 w-32 glass-panel rounded-xl shadow-2xl py-1 z-50 text-xs text-gray-200 divide-y divide-white/5 animate-in fade-in zoom-in-95 duration-100"
                 onClick={(e) => e.stopPropagation()}
               >
-                <button 
+                <button
                   onClick={() => { launchPlayer('mpv', item); setShowPlayerMenu(false); }}
                   className="w-full px-3 py-1.5 text-left hover:bg-white/10 flex items-center justify-between text-cyan-300 font-medium"
                 >
                   <span>MPV 播放器</span>
                   <span className="text-[10px]">mpv://</span>
                 </button>
-                <button 
+                <button
                   onClick={() => { launchPlayer('potplayer', item); setShowPlayerMenu(false); }}
                   className="w-full px-3 py-1.5 text-left hover:bg-white/10 flex items-center justify-between text-amber-300"
                 >
@@ -1187,7 +1181,7 @@ export default function FloatingVideoWindow({
       </div>
 
       {/* Video Viewport (16:9) with Long-press Drag Support */}
-      <div 
+      <div
         className="relative w-full aspect-video bg-black flex items-center justify-center overflow-hidden touch-none select-none"
         style={{ filter: `brightness(${brightness})`, WebkitTouchCallout: 'none', userSelect: 'none' }}
         onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
@@ -1234,9 +1228,9 @@ export default function FloatingVideoWindow({
           onPlaying={() => {
             setIsLoading(false);
             setIsPlaying(true);
-            syncSubtitles();
+            syncSubtitleModes();
           }}
-          onLoadedData={syncSubtitles}
+          onLoadedData={syncSubtitleModes}
           onPause={() => setIsPlaying(false)}
           onEnded={handleEnded}
           onTimeUpdate={handleTimeUpdate}
@@ -1249,7 +1243,6 @@ export default function FloatingVideoWindow({
               src={jellyfin.getSubtitleTrackUrl(item.Id, mediaSourceId, s.Index)}
               srcLang={s.Language || 'zh'}
               data-index={s.Index}
-              default={selectedSubtitleIndex === s.Index}
             />
           ))}
         </video>
@@ -1274,13 +1267,13 @@ export default function FloatingVideoWindow({
           </div>
         )}
 
-        {/* 
+        {/*
           Pinned Poster Floating PIP View:
           - Mobile: 1X compact standard size (w-20 xs:w-24)
           - Desktop: 1.5X enlarged size (sm:w-36)
         */}
         {showPinnedPoster && coverUrl && (
-          <div 
+          <div
             className="absolute top-2 right-2 z-30 w-20 xs:w-24 sm:w-36 aspect-[2/3] rounded-xl overflow-hidden shadow-2xl border sm:border-2 border-cyan-400/60 bg-black/90 backdrop-blur-md animate-in zoom-in-95 duration-150 group/pip cursor-pointer"
             onClick={(e) => {
               e.stopPropagation();
@@ -1314,7 +1307,7 @@ export default function FloatingVideoWindow({
 
         {/* Paused Indicator */}
         {!isPlaying && !isLoading && !hasError && (
-          <div 
+          <div
             onClick={togglePlay}
             className="absolute inset-0 z-20 flex items-center justify-center bg-black/30 cursor-pointer"
           >
@@ -1330,7 +1323,7 @@ export default function FloatingVideoWindow({
         {/* Scrubber with Real-time Drag & Centered Trickplay */}
         <div className="relative w-full">
           {/* Desktop Scrubber-level Trickplay Thumbnail */}
-          {typeof window !== 'undefined' && window.innerWidth >= 768 && (
+          {!isMobileViewport && (
             <TrickplayScrubberThumbnail
               item={item}
               hoverTime={hoverScrubberTime}
@@ -1376,6 +1369,19 @@ export default function FloatingVideoWindow({
               {isMuted ? <VolumeX size={14} className="text-gray-400" /> : <Volume2 size={14} className="text-cyan-400" />}
             </button>
 
+            {/* 音量滑块（记忆并随播放上报真实音量） */}
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.05}
+              value={isMuted ? 0 : volume}
+              onChange={(e) => setVolume(parseFloat(e.target.value))}
+              className="w-12 accent-cyan-400 h-1 bg-white/20 rounded-lg cursor-pointer appearance-none"
+              title={`音量 ${Math.round((isMuted ? 0 : volume) * 100)}%`}
+              onClick={(e) => e.stopPropagation()}
+            />
+
             <span className="font-mono text-[11px] text-gray-400">
               {currentTimeText} / {durationText}
             </span>
@@ -1392,11 +1398,9 @@ export default function FloatingVideoWindow({
               }}
               className="bg-black/60 px-1.5 py-0.5 rounded border border-white/10 text-cyan-300 text-[10px] font-mono focus:outline-none cursor-pointer"
             >
-              <option value="0.75" className="bg-slate-900">0.75x</option>
-              <option value="1.0" className="bg-slate-900">1.0x</option>
-              <option value="1.25" className="bg-slate-900">1.25x</option>
-              <option value="1.5" className="bg-slate-900">1.5x</option>
-              <option value="2.0" className="bg-slate-900">2.0x</option>
+              {PLAYBACK_SPEED_OPTIONS.map(sp => (
+                <option key={sp} value={sp} className="bg-slate-900">{sp}x</option>
+              ))}
             </select>
 
             <button
@@ -1426,11 +1430,11 @@ export default function FloatingVideoWindow({
 
       {/* Full Poster Lightbox */}
       {showPosterModal && coverUrl && (
-        <div 
+        <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4 animate-in fade-in duration-150"
           onClick={() => setShowPosterModal(false)}
         >
-          <div 
+          <div
             className="relative max-w-md w-full glass-panel rounded-2xl overflow-hidden shadow-2xl border border-white/10 flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
@@ -1455,9 +1459,20 @@ export default function FloatingVideoWindow({
         isOpen={showSubtitleModal}
         item={item}
         currentSubtitleIndex={selectedSubtitleIndex}
-        onSelectSubtitle={(idx) => setSelectedSubtitleIndex(idx)}
-        onSubtitleDownloaded={handleReloadStream}
+        onSelectSubtitle={(idx) => selectSubtitle(idx)}
+        onSubtitleDownloaded={(updatedPlayback, subIdx) => {
+          if (updatedPlayback) setPlaybackData(updatedPlayback);
+          if (subIdx !== undefined && subIdx !== null) selectSubtitle(subIdx);
+        }}
         onClose={() => setShowSubtitleModal(false)}
+      />
+
+      {/* 统一样式化删除确认弹窗（替代原生 confirm） */}
+      <DeleteConfirmModal
+        isOpen={showDeleteModal}
+        item={item}
+        onConfirm={handleConfirmDelete}
+        onClose={() => setShowDeleteModal(false)}
       />
     </div>
   );

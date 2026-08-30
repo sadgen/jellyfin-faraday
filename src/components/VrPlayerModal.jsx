@@ -3,10 +3,19 @@ import * as THREE from 'three';
 import Hls from 'hls.js';
 import { jellyfin } from '../api/jellyfinClient';
 import TrickplayScrubberThumbnail from './TrickplayScrubberThumbnail';
-import { 
-  X, Play, Pause, Volume2, VolumeX, 
-  RotateCcw, Glasses, 
-  SkipBack, SkipForward, Compass
+import SubtitleOverlay from './SubtitleOverlay';
+import SubtitleModal from './SubtitleModal';
+import VolumeControl from './VolumeControl';
+import SleepTimerButton from './SleepTimerButton';
+import { useVolumeControl } from '../hooks/useVolumeControl';
+import { useMediaPlaybackInfo } from '../hooks/useMediaPlaybackInfo';
+import { useSubtitleTracks } from '../hooks/useSubtitleTracks';
+import { PLAYBACK_SPEED_OPTIONS } from '../utils/qualityPresets';
+import { getStoredSeekSpeed, getSeekStepSeconds } from '../utils/seekSettings';
+import {
+  X, Play, Pause,
+  RotateCcw, Glasses,
+  SkipBack, SkipForward, Compass, Subtitles
 } from 'lucide-react';
 
 const VR_MODES = [
@@ -48,6 +57,8 @@ export default function VrPlayerModal({
   const animFrameRef = useRef(null);
   const playReportTimerRef = useRef(null);
   const hasCountedPlayRef = useRef(false);
+  const playSessionIdRef = useRef(null);
+  const isDraggingScrubberRef = useRef(false);
 
   const isUserInteractingRef = useRef(false);
   const onPointerDownPointerXRef = useRef(0);
@@ -62,7 +73,6 @@ export default function VrPlayerModal({
 
   const [vrMode, setVrMode] = useState(initialMode);
   const [isPlaying, setIsPlaying] = useState(true);
-  const [isMuted, setIsMuted] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState(1.0);
   const [isLoading, setIsLoading] = useState(true);
   const [progress, setProgress] = useState(0);
@@ -73,7 +83,21 @@ export default function VrPlayerModal({
   const [hoverScrubberTime, setHoverScrubberTime] = useState(null);
   const [hoverScrubberPercent, setHoverScrubberPercent] = useState(0);
   const [scrubberWidth, setScrubberWidth] = useState(600);
-  const isDraggingScrubberRef = useRef(false);
+  const [seekSpeed, setSeekSpeed] = useState(() => getStoredSeekSpeed());
+  const [showSubtitleModal, setShowSubtitleModal] = useState(false);
+
+  useEffect(() => {
+    const handleSeekSpeedChange = (e) => {
+      if (e.detail) setSeekSpeed(e.detail);
+    };
+    window.addEventListener('faraday:seek_speed_changed', handleSeekSpeedChange);
+    return () => window.removeEventListener('faraday:seek_speed_changed', handleSeekSpeedChange);
+  }, []);
+
+  const { playbackData, setPlaybackData } = useMediaPlaybackInfo(item?.Id);
+  const { volume, setVolume, isMuted, setIsMuted, toggleMute } = useVolumeControl(videoRef);
+  const { subtitleStreams, mediaSourceId, selectedSubtitleIndex, selectSubtitle, syncSubtitleModes } =
+    useSubtitleTracks({ item, playbackData, videoRef });
 
   // Setup Mesh Geometry based on VR Mode
   const setupGeometry = useCallback((mode) => {
@@ -245,8 +269,8 @@ export default function VrPlayerModal({
 
   const playbackSpeedRef = useRef(playbackSpeed);
   playbackSpeedRef.current = playbackSpeed;
-  const isMutedRef = useRef(isMuted);
-  isMutedRef.current = isMuted;
+  const volumeRef = useRef(volume);
+  volumeRef.current = volume;
   const itemRef = useRef(item);
   itemRef.current = item;
   const onUpdateItemRef = useRef(onUpdateItem);
@@ -259,7 +283,7 @@ export default function VrPlayerModal({
     };
   }, []);
 
-  // Load video stream (Direct / HLS)
+  // Load video stream (Direct / HLS) — 支持续播（此前 VR 模式总是从 0 开始）
   useEffect(() => {
     if (!isOpen || !item?.Id || !videoRef.current) return;
 
@@ -272,15 +296,40 @@ export default function VrPlayerModal({
       hlsRef.current = null;
     }
 
+    const sessionId = jellyfin.createPlaySessionId();
+    playSessionIdRef.current = sessionId;
+
+    // 续播位置：Trickplay 点击时间 > 服务器上次播放位置 > 0
+    const initialSeekTime = (item.startSecond !== undefined && item.startSecond !== null)
+      ? item.startSecond
+      : (item.UserData?.PlaybackPositionTicks ? item.UserData.PlaybackPositionTicks / 10000000 : 0);
+
+    const onLoadedMetadata = () => {
+      if (initialSeekTime > 0 && videoEl) {
+        videoEl.currentTime = initialSeekTime;
+      }
+      syncSubtitleModesRef.current();
+    };
+    videoEl.addEventListener('loadedmetadata', onLoadedMetadata, { once: true });
+    if (initialSeekTime > 0 && videoEl.readyState >= 1) {
+      videoEl.currentTime = initialSeekTime;
+    }
+
     // Report playback start to Jellyfin
-    jellyfin.reportPlayback(item.Id, 0, false, 'Started');
+    jellyfin.reportPlayback(item.Id, initialSeekTime, false, 'Started', {
+      playSessionId: sessionId,
+      volumeLevel: volumeRef.current * 100
+    });
 
     // Periodic progress reporting (every 10s)
     if (playReportTimerRef.current) clearInterval(playReportTimerRef.current);
     playReportTimerRef.current = setInterval(() => {
       if (videoEl && !videoEl.paused && videoEl.currentTime > 0) {
-        jellyfin.reportPlayback(item.Id, videoEl.currentTime, false, 'Progress');
-        
+        jellyfin.reportPlayback(item.Id, videoEl.currentTime, false, 'Progress', {
+          playSessionId: playSessionIdRef.current,
+          volumeLevel: volumeRef.current * 100
+        });
+
         // Count playback if played for >= 10s
         if (!hasCountedPlayRef.current && videoEl.currentTime >= 10) {
           hasCountedPlayRef.current = true;
@@ -297,7 +346,7 @@ export default function VrPlayerModal({
     }, 10000);
 
     const directUrl = jellyfin.getStreamUrl(item.Id);
-    const hlsUrl = jellyfin.getHlsUrl(item.Id);
+    const hlsUrl = jellyfin.getHlsUrl(item.Id, { playSessionId: sessionId });
 
     const setupDirect = () => {
       videoEl.src = directUrl;
@@ -319,6 +368,7 @@ export default function VrPlayerModal({
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
           videoEl.muted = isMutedRef.current;
           videoEl.playbackRate = playbackSpeedRef.current;
+          if (initialSeekTime > 0) videoEl.currentTime = initialSeekTime;
           videoEl.play().catch(() => {
             videoEl.muted = true;
             setIsMuted(true);
@@ -336,9 +386,13 @@ export default function VrPlayerModal({
     return () => {
       if (playReportTimerRef.current) clearInterval(playReportTimerRef.current);
       if (videoEl && videoEl.currentTime > 0) {
-        jellyfin.reportPlayback(item.Id, videoEl.currentTime, true, 'Stopped');
+        jellyfin.reportPlayback(item.Id, videoEl.currentTime, true, 'Stopped', {
+          playSessionId: playSessionIdRef.current,
+          volumeLevel: volumeRef.current * 100
+        });
       }
       videoEl.removeEventListener('error', setupHls);
+      videoEl.removeEventListener('loadedmetadata', onLoadedMetadata);
       if (hlsRef.current) {
         hlsRef.current.destroy();
         hlsRef.current = null;
@@ -346,7 +400,68 @@ export default function VrPlayerModal({
       videoEl.removeAttribute('src');
       videoEl.load();
     };
-  }, [isOpen, item?.Id]);
+  }, [isOpen, item?.Id, setIsMuted]);
+
+  // 键盘快捷键（与影院播放器一致）
+  useEffect(() => {
+    if (!isOpen) return;
+    const isTypingTarget = (t) => t && (
+      t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA' || t.isContentEditable
+    );
+    const handleKeyDown = (e) => {
+      if (isTypingTarget(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
+      const video = videoRef.current;
+      switch (e.key) {
+        case ' ':
+        case 'k':
+        case 'K':
+          e.preventDefault();
+          togglePlay();
+          break;
+        case 'ArrowLeft':
+          e.preventDefault();
+          if (video && video.duration) {
+            video.currentTime = Math.max(0, video.currentTime - getSeekStepSeconds(seekSpeed));
+          }
+          break;
+        case 'ArrowRight':
+          e.preventDefault();
+          if (video && video.duration) {
+            video.currentTime = Math.min(video.duration, video.currentTime + getSeekStepSeconds(seekSpeed));
+          }
+          break;
+        case 'ArrowUp':
+          e.preventDefault();
+          setVolume(volumeRef.current + 0.05);
+          break;
+        case 'ArrowDown':
+          e.preventDefault();
+          setVolume(volumeRef.current - 0.05);
+          break;
+        case 'm':
+        case 'M':
+          toggleMute();
+          break;
+        case 'n':
+        case 'N':
+          if (onNext) onNext();
+          break;
+        case 'p':
+        case 'P':
+          if (onPrev) onPrev();
+          break;
+        default:
+          break;
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, seekSpeed, setVolume, onNext, onPrev]);
+
+  const isMutedRef = useRef(isMuted);
+  isMutedRef.current = isMuted;
+  const syncSubtitleModesRef = useRef(syncSubtitleModes);
+  syncSubtitleModesRef.current = syncSubtitleModes;
 
   // Drag to Look Around (Mouse / Touch)
   const handlePointerDown = (e) => {
@@ -369,7 +484,7 @@ export default function VrPlayerModal({
     isUserInteractingRef.current = false;
   };
 
-  // Wheel Zoom FOV & Wheel Seek
+  // Wheel Zoom FOV & Wheel Seek（步长遵循全局快进档位设置）
   const handleWheel = (e) => {
     if (e.shiftKey) {
       // Shift + Wheel = Adjust Field of View
@@ -389,7 +504,7 @@ export default function VrPlayerModal({
     e.preventDefault();
     const video = videoRef.current;
     if (!video || !video.duration) return;
-    const step = 5;
+    const step = getSeekStepSeconds(seekSpeed);
     const delta = e.deltaY > 0 ? step : -step;
     video.currentTime = Math.max(0, Math.min(video.duration, video.currentTime + delta));
   };
@@ -405,6 +520,18 @@ export default function VrPlayerModal({
     }
   };
 
+  const togglePlay = useCallback(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    if (video.paused) {
+      video.play().catch(() => {});
+      setIsPlaying(true);
+    } else {
+      video.pause();
+      setIsPlaying(false);
+    }
+  }, []);
+
   const handleTimeUpdate = () => {
     const video = videoRef.current;
     if (!video || !video.duration || isDraggingScrubberRef.current) return;
@@ -414,7 +541,7 @@ export default function VrPlayerModal({
     setDurationText(formatTime(video.duration));
   };
 
-  // Scrubber Drag Seeking
+  // Scrubber Drag Seeking (Mouse + Touch)
   const updateScrubberDrag = useCallback((clientX) => {
     if (!scrubberRef.current || !videoRef.current) return;
     const rect = scrubberRef.current.getBoundingClientRect();
@@ -457,6 +584,30 @@ export default function VrPlayerModal({
     window.addEventListener('mouseup', handleWindowMouseUp);
   }, [updateScrubberDrag]);
 
+  const handleScrubberTouchStart = useCallback((e) => {
+    if (e.touches.length !== 1) return;
+    e.preventDefault();
+    e.stopPropagation();
+    isDraggingScrubberRef.current = true;
+    updateScrubberDrag(e.touches[0].clientX);
+  }, [updateScrubberDrag]);
+
+  const handleScrubberTouchMove = useCallback((e) => {
+    if (e.touches.length !== 1) return;
+    if (isDraggingScrubberRef.current) {
+      e.preventDefault();
+      e.stopPropagation();
+      updateScrubberDrag(e.touches[0].clientX);
+    }
+  }, [updateScrubberDrag]);
+
+  const handleScrubberTouchEnd = useCallback(() => {
+    if (isDraggingScrubberRef.current) {
+      isDraggingScrubberRef.current = false;
+      setTimeout(() => setHoverScrubberTime(null), 800);
+    }
+  }, []);
+
   if (!isOpen || !item) return null;
 
   return (
@@ -471,10 +622,23 @@ export default function VrPlayerModal({
         onPlaying={() => {
           setIsLoading(false);
           setIsPlaying(true);
+          syncSubtitleModes();
         }}
+        onLoadedData={syncSubtitleModes}
         onPause={() => setIsPlaying(false)}
         onTimeUpdate={handleTimeUpdate}
-      />
+      >
+        {subtitleStreams.map(s => (
+          <track
+            key={`${item.Id}-${s.Index}`}
+            kind="subtitles"
+            label={s.Title || s.Language || `Subtitle ${s.Index}`}
+            src={jellyfin.getSubtitleTrackUrl(item.Id, mediaSourceId, s.Index)}
+            srcLang={s.Language || 'zh'}
+            data-index={s.Index}
+          />
+        ))}
+      </video>
 
       {/* Top VR Control HUD */}
       <div className="absolute top-0 inset-x-0 z-30 p-3 sm:p-4 bg-gradient-to-b from-black/90 via-black/60 to-transparent flex items-center justify-between pointer-events-auto">
@@ -487,6 +651,22 @@ export default function VrPlayerModal({
         </div>
 
         <div className="flex items-center gap-2">
+          {/* 睡眠定时 */}
+          <SleepTimerButton onExpire={() => { if (videoRef.current) videoRef.current.pause(); }} />
+
+          {/* 字幕选择 / 在线下载（WebGL 遮挡视频时以覆盖层渲染） */}
+          <button
+            onClick={() => setShowSubtitleModal(true)}
+            className={`p-2 rounded-xl border transition ${
+              selectedSubtitleIndex !== -1
+                ? 'bg-cyan-500/25 border-cyan-400/50 text-cyan-300'
+                : 'bg-black/70 border-white/10 text-gray-300 hover:text-cyan-300'
+            }`}
+            title="字幕选择 / 在线下载"
+          >
+            <Subtitles size={15} />
+          </button>
+
           {/* Mode Selector */}
           <select
             value={vrMode}
@@ -547,6 +727,9 @@ export default function VrPlayerModal({
         </div>
       )}
 
+      {/* 字幕覆盖层（视频元素被 Canvas 遮挡，原生字幕轨不可见） */}
+      <SubtitleOverlay videoRef={videoRef} visible={selectedSubtitleIndex !== -1} />
+
       {/* Bottom Transport Scrubber & HUD */}
       <div className="absolute bottom-0 inset-x-0 z-30 p-4 pt-8 bg-gradient-to-t from-black/95 via-black/80 to-transparent flex flex-col gap-2.5 pointer-events-auto">
         {/* Scrubber Container */}
@@ -561,7 +744,7 @@ export default function VrPlayerModal({
 
           <div
             ref={scrubberRef}
-            className="w-full h-2.5 hover:h-3.5 bg-white/20 rounded-full cursor-pointer transition-all relative overflow-hidden group/bar"
+            className="w-full h-2.5 hover:h-3.5 bg-white/20 rounded-full cursor-pointer transition-all relative overflow-hidden group/bar touch-none"
             onMouseDown={handleScrubberMouseDown}
             onMouseMove={(e) => {
               if (isDraggingScrubberRef.current) return;
@@ -575,6 +758,10 @@ export default function VrPlayerModal({
             onMouseLeave={() => {
               if (!isDraggingScrubberRef.current) setHoverScrubberTime(null);
             }}
+            onTouchStart={handleScrubberTouchStart}
+            onTouchMove={handleScrubberTouchMove}
+            onTouchEnd={handleScrubberTouchEnd}
+            onTouchCancel={handleScrubberTouchEnd}
           >
             <div
               className="absolute top-0 left-0 bottom-0 bg-cyan-400 rounded-full transition-all duration-75"
@@ -587,12 +774,7 @@ export default function VrPlayerModal({
         <div className="flex items-center justify-between text-xs text-gray-300">
           <div className="flex items-center gap-2 sm:gap-3">
             <button
-              onClick={() => {
-                const v = videoRef.current;
-                if (!v) return;
-                if (v.paused) { v.play(); setIsPlaying(true); }
-                else { v.pause(); setIsPlaying(false); }
-              }}
+              onClick={togglePlay}
               className="p-2.5 rounded-xl bg-jf-accent hover:bg-cyan-400 text-white transition shadow-lg shadow-cyan-500/25"
             >
               {isPlaying ? <Pause size={16} /> : <Play size={16} className="ml-0.5" />}
@@ -616,17 +798,8 @@ export default function VrPlayerModal({
               </button>
             )}
 
-            <button
-              onClick={() => {
-                const v = videoRef.current;
-                if (!v) return;
-                v.muted = !v.muted;
-                setIsMuted(v.muted);
-              }}
-              className="p-2 rounded-xl bg-black/60 hover:bg-white/10 text-gray-300 transition"
-            >
-              {isMuted ? <VolumeX size={15} className="text-gray-400" /> : <Volume2 size={15} className="text-cyan-400" />}
-            </button>
+            {/* 音量滑块 + 静音 */}
+            <VolumeControl volume={volume} setVolume={setVolume} isMuted={isMuted} toggleMute={toggleMute} compact />
 
             <span className="font-mono text-gray-400 text-xs">
               {currentTimeText} / {durationText}
@@ -651,16 +824,27 @@ export default function VrPlayerModal({
                 }}
                 className="bg-transparent text-cyan-300 focus:outline-none cursor-pointer font-mono font-bold"
               >
-                <option value="0.75" className="bg-slate-900">0.75x</option>
-                <option value="1.0" className="bg-slate-900">1.0x</option>
-                <option value="1.25" className="bg-slate-900">1.25x</option>
-                <option value="1.5" className="bg-slate-900">1.5x</option>
-                <option value="2.0" className="bg-slate-900">2.0x</option>
+                {PLAYBACK_SPEED_OPTIONS.map(sp => (
+                  <option key={sp} value={sp} className="bg-slate-900">{sp}x</option>
+                ))}
               </select>
             </div>
           </div>
         </div>
       </div>
+
+      {/* 字幕管理 / 在线下载 */}
+      <SubtitleModal
+        isOpen={showSubtitleModal}
+        item={item}
+        currentSubtitleIndex={selectedSubtitleIndex}
+        onSelectSubtitle={(idx) => selectSubtitle(idx)}
+        onSubtitleDownloaded={(updatedPlayback, subIdx) => {
+          if (updatedPlayback) setPlaybackData(updatedPlayback);
+          selectSubtitle(subIdx);
+        }}
+        onClose={() => setShowSubtitleModal(false)}
+      />
     </div>
   );
 }

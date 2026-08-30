@@ -1,14 +1,15 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { jellyfin } from './api/jellyfinClient';
-import { 
-  loadFullCache, 
-  saveFullCache, 
-  updateItemInCache, 
+import {
+  loadFullCache,
+  saveFullCache,
+  updateItemInCache,
   deleteItemFromCache,
   clearLibraryCache
 } from './utils/mediaCache';
 import { sortMediaItems } from './utils/mediaSorter';
 import { getPlaybackDefaults, setPlaybackDefaults } from './utils/playbackDefaults';
+import { saveAccount } from './utils/accountStore';
 import LibraryView from './components/LibraryView';
 import FloatingWindowsContainer from './components/FloatingWindowsContainer';
 import LoginModal from './components/LoginModal';
@@ -17,6 +18,8 @@ import MetadataEditorModal from './components/MetadataEditorModal';
 import IdentifyModal from './components/IdentifyModal';
 import VideoPlayerModal from './components/VideoPlayerModal';
 import VrPlayerModal from './components/VrPlayerModal';
+import ItemDetailModal from './components/ItemDetailModal';
+import StatsModal from './components/StatsModal';
 import MobileNavBar from './components/MobileNavBar';
 import ErrorBoundary from './components/ErrorBoundary';
 import { AlertCircle } from 'lucide-react';
@@ -57,6 +60,10 @@ export default function App() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [selectedGenre, setSelectedGenre] = useState('');
   const [selectedYear, setSelectedYear] = useState('');
+  const [selectedLetter, setSelectedLetter] = useState('');
+
+  // 会话序号：登录 / 切换账号时递增，触发重新水合
+  const [sessionSeq, setSessionSeq] = useState(0);
 
   // Loading state
   const [isLoading, setIsLoading] = useState(false);
@@ -111,6 +118,8 @@ export default function App() {
   const [identifyingItem, setIdentifyingItem] = useState(null);
   const [modalPlayingItem, setModalPlayingItem] = useState(null);
   const [vrPlayingItem, setVrPlayingItem] = useState(null);
+  const [detailItem, setDetailItem] = useState(null);
+  const [showStatsModal, setShowStatsModal] = useState(false);
 
   // Change View & Persist
   const handleSelectView = (viewId) => {
@@ -132,7 +141,7 @@ export default function App() {
   useEffect(() => { selectedViewIdRef.current = selectedViewId; }, [selectedViewId]);
 
   // 1. INSTANT LOCAL CACHE HYDRATION & USER VIEWS INITIALIZATION
-  // 仅在登录态变化时执行一次；视图/排序变化不重复触发全量拉取（防启动 3 次重复请求）
+  // 仅在登录态 / 会话序号变化时执行一次；视图/排序变化不重复触发全量拉取（防启动 3 次重复请求）
   useEffect(() => {
     if (!jellyfin.auth.isConfigured) return;
 
@@ -167,7 +176,7 @@ export default function App() {
     }).catch(err => {
       console.warn('Failed to fetch user views:', err);
     });
-  }, [isAuthenticated]);
+  }, [isAuthenticated, sessionSeq]);
 
   // 2. Query Media Items & Save to Local Cache
   // 竞态守卫：递增请求序号，慢的旧响应后到时直接丢弃，防止旧视图数据覆盖新状态
@@ -255,14 +264,14 @@ export default function App() {
     searchTimeoutRef.current = setTimeout(() => {
       const isBg = isFirstMountRef.current && mediaItems.length > 0;
       isFirstMountRef.current = false;
-      
-      fetchAllMedia(selectedViewId, searchKeyword, statusFilter, sortMethod, selectedGenre, selectedYear, '', isBg);
+
+      fetchAllMedia(selectedViewId, searchKeyword, statusFilter, sortMethod, selectedGenre, selectedYear, selectedLetter, isBg);
     }, searchKeyword ? 300 : 0);
 
     return () => {
       if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
     };
-  }, [selectedViewId, searchKeyword, statusFilter, sortMethod, selectedGenre, selectedYear, fetchAllMedia]);
+  }, [selectedViewId, searchKeyword, statusFilter, sortMethod, selectedGenre, selectedYear, selectedLetter, fetchAllMedia]);
 
   // ==================== FLOATING 3-WINDOW PIP SYSTEM ====================
   // Open item in a floating slot (FIFO replacement with slot shifting if all 3 full)
@@ -528,10 +537,65 @@ export default function App() {
   }, []);
 
   const handleLoginSuccess = () => {
+    // 记住该账号到多账号列表（P14），便于一键切换
+    saveAccount(jellyfin.auth);
     setIsAuthenticated(true);
     setIsLoginModalOpen(false);
-    fetchAllMedia(selectedViewId, searchKeyword, statusFilter, sortMethod, selectedGenre, selectedYear, '');
+    setSessionSeq(seq => seq + 1);
+    fetchAllMedia(selectedViewId, searchKeyword, statusFilter, sortMethod, selectedGenre, selectedYear, selectedLetter);
   };
+
+  // 多账号一键切换（P14）：写入凭据 → 重置视图状态 → 触发重新水合（IndexedDB 按 服务器+用户 隔离）
+  const handleSwitchAccount = useCallback((account) => {
+    if (!account?.token || !account?.userId) return;
+    fetchRequestIdRef.current++;
+    jellyfin.saveAuth({
+      serverUrl: account.serverUrl,
+      token: account.token,
+      userId: account.userId,
+      username: account.username,
+      isConfigured: true
+    }, true);
+    saveAccount(jellyfin.auth);
+
+    setFloatingWindows([]);
+    setModalPlayingItem(null);
+    setVrPlayingItem(null);
+    setEditingItem(null);
+    setIdentifyingItem(null);
+    setDetailItem(null);
+    setShowStatsModal(false);
+    setIsSettingsModalOpen(false);
+    setIsLoginModalOpen(false);
+    setIsAuthenticated(true);
+    setMediaItems([]);
+    setTotalRecordCount(0);
+    setSearchKeyword('');
+    setStatusFilter('all');
+    setSelectedGenre('');
+    setSelectedYear('');
+    setSelectedLetter('');
+    // 清除视图记忆，避免沿用上一账号的库视图
+    localStorage.removeItem(STORAGE_KEY_VIEW);
+    setSelectedViewId('');
+    isFirstMountRef.current = true;
+    setSessionSeq(seq => seq + 1);
+  }, []);
+
+  // 影院播放：剧集自动连播 / 下一集按钮切换
+  const handleSwitchTheaterItem = useCallback((nextItem) => {
+    if (nextItem?.Id) setModalPlayingItem(nextItem);
+  }, []);
+
+  // 浮窗：播放完自动切到下一集（替换该窗口的条目，保留窗口位置）
+  const handleSwitchWindowItem = useCallback((currentItemId, newItem) => {
+    if (!newItem?.Id) return;
+    setFloatingWindows(prev => prev.map(w =>
+      w.item.Id === currentItemId
+        ? { ...w, item: newItem, startSecond: null, timestamp: Date.now() }
+        : w
+    ));
+  }, []);
 
   const handleLogout = async () => {
     // 递增请求序号使所有在途 fetch 响应失效（登出后不再写入状态/缓存）
@@ -556,13 +620,13 @@ export default function App() {
     try {
       await jellyfin.refreshLibrary(selectedViewId);
       await new Promise(r => setTimeout(r, 1200));
-      await fetchAllMedia(selectedViewId, searchKeyword, statusFilter, sortMethod, selectedGenre, selectedYear, '');
+      await fetchAllMedia(selectedViewId, searchKeyword, statusFilter, sortMethod, selectedGenre, selectedYear, selectedLetter);
     } catch (err) {
       console.error('Failed to refresh library metadata on server:', err);
     } finally {
       setIsLoading(false);
     }
-  }, [selectedViewId, searchKeyword, statusFilter, sortMethod, selectedGenre, selectedYear, fetchAllMedia]);
+  }, [selectedViewId, searchKeyword, statusFilter, sortMethod, selectedGenre, selectedYear, selectedLetter, fetchAllMedia]);
 
   return (
     <ErrorBoundary>
@@ -600,6 +664,8 @@ export default function App() {
             onSelectGenre={setSelectedGenre}
             selectedYear={selectedYear}
             onSelectYear={setSelectedYear}
+            selectedLetter={selectedLetter}
+            onSelectLetter={setSelectedLetter}
             autoRefillFloatingWindows={autoRefillFloatingWindows}
             onToggleAutoRefill={handleToggleAutoRefill}
             onFilteredItemsChange={handleFilteredItemsChange}
@@ -614,6 +680,7 @@ export default function App() {
             onDeleteItem={handleDeleteItem}
             onOpenMetadataEditor={(item) => setEditingItem(item)}
             onOpenIdentify={(item) => setIdentifyingItem(item)}
+            onOpenDetail={(item) => setDetailItem(item)}
             onRefreshLibrary={handleServerRefreshLibrary}
             isRefreshing={isLoading}
           />
@@ -628,6 +695,7 @@ export default function App() {
           onBringToFront={handleBringFloatingToFront}
           onUpdateItem={handleUpdateItem}
           onDeleteItem={handleDeleteItem}
+          onSwitchItem={handleSwitchWindowItem}
         />
 
         {/* Mobile Bottom Navigation Bar */}
@@ -640,6 +708,7 @@ export default function App() {
             if (searchInput) searchInput.focus();
           }}
           onOpenSettings={() => setIsSettingsModalOpen(true)}
+          onOpenStats={() => setShowStatsModal(true)}
         />
 
         {/* Full-Screen Theater Video Player Modal */}
@@ -650,6 +719,7 @@ export default function App() {
             onClose={() => setModalPlayingItem(null)}
             onNext={() => navigateModalItem(modalPlayingItem, 1)}
             onPrev={() => navigateModalItem(modalPlayingItem, -1)}
+            onSwitchItem={handleSwitchTheaterItem}
             onUpdateItem={handleUpdateItem}
             onDeleteItem={handleDeleteItem}
             onOpenVr={(item) => setVrPlayingItem(item)}
@@ -674,6 +744,7 @@ export default function App() {
             isOpen={true}
             onClose={() => setIsLoginModalOpen(false)}
             onLoginSuccess={handleLoginSuccess}
+            onQuickLogin={handleSwitchAccount}
           />
         )}
 
@@ -683,10 +754,12 @@ export default function App() {
             isOpen={true}
             onClose={() => setIsSettingsModalOpen(false)}
             onLogout={handleLogout}
-            onRefreshLibrary={() => fetchAllMedia(selectedViewId, searchKeyword, statusFilter, sortMethod, selectedGenre, selectedYear, '')}
+            onRefreshLibrary={() => fetchAllMedia(selectedViewId, searchKeyword, statusFilter, sortMethod, selectedGenre, selectedYear, selectedLetter)}
             isRefreshing={isLoading}
             totalItemsCount={totalRecordCount}
             lastSyncTime={lastSyncTime}
+            onOpenStats={() => setShowStatsModal(true)}
+            onSwitchAccount={handleSwitchAccount}
           />
         )}
 
@@ -709,6 +782,39 @@ export default function App() {
             onIdentified={handleUpdateItem}
           />
         )}
+
+        {/* Item Detail Modal (P7: 简介/演职员/媒体信息/相似推荐) */}
+        {detailItem && (
+          <ItemDetailModal
+            isOpen={true}
+            item={detailItem}
+            onClose={() => setDetailItem(null)}
+            onPlayTheater={(item) => { setDetailItem(null); setModalPlayingItem(item); }}
+            onPlayFloating={(item) => { setDetailItem(null); handleOpenFloatingWindow(item); }}
+            onPlayVr={(item) => { setDetailItem(null); setVrPlayingItem(item); }}
+            onUpdateItem={handleUpdateItem}
+            onDeleteItem={handleDeleteItem}
+            onOpenMetadataEditor={(item) => { setDetailItem(null); setEditingItem(item); }}
+            onOpenIdentify={(item) => { setDetailItem(null); setIdentifyingItem(item); }}
+            onRefreshMetadata={async (item) => {
+              try {
+                await jellyfin.refreshItemMetadata(item.Id);
+                alert(`已向 Jellyfin 发送刷新「${item.Name}」元数据请求`);
+              } catch (err) {
+                alert('刷新失败: ' + err.message);
+              }
+            }}
+            onOpenDetail={(item) => setDetailItem(item)}
+            onSearchPerson={(name) => { setDetailItem(null); setSearchKeyword(name); }}
+          />
+        )}
+
+        {/* Watch Stats Modal (P11) */}
+        <StatsModal
+          isOpen={showStatsModal}
+          onClose={() => setShowStatsModal(false)}
+          items={mediaItems}
+        />
       </div>
     </ErrorBoundary>
   );

@@ -79,4 +79,56 @@ describe('JellyfinClient authentication and URL generation', () => {
 
     await expect(client.toggleFavorite('item_999', true)).rejects.toThrow('HTTP 403');
   });
+
+  it('builds HLS URLs with a stable play session id and optional audio stream index', () => {
+    client.auth = {
+      serverUrl: 'https://jellyfin.example.com',
+      token: 'secret_token_123',
+      userId: 'user_1',
+      isConfigured: true
+    };
+
+    const url = client.getHlsUrl('item_1', { playSessionId: 'sess_1', audioStreamIndex: 2 });
+    expect(url).toContain('PlaySessionId=sess_1');
+    expect(url).toContain('AudioStreamIndex=2');
+
+    const smooth = client.getSmoothHlsUrl('item_1', 4000000, { playSessionId: 'sess_2' });
+    expect(smooth).toContain('PlaySessionId=sess_2');
+    expect(smooth).not.toContain('AudioStreamIndex');
+
+    // 未传会话时自动生成
+    expect(client.getHlsUrl('item_1')).toContain('PlaySessionId=');
+  });
+
+  it('createPlaySessionId returns unique non-empty ids', () => {
+    const a = client.createPlaySessionId();
+    const b = client.createPlaySessionId();
+    expect(a).toBeTruthy();
+    expect(b).toBeTruthy();
+    expect(a).not.toBe(b);
+  });
+
+  it('reportPlayback includes PlaySessionId and the real volume level', async () => {
+    client.auth = {
+      serverUrl: 'https://jellyfin.example.com',
+      token: 'secret_token_123',
+      userId: 'user_1',
+      isConfigured: true
+    };
+
+    let capturedBody = null;
+    vi.stubGlobal('fetch', vi.fn(async (_url, opts) => {
+      capturedBody = JSON.parse(opts.body);
+      return { ok: true };
+    }));
+
+    await client.reportPlayback('item_1', 12.5, false, 'Progress', {
+      playSessionId: 'sess_9',
+      volumeLevel: 65
+    });
+
+    expect(capturedBody.PlaySessionId).toBe('sess_9');
+    expect(capturedBody.VolumeLevel).toBe(65);
+    expect(capturedBody.PositionTicks).toBe(125000000);
+  });
 });

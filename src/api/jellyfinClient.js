@@ -592,15 +592,24 @@ export class JellyfinClient {
   }
 
   /**
-   * Get robust HLS master playlist URL
+   * 创建播放会话 ID。
+   * 同一条目内切换画质/音轨应复用并在切换前上报 Stopped（携带该 ID），
+   * 否则服务器会残留孤儿转码会话持续占用 CPU。
    */
-  getHlsUrl(itemId) {
+  createPlaySessionId() {
+    return 'jf_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 8);
+  }
+
+  /**
+   * Get robust HLS master playlist URL
+   * @param {object} opts - { playSessionId, audioStreamIndex }
+   */
+  getHlsUrl(itemId, { playSessionId = null, audioStreamIndex = null } = {}) {
     if (!this.auth.serverUrl || !itemId) return '';
-    const playSessionId = 'jf_' + Math.random().toString(36).substring(2, 10);
     const query = new URLSearchParams({
       MediaSourceId: itemId,
       api_key: this.auth.token,
-      PlaySessionId: playSessionId,
+      PlaySessionId: playSessionId || ('jf_' + Math.random().toString(36).substring(2, 10)),
       VideoCodec: 'h264',
       AudioCodec: 'aac,mp3',
       maxStreamingBitrate: '8000000',
@@ -609,19 +618,22 @@ export class JellyfinClient {
       SegmentContainer: 'ts',
       MinSegments: '2'
     });
+    if (audioStreamIndex !== null && audioStreamIndex !== undefined) {
+      query.set('AudioStreamIndex', String(audioStreamIndex));
+    }
     return `${this.auth.serverUrl}/Videos/${itemId}/master.m3u8?${query.toString()}`;
   }
 
   /**
-   * Get Smooth HLS Transcode URL (Forced 4Mbps H.264/AAC for 0 frame drops on stuttering / HEVC videos)
+   * Get Smooth HLS Transcode URL (Forced bitrate H.264/AAC for 0 frame drops on stuttering / HEVC videos)
+   * @param {object} opts - { playSessionId, audioStreamIndex }
    */
-  getSmoothHlsUrl(itemId, maxBitrate = 4000000) {
+  getSmoothHlsUrl(itemId, maxBitrate = 4000000, { playSessionId = null, audioStreamIndex = null } = {}) {
     if (!this.auth.serverUrl || !itemId) return '';
-    const playSessionId = 'jf_smooth_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);
     const query = new URLSearchParams({
       MediaSourceId: itemId,
       api_key: this.auth.token,
-      PlaySessionId: playSessionId,
+      PlaySessionId: playSessionId || ('jf_smooth_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6)),
       VideoCodec: 'h264',
       AudioCodec: 'aac',
       maxStreamingBitrate: String(maxBitrate),
@@ -631,6 +643,9 @@ export class JellyfinClient {
       SegmentContainer: 'ts',
       MinSegments: '2'
     });
+    if (audioStreamIndex !== null && audioStreamIndex !== undefined) {
+      query.set('AudioStreamIndex', String(audioStreamIndex));
+    }
     return `${this.auth.serverUrl}/Videos/${itemId}/master.m3u8?${query.toString()}`;
   }
 
@@ -680,8 +695,9 @@ export class JellyfinClient {
 
   /**
    * Report Playback Session progress to Jellyfin server (Increments PlayCount and updates last played)
+   * @param {object} opts - { playSessionId, volumeLevel }
    */
-  async reportPlayback(itemId, positionSec = 0, isPaused = false, type = 'Progress') {
+  async reportPlayback(itemId, positionSec = 0, isPaused = false, type = 'Progress', { playSessionId = null, volumeLevel = null } = {}) {
     if (!this.auth.isConfigured || !itemId) return false;
     const endpoint = type === 'Started' ? '' : `/${type}`;
     const url = `${this.auth.serverUrl}/Sessions/Playing${endpoint}`;
@@ -689,9 +705,12 @@ export class JellyfinClient {
       ItemId: itemId,
       PositionTicks: Math.floor(positionSec * 10000000),
       IsPaused: isPaused,
-      VolumeLevel: 100,
+      VolumeLevel: (volumeLevel !== null && volumeLevel !== undefined) ? Math.round(volumeLevel) : 100,
       EventName: type
     };
+    if (playSessionId) {
+      body.PlaySessionId = playSessionId;
+    }
     try {
       const res = await fetch(url, {
         method: 'POST',
@@ -822,6 +841,165 @@ export class JellyfinClient {
     } catch (err) {
       console.warn('Failed to trigger library refresh:', err);
       return false;
+    }
+  }
+
+  /**
+   * Fetch all production years for current library (年份标签页)
+   */
+  async getYears(parentId = '') {
+    if (!this.auth.isConfigured) return [];
+    try {
+      const query = new URLSearchParams({
+        userId: this.auth.userId,
+        Recursive: 'true',
+        IncludeItemTypes: 'Movie,Video,Episode'
+      });
+      if (parentId && parentId !== 'all') {
+        query.set('parentId', parentId);
+      }
+      const res = await fetch(`${this.auth.serverUrl}/Years?${query.toString()}`, {
+        headers: this.getAuthHeaders()
+      });
+      if (!res.ok) return [];
+      const data = await res.json();
+      const items = data.Items || [];
+      // 按年份倒序排列（新的在前）
+      return items.sort((a, b) => (parseInt(b.Name, 10) || 0) - (parseInt(a.Name, 10) || 0));
+    } catch (err) {
+      console.warn('Failed to fetch years:', err);
+      return [];
+    }
+  }
+
+  /**
+   * Fetch similar / recommended items (详情页"相似推荐")
+   */
+  async getSimilarItems(itemId, limit = 12) {
+    if (!this.auth.isConfigured || !itemId) return [];
+    try {
+      const query = new URLSearchParams({
+        userId: this.auth.userId,
+        limit: String(limit),
+        Fields: 'PrimaryImageAspectRatio,UserData,RunTimeTicks,ProductionYear,CommunityRating'
+      });
+      const res = await fetch(`${this.auth.serverUrl}/Items/${itemId}/Similar?${query.toString()}`, {
+        headers: this.getAuthHeaders()
+      });
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data.Items || [];
+    } catch (err) {
+      console.warn('Failed to fetch similar items:', err);
+      return [];
+    }
+  }
+
+  /**
+   * Fetch resumable (partially watched) items (继续观看)
+   */
+  async getResumeItems(parentId = '', limit = 30) {
+    if (!this.auth.isConfigured) return [];
+    try {
+      const query = new URLSearchParams({
+        Recursive: 'true',
+        Limit: String(limit),
+        MediaTypes: 'Video',
+        Fields: 'PrimaryImageAspectRatio,UserData,RunTimeTicks,ProductionYear,CommunityRating,DateCreated,SeriesName,ParentIndexNumber,IndexNumber'
+      });
+      if (parentId && parentId !== 'all') {
+        query.set('ParentId', parentId);
+      }
+      const res = await fetch(`${this.auth.serverUrl}/Users/${this.auth.userId}/Items/Resume?${query.toString()}`, {
+        headers: this.getAuthHeaders()
+      });
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data.Items || [];
+    } catch (err) {
+      console.warn('Failed to fetch resume items:', err);
+      return [];
+    }
+  }
+
+  /**
+   * Fetch played items sorted by last play date (观看历史)
+   */
+  async getPlayedHistory(parentId = '', startIndex = 0, limit = 100) {
+    if (!this.auth.isConfigured) return [];
+    try {
+      const query = new URLSearchParams({
+        IncludeItemTypes: 'Movie,Episode,Video',
+        Recursive: 'true',
+        Filters: 'IsPlayed',
+        SortBy: 'DatePlayed',
+        SortOrder: 'Descending',
+        StartIndex: String(startIndex),
+        Limit: String(limit),
+        Fields: 'PrimaryImageAspectRatio,UserData,RunTimeTicks,ProductionYear,CommunityRating,SeriesName,ParentIndexNumber,IndexNumber'
+      });
+      if (parentId && parentId !== 'all') {
+        query.set('ParentId', parentId);
+      }
+      const res = await fetch(`${this.auth.serverUrl}/Users/${this.auth.userId}/Items?${query.toString()}`, {
+        headers: this.getAuthHeaders()
+      });
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data.Items || [];
+    } catch (err) {
+      console.warn('Failed to fetch played history:', err);
+      return [];
+    }
+  }
+
+  /**
+   * Fetch episodes of a series sorted by season/episode (剧集连播)
+   */
+  async getEpisodes(seriesId) {
+    if (!this.auth.isConfigured || !seriesId) return [];
+    try {
+      const query = new URLSearchParams({
+        userId: this.auth.userId,
+        Fields: 'PrimaryImageAspectRatio,UserData,RunTimeTicks,SeriesName,ParentIndexNumber,IndexNumber',
+        SortBy: 'ParentIndexNumber,IndexNumber',
+        SortOrder: 'Ascending'
+      });
+      const res = await fetch(`${this.auth.serverUrl}/Shows/${seriesId}/Episodes?${query.toString()}`, {
+        headers: this.getAuthHeaders()
+      });
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data.Items || [];
+    } catch (err) {
+      console.warn('Failed to fetch episodes:', err);
+      return [];
+    }
+  }
+
+  /**
+   * Fetch next-up episodes (NextUp 视图)
+   */
+  async getNextUp(parentId = '', limit = 50) {
+    if (!this.auth.isConfigured) return [];
+    try {
+      const query = new URLSearchParams({
+        userId: this.auth.userId,
+        Limit: String(limit),
+        Fields: 'PrimaryImageAspectRatio,UserData,RunTimeTicks,ProductionYear,CommunityRating,SeriesName,ParentIndexNumber,IndexNumber'
+      });
+      if (parentId && parentId !== 'all') {
+        query.set('ParentId', parentId);
+      }
+      const res = await fetch(`${this.auth.serverUrl}/Shows/NextUp?${query.toString()}`, {
+        headers: this.getAuthHeaders()
+      });
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data.Items || [];
+    } catch (err) {
+      console.warn('Failed to fetch next-up episodes:', err);
+      return [];
     }
   }
 }

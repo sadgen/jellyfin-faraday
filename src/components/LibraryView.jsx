@@ -777,7 +777,24 @@ export default function LibraryView({
   onFilteredItemsChange,
   isRefreshing
 }) {
-  const [activeSubTab, setActiveSubTab] = useState('items');
+  // 默认使用文件夹视图（folder），并持久化记住用户当前所选子标签页
+  const [activeSubTab, setActiveSubTab] = useState(() => {
+    try {
+      return localStorage.getItem('jf_library_active_subtab') || 'folder';
+    } catch {
+      return 'folder';
+    }
+  });
+
+  const handleSubTabChange = useCallback((tabId) => {
+    setActiveSubTab(tabId);
+    try {
+      localStorage.setItem('jf_library_active_subtab', tabId);
+    } catch {
+      // ignore storage errors
+    }
+  }, []);
+
   const [viewLayout, setViewLayout] = useState('poster');
   const [favoriteFilter, setFavoriteFilter] = useState('all');
   const [playCountFilter, setPlayCountFilter] = useState('all');
@@ -1493,7 +1510,7 @@ export default function LibraryView({
               return (
                 <button
                   key={tab.id}
-                  onClick={() => setActiveSubTab(tab.id)}
+                  onClick={() => handleSubTabChange(tab.id)}
                   className={`flex items-center gap-1 px-2 py-1 sm:px-2.5 rounded-lg font-medium transition flex-shrink-0 text-xs ${
                     activeSubTab === tab.id
                       ? isDup ? 'bg-red-600/90 text-white shadow' : 'bg-slate-800 text-cyan-300 shadow'
@@ -1997,10 +2014,10 @@ export default function LibraryView({
             {genresList.map(genre => (
               <div
                 key={genre.Id}
-                onClick={() => {
-                  onSelectGenre(genre.Name);
-                  setActiveSubTab('items');
-                }}
+                  onClick={() => {
+                    onSelectGenre(genre.Name);
+                    handleSubTabChange('items');
+                  }}
                 className="p-3.5 sm:p-4 rounded-xl bg-slate-900/60 hover:bg-slate-800/90 border border-white/5 hover:border-cyan-500/40 flex items-center justify-between cursor-pointer transition shadow-lg"
               >
                 <div className="flex items-center gap-2.5">
@@ -2023,7 +2040,7 @@ export default function LibraryView({
                   key={person.Id}
                   onClick={() => {
                     onSearchChange(person.Name);
-                    setActiveSubTab('items');
+                    handleSubTabChange('items');
                   }}
                   className="group flex flex-col bg-slate-900/50 rounded-2xl overflow-hidden border border-white/5 hover:border-cyan-500/40 hover:-translate-y-1 hover:shadow-xl hover:shadow-cyan-500/10 transition cursor-pointer"
                   title={`查看 ${person.Name} 的作品${person.count ? `（出演 ${person.count} 部）` : ''}`}
@@ -2061,7 +2078,7 @@ export default function LibraryView({
                   key={col.Id}
                   onClick={() => {
                     onSelectView(col.Id);
-                    setActiveSubTab('items');
+                    handleSubTabChange('items');
                   }}
                   className="group flex flex-col bg-slate-900/50 rounded-xl overflow-hidden border border-white/5 hover:border-cyan-500/40 transition cursor-pointer"
                 >
@@ -2096,7 +2113,7 @@ export default function LibraryView({
                   key={year.Id}
                   onClick={() => {
                     onSelectYear && onSelectYear(year.Name);
-                    setActiveSubTab('items');
+                    handleSubTabChange('items');
                   }}
                   className={`p-3 sm:p-4 rounded-xl border flex items-center justify-between cursor-pointer transition shadow-lg ${
                     String(selectedYear) === String(year.Name)

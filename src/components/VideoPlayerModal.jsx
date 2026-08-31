@@ -13,6 +13,7 @@ import DeleteConfirmModal from './DeleteConfirmModal';
 import SubtitleModal from './SubtitleModal';
 import VolumeControl from './VolumeControl';
 import SleepTimerButton from './SleepTimerButton';
+import QuickTagSelector from './QuickTagSelector';
 import { detectVrVideo } from '../utils/vrDetector';
 import { probeStreamStatus, describeVideoMediaError } from '../utils/playbackDiagnostics';
 import { QUALITY_OPTIONS, PLAYBACK_SPEED_OPTIONS } from '../utils/qualityPresets';
@@ -22,7 +23,7 @@ import {
   Play, Pause, Maximize,
   Star, Eye, EyeOff, ExternalLink, X, Film,
   SkipForward, SkipBack, Sun, Zap, FastForward, Glasses, Trash2, Gauge,
-  Subtitles, Music, Keyboard, ChevronRight
+  Subtitles, Music, Keyboard, ChevronRight, Tag, Scaling, FlipHorizontal
 } from 'lucide-react';
 
 function formatTime(seconds) {
@@ -76,6 +77,10 @@ export default function VideoPlayerModal({
   const [showQualityMenu, setShowQualityMenu] = useState(false);
   const [showAudioMenu, setShowAudioMenu] = useState(false);
   const [showSubtitleModal, setShowSubtitleModal] = useState(false);
+  const [showTagMenu, setShowTagMenu] = useState(false);
+  const [showAspectMenu, setShowAspectMenu] = useState(false);
+  const [aspectMode, setAspectMode] = useState('contain'); // 'contain' | 'cover' | 'fill'
+  const [flipH, setFlipH] = useState(false);
   const [isVrActive, setIsVrActive] = useState(false);
   const [detectedVrMode, setDetectedVrMode] = useState('180_3d_sbs');
 
@@ -372,10 +377,14 @@ export default function VideoPlayerModal({
     const sessionId = jellyfin.createPlaySessionId();
     playSessionIdRef.current = sessionId;
 
-    // Determine initial seek time: Trickplay click time > server resumeTicks > 0
+    // Determine initial seek time: Trickplay click time > server resumeTicks > smartStart (25%~35%) > 0
+    const runtimeSec = item.RunTimeTicks ? item.RunTimeTicks / 10000000 : 0;
+    const isSmartStart = !item.startSecond && !item.UserData?.PlaybackPositionTicks && playbackDefaults.smartStart && runtimeSec >= 600;
+    const smartStartTime = isSmartStart ? Math.round(runtimeSec * (0.25 + Math.random() * 0.1)) : 0;
+
     const initialSeekTime = (item.startSecond !== undefined && item.startSecond !== null)
       ? item.startSecond
-      : (item.UserData?.PlaybackPositionTicks ? item.UserData.PlaybackPositionTicks / 10000000 : 0);
+      : (item.UserData?.PlaybackPositionTicks ? item.UserData.PlaybackPositionTicks / 10000000 : smartStartTime);
 
     const onLoadedMetadata = () => {
       if (initialSeekTime > 0 && videoEl) {
@@ -1008,7 +1017,13 @@ export default function VideoPlayerModal({
             controlsList="nodownload noplaybackrate"
             disablePictureInPicture={true}
             onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
-            className="w-full h-full object-contain cursor-pointer z-10 select-none"
+            className={`w-full h-full cursor-pointer z-10 select-none transition-transform duration-200 ${
+              aspectMode === 'cover'
+                ? 'object-cover'
+                : aspectMode === 'fill'
+                  ? 'w-full h-full [object-fit:fill]'
+                  : 'object-contain'
+            } ${flipH ? '-scale-x-100' : ''}`}
             style={{ WebkitTouchCallout: 'none', userSelect: 'none', WebkitUserSelect: 'none' }}
             onClick={togglePlay}
             onWaiting={() => setIsLoading(true)}
@@ -1256,6 +1271,90 @@ export default function VideoPlayerModal({
                   )}
                 </div>
               )}
+
+              {/* 快捷打标 */}
+              <div className="relative">
+                <button
+                  onClick={() => setShowTagMenu(prev => !prev)}
+                  className={`p-2 rounded-xl border transition ${
+                    (item?.Tags?.length || 0) > 0
+                      ? 'bg-cyan-500/20 border-cyan-400/50 text-cyan-300'
+                      : 'bg-black/40 border-white/5 text-gray-300 hover:text-cyan-300'
+                  }`}
+                  title="快捷打标 (极品/精选/收藏片段/自制等)"
+                >
+                  <Tag size={14} />
+                </button>
+
+                {showTagMenu && (
+                  <div
+                    className="absolute right-0 bottom-10 z-50 animate-in fade-in zoom-in-95 duration-100"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <QuickTagSelector
+                      item={item}
+                      onUpdateItem={onUpdateItem}
+                      onClose={() => setShowTagMenu(false)}
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* 画面比例与水平镜像 */}
+              <div className="relative">
+                <button
+                  onClick={() => setShowAspectMenu(prev => !prev)}
+                  className={`p-2 rounded-xl border transition ${
+                    aspectMode !== 'contain' || flipH
+                      ? 'bg-cyan-500/20 border-cyan-400/50 text-cyan-300'
+                      : 'bg-black/40 border-white/5 text-gray-300 hover:text-cyan-300'
+                  }`}
+                  title="画面比例与镜像翻转 (原比例/铺满/拉伸/水平翻转)"
+                >
+                  <Scaling size={14} />
+                </button>
+
+                {showAspectMenu && (
+                  <div
+                    className="absolute right-0 bottom-10 w-36 glass-panel rounded-xl shadow-2xl py-1 z-50 text-xs text-gray-200 divide-y divide-white/5 animate-in fade-in zoom-in-95 duration-100"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div className="px-3 py-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                      画面比例
+                    </div>
+                    {[
+                      { id: 'contain', label: '原比例 (黑边完整)' },
+                      { id: 'cover', label: '铺满裁剪 (无黑边)' },
+                      { id: 'fill', label: '满屏拉伸' }
+                    ].map(opt => (
+                      <button
+                        key={opt.id}
+                        onClick={() => { setAspectMode(opt.id); setShowAspectMenu(false); }}
+                        className={`w-full px-3 py-1.5 text-left flex items-center justify-between transition ${
+                          aspectMode === opt.id ? 'bg-cyan-500/20 text-cyan-300 font-bold' : 'hover:bg-white/10 text-gray-300'
+                        }`}
+                      >
+                        <span>{opt.label}</span>
+                        {aspectMode === opt.id && <span className="text-cyan-400 text-xs">✓</span>}
+                      </button>
+                    ))}
+                    <div className="py-1">
+                      <button
+                        onClick={() => { setFlipH(prev => !prev); setShowAspectMenu(false); }}
+                        className={`w-full px-3 py-1.5 text-left flex items-center justify-between transition ${
+                          flipH ? 'bg-cyan-500/20 text-cyan-300 font-bold' : 'hover:bg-white/10 text-gray-300'
+                        }`}
+                      >
+                        <span className="flex items-center gap-1.5">
+                          <FlipHorizontal size={13} />
+                          <span>水平镜像翻转</span>
+                        </span>
+                        {flipH && <span className="text-cyan-400 text-xs">✓</span>}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
 
               <button
                 onClick={handleToggleFavorite}

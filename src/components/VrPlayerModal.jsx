@@ -72,6 +72,7 @@ export default function VrPlayerModal({
   const fovRef = useRef(100);
 
   const [vrMode, setVrMode] = useState(initialMode);
+  const [swapEyes, setSwapEyes] = useState(false);
   const [isPlaying, setIsPlaying] = useState(true);
   const [playbackSpeed, setPlaybackSpeed] = useState(1.0);
   const [isLoading, setIsLoading] = useState(true);
@@ -100,7 +101,7 @@ export default function VrPlayerModal({
     useSubtitleTracks({ item, playbackData, videoRef });
 
   // Setup Mesh Geometry based on VR Mode
-  const setupGeometry = useCallback((mode) => {
+  const setupGeometry = useCallback((mode, isSwap = swapEyes) => {
     const scene = sceneRef.current;
     if (!scene) return;
 
@@ -123,37 +124,39 @@ export default function VrPlayerModal({
       }
 
       case '180_3d_sbs': {
-        // 180 SBS 3D: Map left half of texture to front 180 dome
+        // 180 SBS 3D: 正常取左眼 [0.0, 0.5]，Swap Eyes 取右眼 [0.5, 1.0]
         geometry = new THREE.SphereGeometry(radius, 64, 32, -Math.PI / 2, Math.PI, 0, Math.PI);
         geometry.scale(-1, 1, 1);
-        // Remap UV to left eye (0.0 to 0.5)
         const uvs180 = geometry.attributes.uv;
+        const uOffset = isSwap ? 0.5 : 0.0;
         for (let i = 0; i < uvs180.count; i++) {
-          uvs180.setX(i, uvs180.getX(i) * 0.5);
+          uvs180.setX(i, uvs180.getX(i) * 0.5 + uOffset);
         }
         uvs180.needsUpdate = true;
         break;
       }
 
       case '360_3d_sbs': {
-        // 360 SBS 3D: Map left half to full 360 sphere
+        // 360 SBS 3D: 正常取左眼 [0.0, 0.5]，Swap Eyes 取右眼 [0.5, 1.0]
         geometry = new THREE.SphereGeometry(radius, 64, 32);
         geometry.scale(-1, 1, 1);
         const uvs360 = geometry.attributes.uv;
+        const uOffset = isSwap ? 0.5 : 0.0;
         for (let i = 0; i < uvs360.count; i++) {
-          uvs360.setX(i, uvs360.getX(i) * 0.5);
+          uvs360.setX(i, uvs360.getX(i) * 0.5 + uOffset);
         }
         uvs360.needsUpdate = true;
         break;
       }
 
       case '360_3d_tb': {
-        // 360 Top-Bottom 3D: Map top half to full 360 sphere
+        // 360 Top-Bottom 3D: 正常取上半部 [0.5, 1.0]，Swap Eyes 取下半部 [0.0, 0.5]
         geometry = new THREE.SphereGeometry(radius, 64, 32);
         geometry.scale(-1, 1, 1);
         const uvsTb = geometry.attributes.uv;
+        const vOffset = isSwap ? 0.0 : 0.5;
         for (let i = 0; i < uvsTb.count; i++) {
-          uvsTb.setY(i, uvsTb.getY(i) * 0.5 + 0.5);
+          uvsTb.setY(i, uvsTb.getY(i) * 0.5 + vOffset);
         }
         uvsTb.needsUpdate = true;
         break;
@@ -183,7 +186,7 @@ export default function VrPlayerModal({
     const mesh = new THREE.Mesh(geometry, material);
     scene.add(mesh);
     meshRef.current = mesh;
-  }, []);
+  }, [swapEyes]);
 
   // Initialize Three.js VR Engine
   useEffect(() => {
@@ -683,6 +686,25 @@ export default function VrPlayerModal({
               </option>
             ))}
           </select>
+
+          {/* 3D 左右眼互换 (Swap Eyes) */}
+          {['180_3d_sbs', '360_3d_sbs', '360_3d_tb'].includes(vrMode) && (
+            <button
+              onClick={() => {
+                const next = !swapEyes;
+                setSwapEyes(next);
+                setupGeometry(vrMode, next);
+              }}
+              className={`px-2.5 py-1.5 rounded-xl border text-xs font-bold transition ${
+                swapEyes
+                  ? 'bg-amber-500/40 border-amber-400 text-amber-300 shadow-sm'
+                  : 'bg-black/70 border-white/10 text-gray-300 hover:text-white'
+              }`}
+              title={swapEyes ? '已切换为右眼主视角 (Swap Eyes)' : '点击切换左右眼主视角 (解决 3D 交叉眼倒置)'}
+            >
+              <span>{swapEyes ? '👀 左右眼已互换' : '左右眼互换'}</span>
+            </button>
+          )}
 
           {/* Reset Orientation */}
           <button

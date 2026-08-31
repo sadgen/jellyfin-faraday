@@ -15,12 +15,14 @@ import TrickplayScrubberThumbnail from './TrickplayScrubberThumbnail';
 import InlineVrCanvas from './InlineVrCanvas';
 import SubtitleModal from './SubtitleModal';
 import DeleteConfirmModal from './DeleteConfirmModal';
+import QuickTagSelector from './QuickTagSelector';
 import { detectVrVideo } from '../utils/vrDetector';
 import { probeStreamStatus, describeVideoMediaError } from '../utils/playbackDiagnostics';
 import {
   Play, Pause, SkipForward, Volume2, VolumeX,
   X, ExternalLink, Star, Eye, EyeOff, Image as ImageIcon,
-  Glasses, Trash2, FastForward, Sun, Zap, Gauge, RefreshCw, Subtitles, Film
+  Glasses, Trash2, FastForward, Sun, Zap, Gauge, RefreshCw, Subtitles, Film,
+  Tag, Scaling, FlipHorizontal
 } from 'lucide-react';
 
 function formatTime(seconds) {
@@ -121,6 +123,10 @@ export default function FloatingVideoWindow({
   const [showSubtitleModal, setShowSubtitleModal] = useState(false);
   const [showQualityMenu, setShowQualityMenu] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showTagMenu, setShowTagMenu] = useState(false);
+  const [showAspectMenu, setShowAspectMenu] = useState(false);
+  const [aspectMode, setAspectMode] = useState('contain'); // 'contain' | 'cover' | 'fill'
+  const [flipH, setFlipH] = useState(false);
 
   // 音量控制（浮窗默认静音启动，音量等级记忆并随播放上报）
   const { volume, setVolume, isMuted, setIsMuted, toggleMute } = useVolumeControl(videoRef, { initialMuted: true });
@@ -323,10 +329,14 @@ export default function FloatingVideoWindow({
     const sessionId = jellyfin.createPlaySessionId();
     playSessionIdRef.current = sessionId;
 
-    // Determine initial seek time: Trickplay click time > server resumeTicks > 0
+    // Determine initial seek time: Trickplay click time > server resumeTicks > smartStart (25%~35%) > 0
+    const runtimeSec = currentPlayingPart.RunTimeTicks ? currentPlayingPart.RunTimeTicks / 10000000 : 0;
+    const isSmartStart = (windowData.startSecond === null || windowData.startSecond === undefined) && !currentPlayingPart.UserData?.PlaybackPositionTicks && playbackDefaults.smartStart && runtimeSec >= 600;
+    const smartStartTime = isSmartStart ? Math.round(runtimeSec * (0.25 + Math.random() * 0.1)) : 0;
+
     const initialSeekTime = (windowData.startSecond !== undefined && windowData.startSecond !== null)
       ? windowData.startSecond
-      : (currentPlayingPart.UserData?.PlaybackPositionTicks ? currentPlayingPart.UserData.PlaybackPositionTicks / 10000000 : 0);
+      : (currentPlayingPart.UserData?.PlaybackPositionTicks ? currentPlayingPart.UserData.PlaybackPositionTicks / 10000000 : smartStartTime);
 
     // Auto-detect VR Video format (pure 2D vs 3D-to-2D vs true VR)
     const initialVr = detectVrVideo(currentPlayingPart, videoEl);
@@ -596,6 +606,11 @@ export default function FloatingVideoWindow({
     setProgress(p);
     setCurrentTimeText(formatTime(video.currentTime));
     setDurationText(formatTime(video.duration));
+
+    // 霓虹巡更轮播模式：达到设定时长（默认 45 秒）自动跳下一部
+    if (playbackDefaults.patrolMode && video.currentTime >= (playbackDefaults.patrolIntervalSeconds || 45)) {
+      handleSkipNext();
+    }
   };
 
   // Video Ended -> increment play count and play next part / next episode / skip
@@ -1176,6 +1191,86 @@ export default function FloatingVideoWindow({
             {item?.UserData?.Played ? <EyeOff size={13} /> : <Eye size={13} />}
           </button>
 
+          {/* 快捷打标 */}
+          <div className="relative">
+            <button
+              onClick={() => setShowTagMenu(prev => !prev)}
+              className={`p-1 rounded transition ${
+                (item?.Tags?.length || 0) > 0 ? 'text-cyan-300 bg-cyan-500/20' : 'text-gray-400 hover:text-cyan-300'
+              }`}
+              title="快捷打标 (极品/精选/收藏片段/自制等)"
+            >
+              <Tag size={13} />
+            </button>
+
+            {showTagMenu && (
+              <div
+                className="absolute right-0 top-7 z-50 animate-in fade-in zoom-in-95 duration-100"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <QuickTagSelector
+                  item={item}
+                  onUpdateItem={onUpdateItem}
+                  onClose={() => setShowTagMenu(false)}
+                />
+              </div>
+            )}
+          </div>
+
+          {/* 画面比例与水平镜像 */}
+          <div className="relative">
+            <button
+              onClick={() => setShowAspectMenu(prev => !prev)}
+              className={`p-1 rounded transition ${
+                aspectMode !== 'contain' || flipH ? 'text-cyan-300 bg-cyan-500/20' : 'text-gray-400 hover:text-cyan-300'
+              }`}
+              title="画面比例与镜像 (原比例/铺满/拉伸/水平镜像)"
+            >
+              <Scaling size={13} />
+            </button>
+
+            {showAspectMenu && (
+              <div
+                className="absolute right-0 top-7 w-36 glass-panel rounded-xl shadow-2xl py-1 z-50 text-xs text-gray-200 divide-y divide-white/5 animate-in fade-in zoom-in-95 duration-100"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="px-3 py-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                  画面比例
+                </div>
+                {[
+                  { id: 'contain', label: '原比例' },
+                  { id: 'cover', label: '铺满裁剪' },
+                  { id: 'fill', label: '满屏拉伸' }
+                ].map(opt => (
+                  <button
+                    key={opt.id}
+                    onClick={() => { setAspectMode(opt.id); setShowAspectMenu(false); }}
+                    className={`w-full px-3 py-1.5 text-left flex items-center justify-between transition ${
+                      aspectMode === opt.id ? 'bg-cyan-500/20 text-cyan-300 font-bold' : 'hover:bg-white/10 text-gray-300'
+                    }`}
+                  >
+                    <span>{opt.label}</span>
+                    {aspectMode === opt.id && <span className="text-cyan-400 text-xs">✓</span>}
+                  </button>
+                ))}
+                <div className="py-1">
+                  <button
+                    onClick={() => { setFlipH(prev => !prev); setShowAspectMenu(false); }}
+                    className={`w-full px-3 py-1.5 text-left flex items-center justify-between transition ${
+                      flipH ? 'bg-cyan-500/20 text-cyan-300 font-bold' : 'hover:bg-white/10 text-gray-300'
+                    }`}
+                  >
+                    <span className="flex items-center gap-1.5">
+                      <FlipHorizontal size={13} />
+                      <span>水平镜像</span>
+                    </span>
+                    {flipH && <span className="text-cyan-400 text-xs">✓</span>}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Delete Video */}
           <button
             onClick={() => setShowDeleteModal(true)}
@@ -1281,7 +1376,13 @@ export default function FloatingVideoWindow({
           controlsList="nodownload noplaybackrate"
           disablePictureInPicture={true}
           onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
-          className="w-full h-full object-contain cursor-pointer z-10 select-none pointer-events-auto"
+          className={`w-full h-full cursor-pointer z-10 select-none pointer-events-auto transition-transform duration-200 ${
+            aspectMode === 'cover'
+              ? 'object-cover'
+              : aspectMode === 'fill'
+                ? 'w-full h-full [object-fit:fill]'
+                : 'object-contain'
+          } ${flipH ? '-scale-x-100' : ''}`}
           style={{ WebkitTouchCallout: 'none', userSelect: 'none', WebkitUserSelect: 'none' }}
           onClick={togglePlay}
           onWaiting={() => setIsLoading(true)}

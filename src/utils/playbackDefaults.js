@@ -1,5 +1,5 @@
 /**
- * Global default playback settings (Stream Quality, Playback Speed, Pinned Poster PIP, Auto Refill)
+ * Global default playback settings (Stream Quality, Playback Speed, Pinned Poster PIP, Auto Refill, Smart Start, Patrol Mode)
  */
 
 // 画质 / 倍速档位统一从 qualityPresets 引用并转发（历史导入路径兼容）
@@ -7,13 +7,18 @@ export { QUALITY_OPTIONS, SPEED_PRESETS, PLAYBACK_SPEED_OPTIONS } from './qualit
 
 const STORAGE_KEY = 'faraday_playback_defaults';
 
+export const PATROL_INTERVALS = [30, 45, 60, 90];
+
 export function getPlaybackDefaults() {
   if (typeof window === 'undefined') {
     return {
       quality: 'direct',
       speed: 1.0,
       showPinnedPoster: true,
-      autoRefill: false
+      autoRefill: false,
+      smartStart: false,
+      patrolMode: false,
+      patrolIntervalSeconds: 45
     };
   }
   try {
@@ -24,7 +29,10 @@ export function getPlaybackDefaults() {
         quality: parsed.quality || 'direct',
         speed: typeof parsed.speed === 'number' ? parsed.speed : 1.0,
         showPinnedPoster: parsed.showPinnedPoster !== undefined ? !!parsed.showPinnedPoster : true,
-        autoRefill: !!parsed.autoRefill
+        autoRefill: !!parsed.autoRefill,
+        smartStart: !!parsed.smartStart,
+        patrolMode: !!parsed.patrolMode,
+        patrolIntervalSeconds: Number(parsed.patrolIntervalSeconds) || 45
       };
     }
   } catch {}
@@ -32,7 +40,10 @@ export function getPlaybackDefaults() {
     quality: 'direct',
     speed: 1.0,
     showPinnedPoster: true,
-    autoRefill: false
+    autoRefill: false,
+    smartStart: false,
+    patrolMode: false,
+    patrolIntervalSeconds: 45
   };
 }
 

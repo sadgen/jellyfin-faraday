@@ -2,10 +2,12 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { jellyfin } from '../api/jellyfinClient';
 import {
   X, Star, Play, Tv, Glasses, Eye, EyeOff, RefreshCw, Edit3,
-  Sparkles, Trash2, Film, Clock, Copy, Check, Users, ChevronRight, Info
+  Sparkles, Trash2, Film, Clock, Copy, Check, Users, ChevronRight, Info, Wand2, Tag
 } from 'lucide-react';
 import { useExternalPlayer } from '../hooks/useExternalPlayer';
+import { cleanMediaTitle } from '../utils/titleCleaner';
 import DeleteConfirmModal from './DeleteConfirmModal';
+import QuickTagSelector from './QuickTagSelector';
 
 function formatRuntime(ticks) {
   if (!ticks) return '';
@@ -52,7 +54,37 @@ export default function ItemDetailModal({
   const [expandedOverview, setExpandedOverview] = useState(false);
   const [copiedPath, setCopiedPath] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showQuickTags, setShowQuickTags] = useState(false);
   const { launchPlayer } = useExternalPlayer();
+
+  const handleCleanTitle = async () => {
+    if (!current?.Id) return;
+    const res = cleanMediaTitle(current.Name || '');
+    if (!res.isChanged && !res.extractedCode) {
+      alert('当前标题已很整洁，无需净化');
+      return;
+    }
+    const suggest = res.extractedCode || res.cleanedTitle;
+    if (confirm(`原标题: ${current.Name}\n净化建议: ${suggest}\n\n是否立即应用新标题保存到 Jellyfin？`)) {
+      try {
+        await jellyfin.updateItemMetadata(current.Id, {
+          Name: suggest,
+          OriginalTitle: current.OriginalTitle || current.Name
+        });
+        const updated = { ...current, Name: suggest };
+        setDetails(updated);
+        if (onUpdateItem) onUpdateItem(updated);
+        if (res.extractedCode && onOpenIdentify) {
+          if (confirm(`已提取到标准番号「${res.extractedCode}」，是否立即发起刮削识别？`)) {
+            onClose();
+            onOpenIdentify(updated);
+          }
+        }
+      } catch (err) {
+        alert('保存失败: ' + err.message);
+      }
+    }
+  };
 
   useEffect(() => {
     setDetails(null);
@@ -250,6 +282,25 @@ export default function ItemDetailModal({
               <span>{isPlayed ? '标记未看' : '标记已看'}</span>
             </button>
             <button
+              onClick={handleCleanTitle}
+              className="px-3 py-2 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-300 hover:bg-amber-500/25 font-bold flex items-center gap-1.5 transition"
+              title="自动去除推广后缀(@kbjba等)并提取标准番号"
+            >
+              <Wand2 size={13} />
+              <span>净化标题</span>
+            </button>
+            <button
+              onClick={() => setShowQuickTags(prev => !prev)}
+              className={`px-3 py-2 rounded-xl border font-bold flex items-center gap-1.5 transition ${
+                showQuickTags
+                  ? 'bg-cyan-500/30 border-cyan-400 text-cyan-300'
+                  : 'bg-black/40 border-white/10 text-cyan-300 hover:bg-white/10'
+              }`}
+            >
+              <Tag size={13} />
+              <span>打标</span>
+            </button>
+            <button
               onClick={() => { if (onRefreshMetadata) onRefreshMetadata(current); }}
               className="px-3 py-2 rounded-xl bg-black/40 border border-white/10 text-gray-300 hover:text-cyan-300 font-bold flex items-center gap-1.5 transition"
               title="向服务器发送元数据刷新请求"
@@ -279,6 +330,20 @@ export default function ItemDetailModal({
               <span>删除</span>
             </button>
           </div>
+
+          {/* Inline Quick Tag Selector */}
+          {showQuickTags && (
+            <div className="animate-in fade-in zoom-in-95 duration-100">
+              <QuickTagSelector
+                item={current}
+                onUpdateItem={(up) => {
+                  setDetails(up);
+                  if (onUpdateItem) onUpdateItem(up);
+                }}
+                onClose={() => setShowQuickTags(false)}
+              />
+            </div>
+          )}
 
           {/* Genres */}
           {current?.Genres?.length > 0 && (

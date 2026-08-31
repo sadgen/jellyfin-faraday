@@ -2,8 +2,10 @@ import { useState, useMemo, useEffect, useRef, useCallback, memo } from 'react';
 import { jellyfin } from '../api/jellyfinClient';
 import { getTrickplayStyle } from '../utils/trickplay';
 import { detectDuplicateMedia } from '../utils/duplicateChecker';
+import { scanLibraryHealth } from '../utils/healthInspector';
+import { stackMediaItems } from '../utils/mediaStacking';
 import { useViewport } from '../hooks/useViewport';
-import { getPlaybackDefaults, setPlaybackDefaults, QUALITY_OPTIONS, SPEED_PRESETS } from '../utils/playbackDefaults';
+import { getPlaybackDefaults, setPlaybackDefaults, QUALITY_OPTIONS, SPEED_PRESETS, PATROL_INTERVALS } from '../utils/playbackDefaults';
 import { SEEK_SPEED_OPTIONS, getStoredSeekSpeed, setStoredSeekSpeed } from '../utils/seekSettings';
 import MobileActionSheet from './MobileActionSheet';
 import DeleteConfirmModal from './DeleteConfirmModal';
@@ -14,7 +16,7 @@ import {
   ArrowUpDown, X, RefreshCw, Layers, LayoutGrid,
   Grid, List, MoreVertical, Calendar,
   Users, Tag, Check, ChevronRight,
-  SlidersHorizontal, Info, RotateCcw, History, Zap
+  SlidersHorizontal, Info, RotateCcw, History, Zap, ShieldAlert, Sparkles, Wand2
 } from 'lucide-react';
 
 const SUB_TABS = [
@@ -27,15 +29,16 @@ const SUB_TABS = [
   { id: 'persons', label: '演职员', icon: Users },
   { id: 'years', label: '年份', icon: Calendar },
   { id: 'collections', label: '合集', icon: Layers },
-  { id: 'duplicates', label: '查重清理', icon: Layers }
+  { id: 'duplicates', label: '查重清理', icon: Layers },
+  { id: 'health', label: '损坏排查', icon: ShieldAlert }
 ];
 
 // A-Z 字母索引（# 代表非字母开头）
 const LETTER_INDEXES = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', '#'];
 
-// 其他网格视图（文件夹 / 继续观看 / NextUp / 历史 / 演员 / 类型 / 年份 / 合集）的默认每行列数
+// 其他网格视图（文件夹 / 继续观看 / NextUp / 历史 / 演员 / 类型 / 年份 / 合集 / 损坏排查）的默认每行列数
 const SECONDARY_GRID_DEFAULT_COLUMNS = {
-  folder: 6, genres: 6, persons: 5, years: 8, collections: 6, resume: 6, nextup: 6, history: 6
+  folder: 6, genres: 6, persons: 5, years: 8, collections: 6, resume: 6, nextup: 6, history: 6, health: 6
 };
 
 // 按标签页读取持久化的每行列数（1-12），无记录时使用默认值
@@ -102,6 +105,7 @@ const MediaCard = memo(function MediaCard({
   onOpenIdentify,
   onRefreshMetadata,
   onDelete,
+  onUpdateItem,
   onOpenActionSheet
 }) {
   const [isHovered, setIsHovered] = useState(false);
@@ -392,8 +396,22 @@ const MediaCard = memo(function MediaCard({
           )}
         </div>
 
-        {/* Top-Left: Duplicate Badge or Play Count */}
-        <div className="absolute top-2 left-2 flex items-center gap-1.5 z-20 pointer-events-none">
+        {/* Top-Left: Duplicate Badge / Stacked / Health Issue or Play Count */}
+        <div className="absolute top-2 left-2 flex items-center gap-1.5 z-20 pointer-events-none flex-wrap max-w-[85%]">
+          {item.healthIssue && (
+            <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-red-600/95 backdrop-blur-md border border-red-400 text-[10px] font-mono font-bold text-white shadow-lg animate-pulse" title={item.healthReason}>
+              <ShieldAlert size={10} />
+              <span>损坏</span>
+            </div>
+          )}
+
+          {item.isStacked && (
+            <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-cyan-600/90 backdrop-blur-md border border-cyan-400/50 text-[10px] font-mono font-bold text-white shadow-md">
+              <Layers size={10} />
+              <span>{item.stackedCount} 段</span>
+            </div>
+          )}
+
           {isDuplicate && (
             <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-red-600/90 backdrop-blur-md border border-red-400/50 text-[10px] font-mono font-bold text-white shadow-lg animate-pulse">
               <Layers size={10} />
@@ -401,7 +419,7 @@ const MediaCard = memo(function MediaCard({
             </div>
           )}
 
-          {!isDuplicate && playCount > 0 && (
+          {!isDuplicate && !item.healthIssue && playCount > 0 && (
             <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-black/60 backdrop-blur-md border border-white/10 text-[10px] font-mono text-cyan-300">
               <Eye size={11} className="text-cyan-400" />
               <span>{playCount}</span>
@@ -491,6 +509,7 @@ const MediaCard = memo(function MediaCard({
           onOpenIdentify={onOpenIdentify}
           onRefreshMetadata={onRefreshMetadata}
           onDelete={onDelete}
+          onUpdateItem={onUpdateItem}
         />
       </div>
 
@@ -539,6 +558,7 @@ const MediaListRow = memo(function MediaListRow({
   onOpenIdentify,
   onRefreshMetadata,
   onDelete,
+  onUpdateItem,
   onOpenActionSheet
 }) {
   const [menuAnchor, setMenuAnchor] = useState(null);
@@ -656,17 +676,27 @@ const MediaListRow = memo(function MediaListRow({
           )}
         </div>
 
-        <div className="flex flex-col min-w-0">
-          <div className="font-semibold text-white truncate text-xs sm:text-sm group-hover:text-cyan-300 transition" title={item.Name}>
-            {item.Name}
+          <div className="flex flex-col min-w-0">
+            <div className="font-semibold text-white truncate text-xs sm:text-sm group-hover:text-cyan-300 transition flex items-center gap-1.5" title={item.Name}>
+              <span>{item.Name}</span>
+              {item.isStacked && (
+                <span className="px-1.5 py-0.2 rounded bg-cyan-600/90 text-[9px] font-mono text-white flex-shrink-0">
+                  {item.stackedCount} 段
+                </span>
+              )}
+              {item.healthIssue && (
+                <span className="px-1.5 py-0.2 rounded bg-red-600 text-[9px] font-mono text-white flex-shrink-0" title={item.healthReason}>
+                  损坏
+                </span>
+              )}
+            </div>
+            <div className="text-[11px] text-gray-400 flex items-center gap-2 mt-0.5">
+              <span>{item.ProductionYear || '未知年份'}</span>
+              <span>•</span>
+              <span>{durationText}</span>
+              {item.OfficialRating && <span className="px-1 bg-white/10 rounded text-[9px]">{item.OfficialRating}</span>}
+            </div>
           </div>
-          <div className="text-[11px] text-gray-400 flex items-center gap-2 mt-0.5">
-            <span>{item.ProductionYear || '未知年份'}</span>
-            <span>•</span>
-            <span>{durationText}</span>
-            {item.OfficialRating && <span className="px-1 bg-white/10 rounded text-[9px]">{item.OfficialRating}</span>}
-          </div>
-        </div>
       </div>
 
       <div className="hidden md:flex items-center gap-6 text-gray-400">
@@ -736,6 +766,7 @@ const MediaListRow = memo(function MediaListRow({
         onOpenIdentify={onOpenIdentify}
         onRefreshMetadata={onRefreshMetadata}
         onDelete={onDelete}
+        onUpdateItem={onUpdateItem}
       />
     </div>
   );
@@ -799,6 +830,13 @@ export default function LibraryView({
   const [favoriteFilter, setFavoriteFilter] = useState('all');
   const [playCountFilter, setPlayCountFilter] = useState('all');
   const [showDuplicatesOnly, setShowDuplicatesOnly] = useState(false);
+  const [enableStacking, setEnableStacking] = useState(() => {
+    try {
+      return localStorage.getItem('jf_enable_media_stacking') !== 'false';
+    } catch {
+      return true;
+    }
+  });
   const [selectedItemIds, setSelectedItemIds] = useState(() => new Set());
   const [actionSheetItem, setActionSheetItem] = useState(null);
   const [deleteTargetItem, setDeleteTargetItem] = useState(null);
@@ -987,6 +1025,11 @@ export default function LibraryView({
     return detectDuplicateMedia(items);
   }, [items]);
 
+  // Health inspection across current items (损坏截断/下载中断坏文件检测)
+  const { brokenItems, brokenCount } = useMemo(() => {
+    return scanLibraryHealth(items);
+  }, [items]);
+
   const subTabReqIdRef = useRef(0);
 
   // Load sub-tab data on demand with race-condition guard
@@ -1073,8 +1116,18 @@ export default function LibraryView({
       result = result.filter(it => (it.UserData?.PlayCount || 0) >= 10);
     }
 
+    // 4. 健康排查子标签页
+    if (activeSubTab === 'health') {
+      return brokenItems;
+    }
+
+    // 5. 自制分段切片智能聚合（在影片主视图且开启聚合时）
+    if (activeSubTab === 'items' && enableStacking) {
+      return stackMediaItems(result);
+    }
+
     return result;
-  }, [items, activeSubTab, duplicateItemIds, showDuplicatesOnly, statusFilter, favoriteFilter, playCountFilter]);
+  }, [items, activeSubTab, duplicateItemIds, brokenItems, showDuplicatesOnly, statusFilter, favoriteFilter, playCountFilter, enableStacking]);
 
   // Sync filtered items to parent container (for auto-refilling floating windows)
   useEffect(() => {
@@ -1495,6 +1548,94 @@ export default function LibraryView({
                       {autoRefillFloatingWindows ? '已开启' : '已关闭'}
                     </button>
                   </div>
+
+                  {/* 6. Smart Start (智能正片起播) */}
+                  <div className="flex items-center justify-between pt-1 border-t border-white/10">
+                    <div className="flex flex-col">
+                      <span className="text-[11px] text-gray-200 font-medium">🎯 智能跳前奏起播</span>
+                      <span className="text-[9px] text-gray-500">长视频（大于10分钟）自动从 25%~35% 处起播</span>
+                    </div>
+                    <button
+                      onClick={() => {
+                        const nextVal = !playbackDefaults.smartStart;
+                        const updated = setPlaybackDefaults({ smartStart: nextVal });
+                        setPlaybackDefaultsState(updated);
+                      }}
+                      className={`px-3 py-1 rounded-lg text-[11px] font-bold transition ${
+                        playbackDefaults.smartStart
+                          ? 'bg-cyan-400 text-slate-950 font-extrabold shadow-md shadow-cyan-400/40'
+                          : 'bg-slate-800 hover:bg-slate-700 text-gray-400 hover:text-white border border-white/15'
+                      }`}
+                    >
+                      {playbackDefaults.smartStart ? '已开启' : '已关闭'}
+                    </button>
+                  </div>
+
+                  {/* 7. Patrol Mode (霓虹巡更轮播) */}
+                  <div className="flex flex-col gap-1.5 pt-1 border-t border-white/10">
+                    <div className="flex items-center justify-between">
+                      <div className="flex flex-col">
+                        <span className="text-[11px] text-cyan-300 font-bold">🚨 霓虹多窗巡更轮巡</span>
+                        <span className="text-[9px] text-gray-400">浮窗每部视频播放固定秒数后自动切下一部</span>
+                      </div>
+                      <button
+                        onClick={() => {
+                          const nextVal = !playbackDefaults.patrolMode;
+                          const updated = setPlaybackDefaults({ patrolMode: nextVal });
+                          setPlaybackDefaultsState(updated);
+                        }}
+                        className={`px-3 py-1 rounded-lg text-[11px] font-bold transition ${
+                          playbackDefaults.patrolMode
+                            ? 'bg-cyan-400 text-slate-950 font-extrabold shadow-md shadow-cyan-400/40'
+                            : 'bg-slate-800 hover:bg-slate-700 text-gray-400 hover:text-white border border-white/15'
+                        }`}
+                      >
+                        {playbackDefaults.patrolMode ? '已开启' : '已关闭'}
+                      </button>
+                    </div>
+                    {playbackDefaults.patrolMode && (
+                      <div className="grid grid-cols-4 gap-1 pt-0.5">
+                        {PATROL_INTERVALS.map(sec => (
+                          <button
+                            key={sec}
+                            onClick={() => {
+                              const updated = setPlaybackDefaults({ patrolIntervalSeconds: sec });
+                              setPlaybackDefaultsState(updated);
+                            }}
+                            className={`py-1 rounded text-[10px] font-mono font-bold text-center transition ${
+                              (playbackDefaults.patrolIntervalSeconds || 45) === sec
+                                ? 'bg-cyan-400 text-slate-950 shadow-sm'
+                                : 'bg-slate-800 text-gray-300 hover:bg-slate-700'
+                            }`}
+                          >
+                            {sec}秒
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 8. Media Stacking Toggle */}
+                  <div className="flex items-center justify-between pt-1 border-t border-white/10">
+                    <div className="flex flex-col">
+                      <span className="text-[11px] text-gray-200 font-medium">📦 自制切片智能聚合</span>
+                      <span className="text-[9px] text-gray-500">将 part1/part2 等切片合并为单张卡片</span>
+                    </div>
+                    <button
+                      onClick={() => {
+                        const nextVal = !enableStacking;
+                        setEnableStacking(nextVal);
+                        localStorage.setItem('jf_enable_media_stacking', String(nextVal));
+                      }}
+                      className={`px-3 py-1 rounded-lg text-[11px] font-bold transition ${
+                        enableStacking
+                          ? 'bg-cyan-400 text-slate-950 font-extrabold shadow-md shadow-cyan-400/40'
+                          : 'bg-slate-800 hover:bg-slate-700 text-gray-400 hover:text-white border border-white/15'
+                      }`}
+                    >
+                      {enableStacking ? '已开启' : '已关闭'}
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
@@ -1507,14 +1648,15 @@ export default function LibraryView({
             {SUB_TABS.map(tab => {
               const Icon = tab.icon;
               const isDup = tab.id === 'duplicates';
+              const isHealth = tab.id === 'health';
               return (
                 <button
                   key={tab.id}
                   onClick={() => handleSubTabChange(tab.id)}
                   className={`flex items-center gap-1 px-2 py-1 sm:px-2.5 rounded-lg font-medium transition flex-shrink-0 text-xs ${
                     activeSubTab === tab.id
-                      ? isDup ? 'bg-red-600/90 text-white shadow' : 'bg-slate-800 text-cyan-300 shadow'
-                      : isDup && duplicateCount > 0 ? 'text-red-400 hover:bg-red-950/40' : 'text-gray-400 hover:text-white'
+                      ? (isDup || isHealth) ? 'bg-red-600/90 text-white shadow' : 'bg-slate-800 text-cyan-300 shadow'
+                      : (isDup && duplicateCount > 0) || (isHealth && brokenCount > 0) ? 'text-red-400 hover:bg-red-950/40' : 'text-gray-400 hover:text-white'
                   }`}
                 >
                   <Icon size={12} />
@@ -1522,6 +1664,11 @@ export default function LibraryView({
                   {isDup && duplicateCount > 0 && (
                     <span className="px-1 py-0.5 rounded-full bg-red-500 text-[9px] text-white">
                       {duplicateCount}
+                    </span>
+                  )}
+                  {isHealth && brokenCount > 0 && (
+                    <span className="px-1 py-0.5 rounded-full bg-red-500 text-[9px] text-white">
+                      {brokenCount}
                     </span>
                   )}
                 </button>
@@ -2312,13 +2459,22 @@ export default function LibraryView({
           )
         )}
 
-        {/* SUB-VIEW 4: Items Grid / List View */}
-        {['items', 'duplicates'].includes(activeSubTab) && (
+        {/* SUB-VIEW 4: Items Grid / List View / Duplicates / Health */}
+        {['items', 'duplicates', 'health'].includes(activeSubTab) && (
           <>
             {displayItems.length === 0 && !isRefreshing ? (
               <div className="h-full flex flex-col items-center justify-center text-gray-500 gap-3 py-20">
-                <Film size={48} className="text-gray-700 animate-pulse" />
-                <div className="text-sm">没有找到符合当前筛选条件的媒体</div>
+                {activeSubTab === 'health' ? (
+                  <>
+                    <ShieldAlert size={48} className="text-emerald-500/80" />
+                    <div className="text-sm text-emerald-300 font-bold">全库未发现损坏/截断文件，媒体文件均健康！</div>
+                  </>
+                ) : (
+                  <>
+                    <Film size={48} className="text-gray-700 animate-pulse" />
+                    <div className="text-sm">没有找到符合当前筛选条件的媒体</div>
+                  </>
+                )}
               </div>
             ) : viewLayout === 'list' ? (
               <div className="flex flex-col gap-2">
@@ -2341,6 +2497,7 @@ export default function LibraryView({
                     onOpenIdentify={onOpenIdentify}
                     onRefreshMetadata={handleRefreshMetadata}
                     onDelete={handleDelete}
+                    onUpdateItem={onUpdateItem}
                     onOpenActionSheet={(it) => setActionSheetItem(it)}
                   />
                 ))}
@@ -2372,6 +2529,7 @@ export default function LibraryView({
                     onOpenIdentify={onOpenIdentify}
                     onRefreshMetadata={handleRefreshMetadata}
                     onDelete={handleDelete}
+                    onUpdateItem={onUpdateItem}
                     onOpenActionSheet={(it) => setActionSheetItem(it)}
                   />
                 ))}
@@ -2457,6 +2615,7 @@ export default function LibraryView({
         onOpenIdentify={onOpenIdentify}
         onRefreshMetadata={handleRefreshMetadata}
         onDelete={handleDelete}
+        onUpdateItem={onUpdateItem}
       />
 
       {/* Custom Safe Delete Modal */}

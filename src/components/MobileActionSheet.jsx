@@ -1,9 +1,12 @@
+import { useState } from 'react';
 import { jellyfin } from '../api/jellyfinClient';
 import { useExternalPlayer } from '../hooks/useExternalPlayer';
+import { cleanMediaTitle } from '../utils/titleCleaner';
+import QuickTagSelector from './QuickTagSelector';
 import {
   Play, Star, Eye, EyeOff, Edit3, Sparkles,
   Trash2, RefreshCw, ExternalLink, X, Film,
-  Glasses, Tv, Info
+  Glasses, Tv, Info, Wand2, Tag
 } from 'lucide-react';
 
 export default function MobileActionSheet({
@@ -19,15 +22,44 @@ export default function MobileActionSheet({
   onOpenMetadataEditor,
   onOpenIdentify,
   onRefreshMetadata,
-  onDelete
+  onDelete,
+  onUpdateItem
 }) {
   const { launchPlayer } = useExternalPlayer();
+  const [showQuickTags, setShowQuickTags] = useState(false);
 
   if (!isOpen || !item) return null;
 
   const posterUrl = jellyfin.getBestImageUrl(item, { maxWidth: 200 });
   const isFavorite = !!item.UserData?.IsFavorite;
   const isPlayed = !!item.UserData?.Played;
+
+  const handleCleanTitle = async () => {
+    const res = cleanMediaTitle(item.Name || '');
+    if (!res.isChanged && !res.extractedCode) {
+      alert('当前标题已很整洁，无需净化');
+      return;
+    }
+    const suggest = res.extractedCode || res.cleanedTitle;
+    if (confirm(`原标题: ${item.Name}\n净化建议: ${suggest}\n\n是否立即应用新标题保存到 Jellyfin？`)) {
+      try {
+        await jellyfin.updateItemMetadata(item.Id, {
+          Name: suggest,
+          OriginalTitle: item.OriginalTitle || item.Name
+        });
+        const updated = { ...item, Name: suggest };
+        if (onUpdateItem) onUpdateItem(updated);
+        onClose();
+        if (res.extractedCode && onOpenIdentify) {
+          if (confirm(`已提取到标准番号「${res.extractedCode}」，是否立即发起刮削识别？`)) {
+            onOpenIdentify(updated);
+          }
+        }
+      } catch (err) {
+        alert('保存失败: ' + err.message);
+      }
+    }
+  };
 
   return (
     <div 
@@ -44,11 +76,15 @@ export default function MobileActionSheet({
 
         {/* Item Header Banner */}
         <div className="flex items-center gap-3 border-b border-white/5 pb-3">
-          <div className="w-11 h-[60px] rounded-lg overflow-hidden bg-black/60 border border-white/10 flex-shrink-0">
-            {posterUrl ? (
-              <img src={posterUrl} alt={item.Name} className="w-full h-full object-cover" />
-            ) : (
-              <div className="w-full h-full flex items-center justify-center text-gray-500"><Film size={18} /></div>
+          <div className="w-11 h-[60px] rounded-lg overflow-hidden bg-black/60 border border-white/10 flex-shrink-0 relative">
+            <div className="absolute inset-0 flex items-center justify-center text-gray-600"><Film size={18} /></div>
+            {posterUrl && (
+              <img
+                src={posterUrl}
+                alt={item.Name}
+                onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                className="relative w-full h-full object-cover"
+              />
             )}
           </div>
           <div className="flex flex-col min-w-0 flex-1">
@@ -105,6 +141,26 @@ export default function MobileActionSheet({
               <span>详情 / 相似推荐</span>
             </button>
           )}
+
+          {/* Clean Title */}
+          <button
+            onClick={handleCleanTitle}
+            className="p-3 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-300 flex items-center gap-2.5"
+          >
+            <Wand2 size={15} />
+            <span>一键净化标题</span>
+          </button>
+
+          {/* Quick Tags */}
+          <button
+            onClick={() => setShowQuickTags(prev => !prev)}
+            className={`p-3 rounded-xl border flex items-center gap-2.5 ${
+              showQuickTags ? 'bg-cyan-500/30 border-cyan-400 text-cyan-300' : 'bg-black/40 border-white/5 text-cyan-300'
+            }`}
+          >
+            <Tag size={15} />
+            <span>快捷打标</span>
+          </button>
 
           {/* Favorite */}
           <button
@@ -182,6 +238,17 @@ export default function MobileActionSheet({
             <span>从磁盘彻底删除</span>
           </button>
         </div>
+
+        {/* Mobile Quick Tags Drawer Panel */}
+        {showQuickTags && (
+          <div className="pt-2 border-t border-white/10 animate-in fade-in zoom-in-95 duration-100">
+            <QuickTagSelector
+              item={item}
+              onUpdateItem={onUpdateItem}
+              onClose={() => setShowQuickTags(false)}
+            />
+          </div>
+        )}
       </div>
     </div>
   );

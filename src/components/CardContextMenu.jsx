@@ -1,14 +1,15 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  Tv, Play, Glasses, ExternalLink, Info, Edit3, Sparkles, RefreshCw, Trash2
+  Tv, Play, Glasses, ExternalLink, Info, Edit3, Sparkles, RefreshCw, Trash2, Wand2, Tag
 } from 'lucide-react';
 import { useExternalPlayer } from '../hooks/useExternalPlayer';
+import { cleanMediaTitle } from '../utils/titleCleaner';
+import { jellyfin } from '../api/jellyfinClient';
+import QuickTagSelector from './QuickTagSelector';
 
 /**
  * 媒体卡片操作菜单（Portal 渲染到 body，fixed 定位）
- * 修复：旧实现渲染在海报容器的 overflow-hidden 内部且向上弹出，
- * 菜单高度超出海报顶边被整体裁剪，导致"三点按钮点了没反应"。
  */
 export default function CardContextMenu({
   item,
@@ -21,11 +22,13 @@ export default function CardContextMenu({
   onOpenMetadataEditor,
   onOpenIdentify,
   onRefreshMetadata,
-  onDelete
+  onDelete,
+  onUpdateItem
 }) {
   const { launchPlayer } = useExternalPlayer();
   const menuRef = useRef(null);
   const [pos, setPos] = useState(null);
+  const [showQuickTags, setShowQuickTags] = useState(false);
 
   useLayoutEffect(() => {
     if (!anchorRect || !menuRef.current) return;
@@ -38,13 +41,12 @@ export default function CardContextMenu({
     left = Math.max(8, Math.min(left, window.innerWidth - mw - 8));
     top = Math.max(8, Math.min(top, window.innerHeight - mh - 8));
     setPos({ left, top });
-  }, [anchorRect]);
+  }, [anchorRect, showQuickTags]);
 
   useEffect(() => {
     if (!item) return;
     const handleOutside = (e) => {
       if (menuRef.current && !menuRef.current.contains(e.target)) {
-        // 触发按钮自身的点击交给按钮 onClick 处理（切换开/关），这里跳过
         if (e.target.closest?.('[data-contextmenu-trigger]')) return;
         onClose();
       }
@@ -72,6 +74,33 @@ export default function CardContextMenu({
     if (typeof fn === 'function') fn(item);
   };
 
+  const handleCleanTitle = async () => {
+    const res = cleanMediaTitle(item.Name || '');
+    if (!res.isChanged && !res.extractedCode) {
+      alert('当前标题已很整洁，无需净化');
+      return;
+    }
+    const suggest = res.extractedCode || res.cleanedTitle;
+    if (confirm(`原标题: ${item.Name}\n净化建议: ${suggest}\n\n是否立即应用新标题保存到 Jellyfin？`)) {
+      try {
+        await jellyfin.updateItemMetadata(item.Id, {
+          Name: suggest,
+          OriginalTitle: item.OriginalTitle || item.Name
+        });
+        const updated = { ...item, Name: suggest };
+        if (onUpdateItem) onUpdateItem(updated);
+        onClose();
+        if (res.extractedCode && onOpenIdentify) {
+          if (confirm(`已提取到标准番号「${res.extractedCode}」，是否立即发起刮削识别？`)) {
+            onOpenIdentify(updated);
+          }
+        }
+      } catch (err) {
+        alert('保存失败: ' + err.message);
+      }
+    }
+  };
+
   return createPortal(
     <div
       ref={menuRef}
@@ -81,7 +110,7 @@ export default function CardContextMenu({
         top: pos?.top ?? -9999,
         visibility: pos ? 'visible' : 'hidden'
       }}
-      className="w-44 glass-panel rounded-xl shadow-2xl py-1 z-[9999] text-xs text-gray-200 divide-y divide-white/5 animate-in fade-in zoom-in-95 duration-100"
+      className="w-48 glass-panel rounded-xl shadow-2xl py-1 z-[9999] text-xs text-gray-200 divide-y divide-white/5 animate-in fade-in zoom-in-95 duration-100"
       onClick={(e) => e.stopPropagation()}
     >
       <div className="py-1">
@@ -143,6 +172,38 @@ export default function CardContextMenu({
       </div>
 
       <div className="py-1">
+        {/* 一键净化标题 */}
+        <button
+          onClick={handleCleanTitle}
+          className="w-full px-3 py-1.5 text-left hover:bg-white/10 flex items-center gap-2 text-amber-300 font-medium"
+          title="自动去除推广后缀(@kbjba等)并提取标准番号"
+        >
+          <Wand2 size={12} />
+          <span>一键净化标题 / 提番号</span>
+        </button>
+
+        {/* 快捷打标 */}
+        <button
+          onClick={() => setShowQuickTags(prev => !prev)}
+          className="w-full px-3 py-1.5 text-left hover:bg-white/10 flex items-center justify-between text-cyan-300 font-medium"
+        >
+          <span className="flex items-center gap-2">
+            <Tag size={12} />
+            <span>快捷打标</span>
+          </span>
+          <span className="text-[10px] opacity-70">{(item.Tags || []).length > 0 ? `${item.Tags.length}个` : '+'}</span>
+        </button>
+
+        {showQuickTags && (
+          <div className="p-1">
+            <QuickTagSelector
+              item={item}
+              onUpdateItem={onUpdateItem}
+              onClose={() => setShowQuickTags(false)}
+            />
+          </div>
+        )}
+
         {onOpenMetadataEditor && (
           <button
             onClick={run(onOpenMetadataEditor)}

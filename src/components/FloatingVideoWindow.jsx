@@ -186,6 +186,8 @@ export default function FloatingVideoWindow({
 
   // 播放会话 ID（切换画质前上报 Stopped，防孤儿转码会话）
   const playSessionIdRef = useRef(null);
+  // 巡更模式单片跳过防重锁
+  const hasPatrolSkippedRef = useRef(false);
 
   const { launchPlayer } = useExternalPlayer();
 
@@ -264,6 +266,18 @@ export default function FloatingVideoWindow({
   useEffect(() => {
     const currentItem = itemRef.current;
     if (!currentItem?.Id) return;
+
+    // 1. 如果该条目已被 Smart Stacking 智能聚合并带有多分段，直接使用聚合切片列表！
+    if (currentItem.isStacked && currentItem.stackedItems && currentItem.stackedItems.length > 0) {
+      setPartsList(currentItem.stackedItems.map((part, idx) => ({
+        ...part,
+        Name: part.Name || `Part ${idx + 1}`
+      })));
+      setCurrentPartIndex(0);
+      return;
+    }
+
+    // 2. 否则通过 Jellyfin 原生 AdditionalParts 接口拉取多分段
     jellyfin.getAdditionalParts(currentItem.Id).then(additional => {
       if (additional && additional.length > 0) {
         setPartsList([
@@ -316,6 +330,7 @@ export default function FloatingVideoWindow({
     setHoverScrubberTime(null);
     setIsWheelSeeking(false);
     hasCountedPlayRef.current = false;
+    hasPatrolSkippedRef.current = false;
 
     const videoEl = videoRef.current;
     if (!videoEl) return;
@@ -607,8 +622,9 @@ export default function FloatingVideoWindow({
     setCurrentTimeText(formatTime(video.currentTime));
     setDurationText(formatTime(video.duration));
 
-    // 霓虹巡更轮播模式：达到设定时长（默认 45 秒）自动跳下一部
-    if (playbackDefaults.patrolMode && video.currentTime >= (playbackDefaults.patrolIntervalSeconds || 45)) {
+    // 霓虹巡更轮播模式：达到设定时长（默认 45 秒）自动跳下一部（加防重锁）
+    if (playbackDefaults.patrolMode && !hasPatrolSkippedRef.current && video.currentTime >= (playbackDefaults.patrolIntervalSeconds || 45)) {
+      hasPatrolSkippedRef.current = true;
       handleSkipNext();
     }
   };

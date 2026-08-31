@@ -830,6 +830,7 @@ export default function LibraryView({
   const [favoriteFilter, setFavoriteFilter] = useState('all');
   const [playCountFilter, setPlayCountFilter] = useState('all');
   const [showDuplicatesOnly, setShowDuplicatesOnly] = useState(false);
+  const [showMobileFilterMenu, setShowMobileFilterMenu] = useState(false);
   const [enableStacking, setEnableStacking] = useState(() => {
     try {
       return localStorage.getItem('jf_enable_media_stacking') !== 'false';
@@ -924,6 +925,13 @@ export default function LibraryView({
   const isMediaGridTab = activeSubTab === 'items' || activeSubTab === 'duplicates';
   const effectiveGridColumns = isMediaGridTab ? gridColumns : secondaryGridColumns;
   const showColumnsSlider = isMediaGridTab ? viewLayout !== 'list' : true;
+
+  // 手机端筛选下拉按钮是否处于激活状态（任一筛选生效即高亮）
+  const hasActiveMobileFilters =
+    (statusFilter || 'all') !== 'all' ||
+    favoriteFilter !== 'all' ||
+    playCountFilter !== 'all' ||
+    showDuplicatesOnly;
   
   // Secondary metadata state
   const [genresList, setGenresList] = useState([]);
@@ -1349,22 +1357,22 @@ export default function LibraryView({
             </button>
           </div>
 
-          <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
+          <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
             {/* Quick Random Windows Button: Mobile shows 随机 2 窗, Desktop shows 随机 3 窗 */}
             <button
               onClick={isMobileViewport ? (onOpenRandom2Windows || onPlayRandomItem) : (onOpenRandom3Windows || onPlayRandomItem)}
-              className="flex items-center gap-1 px-2.5 sm:px-3.5 py-1 sm:py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 text-xs font-bold shadow-lg transition transform hover:scale-[1.02]"
+              className="flex items-center gap-1 px-2 sm:px-3.5 py-1 sm:py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 text-xs font-bold shadow-lg transition transform hover:scale-[1.02]"
               title={isMobileViewport ? "随机挑选 2 部视频开启双窗播放" : "随机挑选 3 部视频开启 1大+2小 悬浮 3 窗"}
             >
               <Play size={12} className="fill-amber-400 text-amber-400" />
-              <span className="sm:hidden">随机 2 窗</span>
+              <span className="sm:hidden">随机2窗</span>
               <span className="hidden sm:inline">随机 3 窗</span>
             </button>
 
-            {/* Quick Random 1 Play Button */}
+            {/* Quick Random 1 Play Button (Desktop Only；移动端由底部导航栏承担) */}
             <button
               onClick={onPlayRandomItem}
-              className="hidden sm:flex items-center gap-1 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl bg-black/40 hover:bg-white/10 border border-white/10 text-gray-300 text-xs font-medium transition"
+              className="hidden md:flex items-center gap-1 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl bg-black/40 hover:bg-white/10 border border-white/10 text-gray-300 text-xs font-medium transition"
               title="随机挑选一部视频立即播放"
             >
               <Play size={12} className="text-gray-400" />
@@ -1389,15 +1397,15 @@ export default function LibraryView({
             <div className="relative">
               <button
                 onClick={() => setShowPlaybackDefaultsMenu(prev => !prev)}
-                className={`flex items-center gap-1 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl border text-xs font-bold transition ${
+                className={`flex items-center gap-1 p-1.5 sm:px-3 sm:py-1.5 rounded-xl border text-xs font-bold transition ${
                   showPlaybackDefaultsMenu
                     ? 'bg-cyan-950 border-cyan-400 text-cyan-300 shadow-lg shadow-cyan-500/30'
                     : 'bg-black/40 hover:bg-white/10 border-white/10 text-gray-300 hover:text-cyan-300'
                 }`}
                 title="设置全局默认播放选项（画质、倍速、海报画中画、快进步长等）"
               >
-                <SlidersHorizontal size={12} className="text-cyan-400" />
-                <span className="hidden xs:inline">默认播放</span>
+                <SlidersHorizontal size={13} className="text-cyan-400" />
+                <span className="hidden sm:inline">默认播放</span>
               </button>
 
               {/* Backdrop to close on outside click */}
@@ -1411,7 +1419,7 @@ export default function LibraryView({
               {/* Solid High-Contrast Dropdown Menu */}
               {showPlaybackDefaultsMenu && (
                 <div 
-                  className="absolute right-0 top-[calc(100%+8px)] z-50 w-80 bg-[#0d131f] border-2 border-cyan-400/80 rounded-2xl p-4 shadow-[0_20px_60px_rgba(0,0,0,0.95)] flex flex-col gap-3.5 text-xs animate-in fade-in zoom-in-95 duration-100"
+                  className="absolute right-0 top-[calc(100%+8px)] z-50 w-[88vw] max-w-sm sm:w-80 bg-[#0d131f] border-2 border-cyan-400/80 rounded-2xl p-3.5 sm:p-4 shadow-[0_20px_60px_rgba(0,0,0,0.95)] flex flex-col gap-3.5 text-xs animate-in fade-in zoom-in-95 duration-100 max-h-[85vh] overflow-y-auto"
                   onClick={(e) => e.stopPropagation()}
                 >
                   <div className="flex items-center justify-between border-b border-white/15 pb-2">
@@ -1756,103 +1764,243 @@ export default function LibraryView({
             )}
           </div>
 
-          {/* Filter Bar with Status, Favorites and Play Count */}
-          <div className="flex items-center bg-black/40 p-0.5 rounded-xl border border-white/5 gap-0.5 sm:gap-1 overflow-x-auto flex-shrink-0">
-            {/* Status (Mutually Exclusive: 全部 / 未播完 / 已播) */}
-            <div className="flex items-center gap-0.5">
-              {STATUS_OPTIONS.map(f => {
-                const active = (statusFilter || 'all') === f.id;
-                return (
-                  <button
-                    key={f.id}
-                    onClick={() => onStatusFilterChange(active && f.id !== 'all' ? 'all' : f.id)}
-                    className={`px-1.5 sm:px-2 py-1 rounded-lg transition flex-shrink-0 text-xs ${
-                      active
-                        ? 'bg-slate-700 text-cyan-300 font-medium shadow'
-                        : 'text-gray-400 hover:text-white'
-                    }`}
-                  >
-                    {f.label}
-                  </button>
-                );
-              })}
-            </div>
-
-            <div className="h-3.5 w-px bg-white/10 mx-0.5 flex-shrink-0" />
-
-            {/* Favorites Filter (Mutually Exclusive Pair: 最爱 / 非最爱) */}
-            <div className="flex items-center gap-0.5">
+          {/* 手机端：筛选下拉菜单（桌面端隐藏，防止按钮过多溢出） */}
+          {isMobileViewport ? (
+            <div className="relative flex-shrink-0">
               <button
-                onClick={() => setFavoriteFilter(prev => prev === 'favorite' ? 'all' : 'favorite')}
-                className={`px-1.5 sm:px-2 py-1 rounded-lg transition flex-shrink-0 text-xs flex items-center gap-1 ${
-                  favoriteFilter === 'favorite'
-                    ? 'bg-amber-500/25 border border-amber-500/40 text-amber-300 font-medium shadow'
-                    : 'text-gray-400 hover:text-amber-300'
+                onClick={() => setShowMobileFilterMenu(prev => !prev)}
+                className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl border text-xs font-bold transition ${
+                  hasActiveMobileFilters
+                    ? 'bg-cyan-500/30 border-cyan-400/60 text-cyan-300 shadow-sm shadow-cyan-500/30'
+                    : 'bg-black/40 border-white/10 text-gray-300 hover:text-cyan-300'
                 }`}
-                title="只看最爱视频"
+                title="筛选"
               >
-                <Star size={11} className={favoriteFilter === 'favorite' ? 'fill-amber-400 text-amber-400' : ''} />
-                <span>最爱</span>
+                <SlidersHorizontal size={12} />
+                <span>筛选</span>
+                {hasActiveMobileFilters && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
+                )}
               </button>
-              <button
-                onClick={() => setFavoriteFilter(prev => prev === 'not_favorite' ? 'all' : 'not_favorite')}
-                className={`px-1.5 sm:px-2 py-1 rounded-lg transition flex-shrink-0 text-xs flex items-center gap-1 ${
-                  favoriteFilter === 'not_favorite'
-                    ? 'bg-slate-700 text-cyan-300 font-medium shadow'
-                    : 'text-gray-400 hover:text-white'
-                }`}
-                title="只看非最爱视频"
-              >
-                <span>非最爱</span>
-              </button>
-            </div>
 
-            <div className="h-3.5 w-px bg-white/10 mx-0.5 flex-shrink-0" />
-
-            {/* Play Count Filter */}
-            <div className="flex items-center gap-0.5">
-              {PLAY_COUNT_OPTIONS.map(opt => {
-                const active = playCountFilter === opt.id;
-                return (
-                  <button
-                    key={opt.id}
-                    onClick={() => setPlayCountFilter(active ? 'all' : opt.id)}
-                    className={`px-1.5 sm:px-2 py-1 rounded-lg transition flex-shrink-0 text-xs ${
-                      active
-                        ? 'bg-slate-700 text-cyan-300 font-medium shadow'
-                        : 'text-gray-400 hover:text-white'
-                    }`}
-                    title={opt.title}
+              {showMobileFilterMenu && (
+                <>
+                  <div
+                    className="fixed inset-0 z-40"
+                    onClick={() => setShowMobileFilterMenu(false)}
+                  />
+                  <div
+                    className="absolute right-0 top-[calc(100%+8px)] z-50 w-72 bg-[#0d131f] border-2 border-cyan-400/60 rounded-2xl p-3.5 shadow-[0_20px_60px_rgba(0,0,0,0.95)] flex flex-col gap-3 text-xs animate-in fade-in zoom-in-95 duration-100 max-h-[70vh] overflow-y-auto"
+                    onClick={(e) => e.stopPropagation()}
                   >
-                    {opt.label}
-                  </button>
-                );
-              })}
-            </div>
+                    <div className="flex items-center justify-between border-b border-white/15 pb-2">
+                      <span className="font-bold text-white text-sm flex items-center gap-1.5">
+                        <SlidersHorizontal size={13} className="text-cyan-400" />
+                        筛选选项
+                      </span>
+                      <button
+                        onClick={() => setShowMobileFilterMenu(false)}
+                        className="p-1 rounded-full text-gray-400 hover:text-white hover:bg-white/10 transition"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
 
-            <div className="h-3.5 w-px bg-white/10 mx-0.5 flex-shrink-0" />
+                    {/* 播放状态 */}
+                    <div className="flex flex-col gap-1.5">
+                      <span className="text-[10px] text-cyan-300 font-bold">播放状态</span>
+                      <div className="grid grid-cols-3 gap-1">
+                        {STATUS_OPTIONS.map(f => {
+                          const active = (statusFilter || 'all') === f.id;
+                          return (
+                            <button
+                              key={f.id}
+                              onClick={() => onStatusFilterChange(active && f.id !== 'all' ? 'all' : f.id)}
+                              className={`py-1.5 rounded-lg text-[11px] text-center transition ${
+                                active
+                                  ? 'bg-cyan-400 text-slate-950 font-extrabold shadow-md shadow-cyan-400/40'
+                                  : 'bg-slate-800 text-gray-300 hover:bg-slate-700 border border-white/10'
+                              }`}
+                            >
+                              {f.label.replace(/^[^\u4e00-\u9fa5A-Za-z]+/, '')}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
 
-            {/* 仅显示重复影片 (U4) */}
-            <button
-              onClick={() => setShowDuplicatesOnly(prev => !prev)}
-              className={`px-1.5 sm:px-2 py-1 rounded-lg transition flex-shrink-0 text-xs flex items-center gap-1 ${
-                showDuplicatesOnly
-                  ? 'bg-red-600/90 text-white font-bold shadow'
-                  : duplicateCount > 0
-                    ? 'text-red-400 hover:text-red-300'
-                    : 'text-gray-400 hover:text-white'
-              }`}
-              title={showDuplicatesOnly ? '取消仅显示重复影片' : `仅在当前列表中显示重复影片 (${duplicateCount} 部)`}
-            >
-              <Layers size={11} />
-              <span>仅重复</span>
-              {showDuplicatesOnly && duplicateCount > 0 && (
-                <span className="px-1 py-0.5 rounded-full bg-red-500 text-[9px] text-white font-mono">
-                  {duplicateCount}
-                </span>
+                    {/* 收藏筛选 */}
+                    <div className="flex flex-col gap-1.5">
+                      <span className="text-[10px] text-cyan-300 font-bold">收藏</span>
+                      <div className="grid grid-cols-3 gap-1">
+                        {[
+                          { id: 'all', label: '全部' },
+                          { id: 'favorite', label: '最爱' },
+                          { id: 'not_favorite', label: '非最爱' }
+                        ].map(opt => {
+                          const active =
+                            (opt.id === 'all' && favoriteFilter === 'all') ||
+                            (opt.id === 'favorite' && favoriteFilter === 'favorite') ||
+                            (opt.id === 'not_favorite' && favoriteFilter === 'not_favorite');
+                          return (
+                            <button
+                              key={opt.id}
+                              onClick={() => setFavoriteFilter(opt.id)}
+                              className={`py-1.5 rounded-lg text-[11px] text-center transition ${
+                                active
+                                  ? 'bg-cyan-400 text-slate-950 font-extrabold shadow-md shadow-cyan-400/40'
+                                  : 'bg-slate-800 text-gray-300 hover:bg-slate-700 border border-white/10'
+                              }`}
+                            >
+                              {opt.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* 播放次数 */}
+                    <div className="flex flex-col gap-1.5">
+                      <span className="text-[10px] text-cyan-300 font-bold">播放次数</span>
+                      <div className="grid grid-cols-3 gap-1">
+                        {PLAY_COUNT_OPTIONS.map(opt => {
+                          const active = playCountFilter === opt.id;
+                          return (
+                            <button
+                              key={opt.id}
+                              onClick={() => setPlayCountFilter(active ? 'all' : opt.id)}
+                              className={`py-1.5 rounded-lg text-[11px] text-center transition ${
+                                active
+                                  ? 'bg-cyan-400 text-slate-950 font-extrabold shadow-md shadow-cyan-400/40'
+                                  : 'bg-slate-800 text-gray-300 hover:bg-slate-700 border border-white/10'
+                              }`}
+                            >
+                              {opt.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* 仅显示重复影片 */}
+                    <div className="flex items-center justify-between pt-1 border-t border-white/10">
+                      <span className="text-[11px] text-gray-200 font-medium flex items-center gap-1">
+                        <Layers size={11} className="text-red-400" />
+                        <span>仅显示重复影片</span>
+                      </span>
+                      <button
+                        onClick={() => setShowDuplicatesOnly(prev => !prev)}
+                        className={`px-3 py-1 rounded-lg text-[11px] font-bold transition ${
+                          showDuplicatesOnly
+                            ? 'bg-red-600 text-white shadow'
+                            : 'bg-slate-800 text-gray-300 hover:bg-slate-700 border border-white/10'
+                        }`}
+                      >
+                        {showDuplicatesOnly ? `已开启 (${duplicateCount})` : '已关闭'}
+                      </button>
+                    </div>
+                  </div>
+                </>
               )}
-            </button>
-          </div>
+            </div>
+          ) : (
+            <div className="flex items-center bg-black/40 p-0.5 rounded-xl border border-white/5 gap-0.5 sm:gap-1 overflow-x-auto flex-shrink-0">
+              {/* Status (Mutually Exclusive: 全部 / 未播完 / 已播) */}
+              <div className="flex items-center gap-0.5">
+                {STATUS_OPTIONS.map(f => {
+                  const active = (statusFilter || 'all') === f.id;
+                  return (
+                    <button
+                      key={f.id}
+                      onClick={() => onStatusFilterChange(active && f.id !== 'all' ? 'all' : f.id)}
+                      className={`px-1.5 sm:px-2 py-1 rounded-lg transition flex-shrink-0 text-xs ${
+                        active
+                          ? 'bg-slate-700 text-cyan-300 font-medium shadow'
+                          : 'text-gray-400 hover:text-white'
+                      }`}
+                    >
+                      {f.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="h-3.5 w-px bg-white/10 mx-0.5 flex-shrink-0" />
+
+              {/* Favorites Filter (Mutually Exclusive Pair: 最爱 / 非最爱) */}
+              <div className="flex items-center gap-0.5">
+                <button
+                  onClick={() => setFavoriteFilter(prev => prev === 'favorite' ? 'all' : 'favorite')}
+                  className={`px-1.5 sm:px-2 py-1 rounded-lg transition flex-shrink-0 text-xs flex items-center gap-1 ${
+                    favoriteFilter === 'favorite'
+                      ? 'bg-amber-500/25 border border-amber-500/40 text-amber-300 font-medium shadow'
+                      : 'text-gray-400 hover:text-amber-300'
+                  }`}
+                  title="只看最爱视频"
+                >
+                  <Star size={11} className={favoriteFilter === 'favorite' ? 'fill-amber-400 text-amber-400' : ''} />
+                  <span>最爱</span>
+                </button>
+                <button
+                  onClick={() => setFavoriteFilter(prev => prev === 'not_favorite' ? 'all' : 'not_favorite')}
+                  className={`px-1.5 sm:px-2 py-1 rounded-lg transition flex-shrink-0 text-xs flex items-center gap-1 ${
+                    favoriteFilter === 'not_favorite'
+                      ? 'bg-slate-700 text-cyan-300 font-medium shadow'
+                      : 'text-gray-400 hover:text-white'
+                  }`}
+                  title="只看非最爱视频"
+                >
+                  <span>非最爱</span>
+                </button>
+              </div>
+
+              <div className="h-3.5 w-px bg-white/10 mx-0.5 flex-shrink-0" />
+
+              {/* Play Count Filter */}
+              <div className="flex items-center gap-0.5">
+                {PLAY_COUNT_OPTIONS.map(opt => {
+                  const active = playCountFilter === opt.id;
+                  return (
+                    <button
+                      key={opt.id}
+                      onClick={() => setPlayCountFilter(active ? 'all' : opt.id)}
+                      className={`px-1.5 sm:px-2 py-1 rounded-lg transition flex-shrink-0 text-xs ${
+                        active
+                          ? 'bg-slate-700 text-cyan-300 font-medium shadow'
+                          : 'text-gray-400 hover:text-white'
+                      }`}
+                      title={opt.title}
+                    >
+                      {opt.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="h-3.5 w-px bg-white/10 mx-0.5 flex-shrink-0" />
+
+              {/* 仅显示重复影片 (U4) */}
+              <button
+                onClick={() => setShowDuplicatesOnly(prev => !prev)}
+                className={`px-1.5 sm:px-2 py-1 rounded-lg transition flex-shrink-0 text-xs flex items-center gap-1 ${
+                  showDuplicatesOnly
+                    ? 'bg-red-600/90 text-white font-bold shadow'
+                    : duplicateCount > 0
+                      ? 'text-red-400 hover:text-red-300'
+                      : 'text-gray-400 hover:text-white'
+                }`}
+                title={showDuplicatesOnly ? '取消仅显示重复影片' : `仅在当前列表中显示重复影片 (${duplicateCount} 部)`}
+              >
+                <Layers size={11} />
+                <span>仅重复</span>
+                {showDuplicatesOnly && duplicateCount > 0 && (
+                  <span className="px-1 py-0.5 rounded-full bg-red-500 text-[9px] text-white font-mono">
+                    {duplicateCount}
+                  </span>
+                )}
+              </button>
+            </div>
+          )}
 
           {/* Active Filter Chips（类型 / 年份 / 字母索引） */}
           {(selectedGenre || selectedYear || selectedLetter) && (

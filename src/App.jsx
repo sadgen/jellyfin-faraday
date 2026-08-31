@@ -208,7 +208,8 @@ export default function App() {
 
       if (isStale()) return; // 已有更新的请求发出，丢弃本次响应
 
-      const initialItems = firstPageData.Items || [];
+      const rawInitial = firstPageData.Items || [];
+      const initialItems = sortMediaItems(rawInitial, sort);
       const total = firstPageData.TotalRecordCount || initialItems.length;
 
       setMediaItems(initialItems);
@@ -232,11 +233,12 @@ export default function App() {
         if (isStale()) return;
 
         if (fullData.Items && fullData.Items.length > 0) {
-          setMediaItems(fullData.Items);
-          setTotalRecordCount(fullData.TotalRecordCount || fullData.Items.length);
+          const sortedFull = sortMediaItems(fullData.Items, sort);
+          setMediaItems(sortedFull);
+          setTotalRecordCount(fullData.TotalRecordCount || sortedFull.length);
           // 仅全量未筛选结果才写入全库缓存；筛选/搜索子集只更新内存状态
           if (isUnfilteredQuery) {
-            saveFullCache(fullData.Items, userViewsRef.current);
+            saveFullCache(sortedFull, userViewsRef.current);
           }
         }
       } else if (initialItems.length > 0 && isUnfilteredQuery) {
@@ -436,9 +438,12 @@ export default function App() {
   }, [mediaItems]);
 
   // Close floating window (removes window, subsequent windows shift forward; auto-refills if enabled)
-  const handleCloseFloatingWindow = useCallback((closedSlotIndex) => {
+  const handleCloseFloatingWindow = useCallback((targetSlotOrId) => {
     setFloatingWindows(prev => {
-      const remaining = prev.filter(w => w.slotIndex !== closedSlotIndex);
+      const target = prev.find(w => w.id === targetSlotOrId || w.slotIndex === targetSlotOrId);
+      if (!target) return prev;
+      const closedSlotIndex = target.slotIndex;
+      const remaining = prev.filter(w => w.id !== target.id);
       const shifted = remaining.map(w => {
         if (w.slotIndex > closedSlotIndex) {
           return { ...w, slotIndex: w.slotIndex - 1 };
@@ -477,10 +482,14 @@ export default function App() {
   }, []);
 
   // Skip video in floating window (destroys current window, shifts next windows forward, and spawns new random item from current filtered pool at tail slot)
-  const handleSkipFloatingWindow = useCallback((skippedSlotIndex) => {
+  const handleSkipFloatingWindow = useCallback((targetSlotOrId) => {
     setFloatingWindows(prev => {
+      const target = prev.find(w => w.id === targetSlotOrId || w.slotIndex === targetSlotOrId);
+      if (!target) return prev;
+      const skippedSlotIndex = target.slotIndex;
+
       // 1. Remove current window and shift following windows forward
-      const remaining = prev.filter(w => w.slotIndex !== skippedSlotIndex);
+      const remaining = prev.filter(w => w.id !== target.id);
       const shifted = remaining.map(w => {
         if (w.slotIndex > skippedSlotIndex) {
           return { ...w, slotIndex: w.slotIndex - 1 };

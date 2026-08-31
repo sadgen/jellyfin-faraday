@@ -4,6 +4,7 @@ import { getTrickplayStyle } from '../utils/trickplay';
 import { detectDuplicateMedia } from '../utils/duplicateChecker';
 import { scanLibraryHealth } from '../utils/healthInspector';
 import { stackMediaItems } from '../utils/mediaStacking';
+import { sortMediaItems } from '../utils/mediaSorter';
 import { useViewport } from '../hooks/useViewport';
 import { getPlaybackDefaults, setPlaybackDefaults, QUALITY_OPTIONS, SPEED_PRESETS, PATROL_INTERVALS } from '../utils/playbackDefaults';
 import { SEEK_SPEED_OPTIONS, getStoredSeekSpeed, setStoredSeekSpeed } from '../utils/seekSettings';
@@ -15,7 +16,7 @@ import {
   Trash2, Folder, Film,
   ArrowUpDown, X, RefreshCw, Layers, LayoutGrid,
   Grid, List, MoreVertical, Calendar,
-  Users, Tag, Check, ChevronRight,
+  Users, Tag, Check, ChevronRight, ChevronDown,
   SlidersHorizontal, Info, RotateCcw, History, Zap, ShieldAlert, Sparkles, Wand2
 } from 'lucide-react';
 
@@ -831,6 +832,8 @@ export default function LibraryView({
   const [playCountFilter, setPlayCountFilter] = useState('all');
   const [showDuplicatesOnly, setShowDuplicatesOnly] = useState(false);
   const [showMobileFilterMenu, setShowMobileFilterMenu] = useState(false);
+  const [showMobileSubTabMenu, setShowMobileSubTabMenu] = useState(false);
+  const [showMobileLayoutMenu, setShowMobileLayoutMenu] = useState(false);
   const [enableStacking, setEnableStacking] = useState(() => {
     try {
       return localStorage.getItem('jf_enable_media_stacking') !== 'false';
@@ -1126,16 +1129,17 @@ export default function LibraryView({
 
     // 4. 健康排查子标签页
     if (activeSubTab === 'health') {
-      return brokenItems;
+      return sortMediaItems(brokenItems, sortMethod);
     }
 
     // 5. 自制分段切片智能聚合（在影片主视图且开启聚合时）
     if (activeSubTab === 'items' && enableStacking) {
-      return stackMediaItems(result);
+      result = stackMediaItems(result);
     }
 
-    return result;
-  }, [items, activeSubTab, duplicateItemIds, brokenItems, showDuplicatesOnly, statusFilter, favoriteFilter, playCountFilter, enableStacking]);
+    // 6. 保证最终展示列表严格按当前 sortMethod 排序（解决按演员/关键词搜索时服务端按匹配度打乱排序的问题）
+    return sortMediaItems(result, sortMethod);
+  }, [items, activeSubTab, duplicateItemIds, brokenItems, showDuplicatesOnly, statusFilter, favoriteFilter, playCountFilter, enableStacking, sortMethod]);
 
   // Sync filtered items to parent container (for auto-refilling floating windows)
   useEffect(() => {
@@ -1561,7 +1565,7 @@ export default function LibraryView({
                   <div className="flex items-center justify-between pt-1 border-t border-white/10">
                     <div className="flex flex-col">
                       <span className="text-[11px] text-gray-200 font-medium">🎯 智能跳前奏起播</span>
-                      <span className="text-[9px] text-gray-500">长视频（大于10分钟）自动从 25%~35% 处起播</span>
+                      <span className="text-[9px] text-gray-400">优先识别片头章节，智能跳过开场冗余前奏起播</span>
                     </div>
                     <button
                       onClick={() => {
@@ -1584,7 +1588,7 @@ export default function LibraryView({
                     <div className="flex items-center justify-between">
                       <div className="flex flex-col">
                         <span className="text-[11px] text-cyan-300 font-bold">🚨 霓虹多窗巡更轮巡</span>
-                        <span className="text-[9px] text-gray-400">浮窗每部视频播放固定秒数后自动切下一部</span>
+                        <span className="text-[9px] text-gray-400">浮窗按设定秒数自动轮换换片，打造多屏监控看板</span>
                       </div>
                       <button
                         onClick={() => {
@@ -1650,97 +1654,264 @@ export default function LibraryView({
           </div>
         </div>
 
-        {/* Row 2: Secondary Sub-Tabs + 视图布局切换（常驻可见，窄屏下标签区横向滚动） */}
-        <div className="flex items-center justify-between gap-2 border-t border-white/5 pt-2 text-xs min-w-0">
-          <div className="flex items-center gap-1 overflow-x-auto flex-1 min-w-0 no-scrollbar">
-            {SUB_TABS.map(tab => {
-              const Icon = tab.icon;
-              const isDup = tab.id === 'duplicates';
-              const isHealth = tab.id === 'health';
-              return (
-                <button
-                  key={tab.id}
-                  onClick={() => handleSubTabChange(tab.id)}
-                  className={`flex items-center gap-1 px-2 py-1 sm:px-2.5 rounded-lg font-medium transition flex-shrink-0 text-xs ${
-                    activeSubTab === tab.id
-                      ? (isDup || isHealth) ? 'bg-red-600/90 text-white shadow' : 'bg-slate-800 text-cyan-300 shadow'
-                      : (isDup && duplicateCount > 0) || (isHealth && brokenCount > 0) ? 'text-red-400 hover:bg-red-950/40' : 'text-gray-400 hover:text-white'
-                  }`}
-                >
-                  <Icon size={12} />
-                  <span>{tab.label}</span>
-                  {isDup && duplicateCount > 0 && (
-                    <span className="px-1 py-0.5 rounded-full bg-red-500 text-[9px] text-white">
-                      {duplicateCount}
-                    </span>
-                  )}
-                  {isHealth && brokenCount > 0 && (
-                    <span className="px-1 py-0.5 rounded-full bg-red-500 text-[9px] text-white">
-                      {brokenCount}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
+        {/* Row 2: Secondary Sub-Tabs + 视图布局切换（桌面端平铺，手机端收拢为下拉菜单） */}
+        {isMobileViewport ? (
+          <div className="flex items-center justify-between gap-2 border-t border-white/5 pt-1.5 text-xs min-w-0">
+            {/* 手机端：子标签页下拉菜单 */}
+            <div className="relative flex-1 min-w-0">
+              {(() => {
+                const currentTab = SUB_TABS.find(t => t.id === activeSubTab) || SUB_TABS[0];
+                const Icon = currentTab.icon;
+                const isDup = activeSubTab === 'duplicates';
+                const isHealth = activeSubTab === 'health';
+                return (
+                  <button
+                    onClick={() => setShowMobileSubTabMenu(prev => !prev)}
+                    className="w-full flex items-center justify-between gap-1.5 px-3 py-1.5 rounded-xl bg-black/50 hover:bg-white/10 border border-white/10 text-xs font-bold text-gray-200 shadow-sm transition"
+                  >
+                    <div className="flex items-center gap-1.5 min-w-0 truncate">
+                      <Icon size={13} className={isDup || isHealth ? 'text-red-400' : 'text-cyan-400'} />
+                      <span className="truncate">{currentTab.label}</span>
+                      {isDup && duplicateCount > 0 && (
+                        <span className="px-1 py-0.2 rounded-full bg-red-500 text-[9px] text-white font-mono">
+                          {duplicateCount}
+                        </span>
+                      )}
+                      {isHealth && brokenCount > 0 && (
+                        <span className="px-1 py-0.2 rounded-full bg-red-500 text-[9px] text-white font-mono">
+                          {brokenCount}
+                        </span>
+                      )}
+                    </div>
+                    <ChevronDown size={13} className={`text-gray-400 transition-transform ${showMobileSubTabMenu ? 'rotate-180' : ''}`} />
+                  </button>
+                );
+              })()}
+
+              {showMobileSubTabMenu && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setShowMobileSubTabMenu(false)} />
+                  <div
+                    className="absolute left-0 top-[calc(100%+6px)] z-50 w-56 bg-[#0d131f] border-2 border-cyan-400/60 rounded-2xl p-2 shadow-[0_20px_60px_rgba(0,0,0,0.95)] flex flex-col gap-1 text-xs animate-in fade-in zoom-in-95 duration-100 max-h-[70vh] overflow-y-auto"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div className="px-2 py-1 text-[10px] font-bold text-gray-400 border-b border-white/10 mb-0.5">
+                      切换子标签页
+                    </div>
+                    {SUB_TABS.map(tab => {
+                      const Icon = tab.icon;
+                      const active = activeSubTab === tab.id;
+                      const isTabDup = tab.id === 'duplicates';
+                      const isTabHealth = tab.id === 'health';
+                      return (
+                        <button
+                          key={tab.id}
+                          onClick={() => {
+                            handleSubTabChange(tab.id);
+                            setShowMobileSubTabMenu(false);
+                          }}
+                          className={`flex items-center justify-between px-2.5 py-1.5 rounded-xl text-left transition ${
+                            active
+                              ? 'bg-cyan-400 text-slate-950 font-bold shadow-md shadow-cyan-400/30'
+                              : 'text-gray-300 hover:bg-white/10 hover:text-white'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <Icon size={13} className={active ? 'text-slate-950' : 'text-cyan-400'} />
+                            <span>{tab.label}</span>
+                          </div>
+                          {isTabDup && duplicateCount > 0 && (
+                            <span className="px-1.5 py-0.5 rounded-full bg-red-500 text-[10px] text-white font-mono">
+                              {duplicateCount}
+                            </span>
+                          )}
+                          {isTabHealth && brokenCount > 0 && (
+                            <span className="px-1.5 py-0.5 rounded-full bg-red-500 text-[10px] text-white font-mono">
+                              {brokenCount}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* 手机端：视图排版与列数下拉菜单 */}
+            <div className="relative flex-shrink-0">
+              <button
+                onClick={() => setShowMobileLayoutMenu(prev => !prev)}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-black/50 hover:bg-white/10 border border-white/10 text-xs font-bold text-gray-200 shadow-sm transition"
+                title="视图与排版选项"
+              >
+                <LayoutGrid size={13} className="text-cyan-400" />
+                <span>{effectiveGridColumns}列 · {viewLayout === 'poster' ? '海报' : viewLayout === 'backdrop' ? '剧照' : '列表'}</span>
+                <ChevronDown size={12} className={`text-gray-400 transition-transform ${showMobileLayoutMenu ? 'rotate-180' : ''}`} />
+              </button>
+
+              {showMobileLayoutMenu && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setShowMobileLayoutMenu(false)} />
+                  <div
+                    className="absolute right-0 top-[calc(100%+6px)] z-50 w-64 bg-[#0d131f] border-2 border-cyan-400/60 rounded-2xl p-3 shadow-[0_20px_60px_rgba(0,0,0,0.95)] flex flex-col gap-3 text-xs animate-in fade-in zoom-in-95 duration-100"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {/* 视图布局 */}
+                    {['items', 'duplicates'].includes(activeSubTab) && (
+                      <div className="flex flex-col gap-1.5">
+                        <span className="text-[10px] text-cyan-300 font-bold">视图布局</span>
+                        <div className="grid grid-cols-3 gap-1">
+                          {[
+                            { id: 'poster', label: '海报 (2:3)', icon: LayoutGrid },
+                            { id: 'backdrop', label: '剧照 (16:9)', icon: Grid },
+                            { id: 'list', label: '列表', icon: List }
+                          ].map(l => (
+                            <button
+                              key={l.id}
+                              onClick={() => {
+                                setViewLayout(l.id);
+                                setShowMobileLayoutMenu(false);
+                              }}
+                              className={`py-2 px-1 rounded-lg text-center flex flex-col items-center gap-1 transition ${
+                                viewLayout === l.id
+                                  ? 'bg-cyan-400 text-slate-950 font-extrabold shadow-md shadow-cyan-400/40'
+                                  : 'bg-slate-800 text-gray-300 hover:bg-slate-700 border border-white/10'
+                              }`}
+                            >
+                              <l.icon size={14} />
+                              <span className="text-[10px]">{l.label}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 每行列数 */}
+                    {showColumnsSlider && (
+                      <div className="flex flex-col gap-1.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] text-cyan-300 font-bold">每行显示列数</span>
+                          <span className="text-[11px] font-mono text-cyan-400 font-bold">{effectiveGridColumns} 列</span>
+                        </div>
+                        <div className="grid grid-cols-4 gap-1">
+                          {[1, 2, 3, 4].map(cols => (
+                            <button
+                              key={cols}
+                              onClick={() => {
+                                if (isMediaGridTab) handleGridColumnsChange(cols);
+                                else handleSecondaryGridColumnsChange(cols);
+                                setShowMobileLayoutMenu(false);
+                              }}
+                              className={`py-1.5 rounded-lg text-xs font-bold text-center transition ${
+                                effectiveGridColumns === cols
+                                  ? 'bg-cyan-400 text-slate-950 shadow-md shadow-cyan-400/30'
+                                  : 'bg-slate-800 text-gray-300 hover:bg-slate-700 border border-white/10'
+                              }`}
+                            >
+                              {cols}列
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
           </div>
+        ) : (
+          <div className="flex items-center justify-between gap-2 border-t border-white/5 pt-2 text-xs min-w-0">
+            <div className="flex items-center gap-1 overflow-x-auto flex-1 min-w-0 no-scrollbar">
+              {SUB_TABS.map(tab => {
+                const Icon = tab.icon;
+                const isDup = tab.id === 'duplicates';
+                const isHealth = tab.id === 'health';
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => handleSubTabChange(tab.id)}
+                    className={`flex items-center gap-1 px-2 py-1 sm:px-2.5 rounded-lg font-medium transition flex-shrink-0 text-xs ${
+                      activeSubTab === tab.id
+                        ? (isDup || isHealth) ? 'bg-red-600/90 text-white shadow' : 'bg-slate-800 text-cyan-300 shadow'
+                        : (isDup && duplicateCount > 0) || (isHealth && brokenCount > 0) ? 'text-red-400 hover:bg-red-950/40' : 'text-gray-400 hover:text-white'
+                    }`}
+                  >
+                    <Icon size={12} />
+                    <span>{tab.label}</span>
+                    {isDup && duplicateCount > 0 && (
+                      <span className="px-1 py-0.5 rounded-full bg-red-500 text-[9px] text-white">
+                        {duplicateCount}
+                      </span>
+                    )}
+                    {isHealth && brokenCount > 0 && (
+                      <span className="px-1 py-0.5 rounded-full bg-red-500 text-[9px] text-white">
+                        {brokenCount}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
 
-          <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
-            {/* 每行列数滑块（当前网格视图，按标签页独立记忆） */}
-            {showColumnsSlider && (
-              <div className="flex items-center gap-1.5 bg-black/50 px-2 py-1 rounded-xl border border-white/10 text-xs text-gray-300 flex-shrink-0">
-                <SlidersHorizontal size={12} className="text-cyan-400 flex-shrink-0" />
-                <input
-                  type="range"
-                  min={1}
-                  max={12}
-                  step={1}
-                  value={effectiveGridColumns}
-                  onChange={(e) => isMediaGridTab ? handleGridColumnsChange(e.target.value) : handleSecondaryGridColumnsChange(e.target.value)}
-                  className="w-14 sm:w-20 accent-cyan-400 h-1.5 bg-white/20 rounded-lg cursor-pointer appearance-none"
-                  title={`拖拽滑块调整当前视图每行数量 (当前: ${effectiveGridColumns} 列)`}
-                />
-                <span className="text-[10px] font-mono text-cyan-300 font-bold min-w-[24px] text-right">
-                  {effectiveGridColumns}列
-                </span>
-              </div>
-            )}
+            <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
+              {/* 每行列数滑块（当前网格视图，按标签页独立记忆） */}
+              {showColumnsSlider && (
+                <div className="flex items-center gap-1.5 bg-black/50 px-2 py-1 rounded-xl border border-white/10 text-xs text-gray-300 flex-shrink-0">
+                  <SlidersHorizontal size={12} className="text-cyan-400 flex-shrink-0" />
+                  <input
+                    type="range"
+                    min={1}
+                    max={12}
+                    step={1}
+                    value={effectiveGridColumns}
+                    onChange={(e) => isMediaGridTab ? handleGridColumnsChange(e.target.value) : handleSecondaryGridColumnsChange(e.target.value)}
+                    className="w-14 sm:w-20 accent-cyan-400 h-1.5 bg-white/20 rounded-lg cursor-pointer appearance-none"
+                    title={`拖拽滑块调整当前视图每行数量 (当前: ${effectiveGridColumns} 列)`}
+                  />
+                  <span className="text-[10px] font-mono text-cyan-300 font-bold min-w-[24px] text-right">
+                    {effectiveGridColumns}列
+                  </span>
+                </div>
+              )}
 
-            {/* 视图布局切换：海报 / 剧照缩略图 / 列表（影片/查重视图） */}
-            {['items', 'duplicates'].includes(activeSubTab) && (
-              <div className="flex items-center bg-black/50 p-0.5 rounded-xl border border-white/10 gap-0.5 flex-shrink-0">
-                <button
-                  onClick={() => setViewLayout('poster')}
-                  className={`p-1.5 rounded-lg transition ${
-                    viewLayout === 'poster' ? 'bg-slate-700 text-cyan-300 shadow' : 'text-gray-400 hover:text-white'
-                  }`}
-                  title="海报网格 (2:3)"
-                >
-                  <LayoutGrid size={13} />
-                </button>
+              {/* 视图布局切换：海报 / 剧照缩略图 / 列表（影片/查重视图） */}
+              {['items', 'duplicates'].includes(activeSubTab) && (
+                <div className="flex items-center bg-black/50 p-0.5 rounded-xl border border-white/10 gap-0.5 flex-shrink-0">
+                  <button
+                    onClick={() => setViewLayout('poster')}
+                    className={`p-1.5 rounded-lg transition ${
+                      viewLayout === 'poster' ? 'bg-slate-700 text-cyan-300 shadow' : 'text-gray-400 hover:text-white'
+                    }`}
+                    title="海报网格 (2:3)"
+                  >
+                    <LayoutGrid size={13} />
+                  </button>
 
-                <button
-                  onClick={() => setViewLayout('backdrop')}
-                  className={`p-1.5 rounded-lg transition ${
-                    viewLayout === 'backdrop' ? 'bg-slate-700 text-cyan-300 shadow' : 'text-gray-400 hover:text-white'
-                  }`}
-                  title="剧照缩略图网格 (16:9)"
-                >
-                  <Grid size={13} />
-                </button>
+                  <button
+                    onClick={() => setViewLayout('backdrop')}
+                    className={`p-1.5 rounded-lg transition ${
+                      viewLayout === 'backdrop' ? 'bg-slate-700 text-cyan-300 shadow' : 'text-gray-400 hover:text-white'
+                    }`}
+                    title="剧照缩略图网格 (16:9)"
+                  >
+                    <Grid size={13} />
+                  </button>
 
-                <button
-                  onClick={() => setViewLayout('list')}
-                  className={`p-1.5 rounded-lg transition ${
-                    viewLayout === 'list' ? 'bg-slate-700 text-cyan-300 shadow' : 'text-gray-400 hover:text-white'
-                  }`}
-                  title="列表视图"
-                >
-                  <List size={13} />
-                </button>
-              </div>
-            )}
+                  <button
+                    onClick={() => setViewLayout('list')}
+                    className={`p-1.5 rounded-lg transition ${
+                      viewLayout === 'list' ? 'bg-slate-700 text-cyan-300 shadow' : 'text-gray-400 hover:text-white'
+                    }`}
+                    title="列表视图"
+                  >
+                    <List size={13} />
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Row 2/3: Search, Filters & Sorting Bar: Auto-resizing Search Bar tiling smoothly */}
         <div className="flex items-center gap-1.5 sm:gap-2 text-xs pt-0.5 min-w-0 flex-nowrap overflow-x-auto no-scrollbar">

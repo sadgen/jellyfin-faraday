@@ -865,7 +865,7 @@ export default function VideoPlayerModal({
     }
   };
 
-  const posterUrl = item?.Id ? (jellyfin.getImageUrl(item.Id, item.ImageTags?.Backdrop || item.ImageTags?.Primary, 'Backdrop', 800, 80) || jellyfin.getImageUrl(item.Id, item.ImageTags?.Primary, 'Primary', 800, 80)) : null;
+  const posterUrl = item?.Id ? jellyfin.getBestImageUrl(item, { maxWidth: 800, preferBackdrop: true }) : null;
   const isFavorite = !!item?.UserData?.IsFavorite;
 
   return (

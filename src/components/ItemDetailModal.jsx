@@ -117,12 +117,8 @@ export default function ItemDetailModal({
 
   if (!isOpen || !item) return null;
 
-  const backdropUrl = current?.ImageTags?.Backdrop
-    ? jellyfin.getImageUrl(current.Id, current.ImageTags.Backdrop, 'Backdrop', 1000, 80)
-    : null;
-  const posterUrl = current?.ImageTags?.Primary
-    ? jellyfin.getImageUrl(current.Id, current.ImageTags.Primary, 'Primary', 400, 85)
-    : null;
+  const backdropUrl = current?.Id ? jellyfin.getBestImageUrl(current, { maxWidth: 1000, preferBackdrop: true }) : '';
+  const posterUrl = current?.Id ? jellyfin.getBestImageUrl(current, { maxWidth: 400 }) : '';
   const cast = (current?.People || [])
     // 只保留演员（Actor / GuestStar；无 Type 的条目按演员兜底），过滤导演/编剧等幕后人员
     .filter(p => !p.Type || ['Actor', 'GuestStar'].includes(p.Type))
@@ -157,11 +153,15 @@ export default function ItemDetailModal({
 
           {/* Title Block */}
           <div className="absolute bottom-0 inset-x-0 p-4 flex items-end gap-3">
-            <div className="w-16 sm:w-20 aspect-[2/3] rounded-lg overflow-hidden bg-black/70 border border-white/15 flex-shrink-0 shadow-xl">
-              {posterUrl ? (
-                <img src={posterUrl} alt={current?.Name} className="w-full h-full object-cover" />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center text-gray-600"><Film size={22} /></div>
+            <div className="w-16 sm:w-20 aspect-[2/3] rounded-lg overflow-hidden bg-black/70 border border-white/15 flex-shrink-0 shadow-xl relative">
+              <div className="absolute inset-0 flex items-center justify-center text-gray-600"><Film size={22} /></div>
+              {posterUrl && (
+                <img
+                  src={posterUrl}
+                  alt={current?.Name}
+                  onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                  className="relative w-full h-full object-cover"
+                />
               )}
             </div>
             <div className="min-w-0 flex-1 pb-0.5">
@@ -409,7 +409,7 @@ export default function ItemDetailModal({
               </div>
               <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
                 {similarItems.map(sim => {
-                  const simPoster = jellyfin.getImageUrl(sim.Id, sim.ImageTags?.Primary, 'Primary', 240, 80);
+                  const simPoster = jellyfin.getBestImageUrl(sim, { maxWidth: 240 });
                   return (
                     <button
                       key={sim.Id}

@@ -179,7 +179,7 @@ export default function StatsModal({ isOpen, onClose, items = [] }) {
               <div className="text-[11px] text-gray-400 font-bold">重播榜 Top 8</div>
               <div className="flex flex-col gap-1">
                 {stats.topPlayed.map(it => {
-                  const poster = jellyfin.getImageUrl(it.Id, it.ImageTags?.Primary, 'Primary', 120, 75);
+                  const poster = jellyfin.getBestImageUrl(it, { maxWidth: 120 });
                   return (
                     <div key={it.Id} className="flex items-center gap-2.5 p-1.5 rounded-lg bg-black/30 border border-white/5">
                       <div className="w-7 h-10 rounded overflow-hidden bg-black/60 border border-white/10 flex-shrink-0">

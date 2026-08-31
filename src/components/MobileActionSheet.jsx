@@ -25,7 +25,7 @@ export default function MobileActionSheet({
 
   if (!isOpen || !item) return null;
 
-  const posterUrl = jellyfin.getImageUrl(item.Id, item.ImageTags?.Primary, 'Primary', 200);
+  const posterUrl = jellyfin.getBestImageUrl(item, { maxWidth: 200 });
   const isFavorite = !!item.UserData?.IsFavorite;
   const isPlayed = !!item.UserData?.Played;
 

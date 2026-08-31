@@ -913,8 +913,8 @@ export default function FloatingVideoWindow({
 
   const coverUrl = useMemo(() => {
     if (!item?.Id) return null;
-    return jellyfin.getImageUrl(item.Id, item.ImageTags?.Primary, 'Primary', 500, 80);
-  }, [item?.Id, item?.ImageTags]);
+    return jellyfin.getBestImageUrl(item, { maxWidth: 500 });
+  }, [item]);
 
   const isFavorite = !!item?.UserData?.IsFavorite;
 
@@ -1306,7 +1306,12 @@ export default function FloatingVideoWindow({
             }}
             title="点击查看高清大图"
           >
-            <img src={coverUrl} alt="Poster" className="w-full h-full object-cover transition-transform group-hover/pip:scale-105" />
+            <img
+              src={coverUrl}
+              alt="Poster"
+              onError={(e) => { e.currentTarget.style.display = 'none'; }}
+              className="w-full h-full object-cover transition-transform group-hover/pip:scale-105"
+            />
             <button
               onClick={(e) => {
                 e.stopPropagation();

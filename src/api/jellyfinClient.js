@@ -670,6 +670,27 @@ export class JellyfinClient {
   }
 
   /**
+   * 选择条目最佳可用封面 URL。
+   * 回退链：Primary（海报/截图封面）→ Thumb → Backdrop；preferBackdrop 时优先 16:9 图源。
+   * 最后尝试不带 tag 的 Primary：服务器为无元数据视频自动生成的截图封面，
+   * 可能尚未反映在本地缓存的 ImageTags 里（无图时返回 404，由调用方 onError 回退占位图）。
+   */
+  getBestImageUrl(item, { maxWidth = 360, preferBackdrop = false, quality = 80 } = {}) {
+    if (!this.auth.serverUrl || !item?.Id) return '';
+    const tags = item.ImageTags || {};
+    if (preferBackdrop) {
+      if (tags.Backdrop) return this.getImageUrl(item.Id, tags.Backdrop, 'Backdrop', maxWidth, quality);
+      if (tags.Thumb) return this.getImageUrl(item.Id, tags.Thumb, 'Thumb', maxWidth, quality);
+      if (tags.Primary) return this.getImageUrl(item.Id, tags.Primary, 'Primary', maxWidth, quality);
+    } else {
+      if (tags.Primary) return this.getImageUrl(item.Id, tags.Primary, 'Primary', maxWidth, quality);
+      if (tags.Thumb) return this.getImageUrl(item.Id, tags.Thumb, 'Thumb', maxWidth, quality);
+      if (tags.Backdrop) return this.getImageUrl(item.Id, tags.Backdrop, 'Backdrop', maxWidth, quality);
+    }
+    return this.getImageUrl(item.Id, null, 'Primary', maxWidth, quality);
+  }
+
+  /**
    * Toggle favorite status
    */
   async toggleFavorite(itemId, isFavorite) {

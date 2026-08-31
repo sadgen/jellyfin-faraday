@@ -110,9 +110,11 @@ const MediaCard = memo(function MediaCard({
   const [isNearTop, setIsNearTop] = useState(false);
 
   const isBackdrop = viewLayout === 'backdrop';
-  const posterUrl = isBackdrop 
-    ? (jellyfin.getImageUrl(item.Id, item.ImageTags?.Backdrop || item.ImageTags?.Primary, 'Backdrop', 500, 80) || jellyfin.getImageUrl(item.Id, item.ImageTags?.Primary, 'Primary', 360, 80))
-    : jellyfin.getImageUrl(item.Id, item.ImageTags?.Primary, 'Primary', 360, 80);
+  // 封面回退链：Primary(海报/截图封面) → Thumb → Backdrop → 无 tag 兜底；
+  // 服务端 404 时由 img onError 回退到垫底的占位图标
+  const posterUrl = useMemo(() => {
+    return jellyfin.getBestImageUrl(item, { maxWidth: isBackdrop ? 500 : 360, preferBackdrop: isBackdrop });
+  }, [item, isBackdrop]);
 
   const isFavorite = !!item.UserData?.IsFavorite;
   const isPlayed = !!item.UserData?.Played;
@@ -328,20 +330,20 @@ const MediaCard = memo(function MediaCard({
         onTouchEnd={handleCoverTouchEnd}
         onTouchCancel={handleCoverTouchEnd}
       >
-        {/* Static Poster Artwork */}
-        {posterUrl ? (
+        {/* Static Poster Artwork（垫底占位图标：无封面 / 截图封面 404 时优雅回退） */}
+        <div className="absolute inset-0 flex items-center justify-center text-gray-600">
+          <Film size={isBackdrop ? 40 : 32} />
+        </div>
+        {posterUrl && (
           <img
             src={posterUrl}
             alt={item.Name}
             loading="lazy"
-            className={`w-full h-full object-cover transition-opacity duration-200 ${
+            onError={(e) => { e.currentTarget.style.display = 'none'; }}
+            className={`relative w-full h-full object-cover transition-opacity duration-200 ${
               isBackdrop && tpStyle ? 'opacity-0' : 'opacity-100'
             }`}
           />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center text-gray-600">
-            <Film size={isBackdrop ? 40 : 32} />
-          </div>
         )}
 
         {/* BACKDROP MODE: Inline inside 16:9 Card */}
@@ -539,7 +541,7 @@ const MediaListRow = memo(function MediaListRow({
   onOpenActionSheet
 }) {
   const [menuAnchor, setMenuAnchor] = useState(null);
-  const posterUrl = jellyfin.getImageUrl(item.Id, item.ImageTags?.Primary, 'Primary', 150, 80);
+  const posterUrl = jellyfin.getBestImageUrl(item, { maxWidth: 150 });
   const isFavorite = !!item.UserData?.IsFavorite;
   const playCount = item.UserData?.PlayCount || 0;
 
@@ -642,10 +644,14 @@ const MediaListRow = memo(function MediaListRow({
         )}
 
         <div className="relative w-8 h-12 sm:w-9 sm:h-[52px] rounded-lg overflow-hidden bg-black/60 border border-white/10 flex-shrink-0">
-          {posterUrl ? (
-            <img src={posterUrl} alt={item.Name} className="w-full h-full object-cover" />
-          ) : (
-            <div className="w-full h-full flex items-center justify-center text-gray-600"><Film size={14} /></div>
+          <div className="absolute inset-0 flex items-center justify-center text-gray-600"><Film size={14} /></div>
+          {posterUrl && (
+            <img
+              src={posterUrl}
+              alt={item.Name}
+              onError={(e) => { e.currentTarget.style.display = 'none'; }}
+              className="relative w-full h-full object-cover"
+            />
           )}
         </div>
 
@@ -1879,7 +1885,7 @@ export default function LibraryView({
                 const resumePercent = item.UserData?.PlaybackPositionTicks && item.RunTimeTicks
                   ? Math.min(100, (item.UserData.PlaybackPositionTicks / item.RunTimeTicks) * 100)
                   : 0;
-                const poster = jellyfin.getImageUrl(item.Id, item.ImageTags?.Primary, 'Primary', 360, 80);
+                const poster = jellyfin.getBestImageUrl(item, { maxWidth: 360 });
                 return (
                   <div
                     key={item.Id}
@@ -1888,10 +1894,15 @@ export default function LibraryView({
                     title={`继续播放 ${item.Name}`}
                   >
                     <div className="relative aspect-[2/3] bg-black overflow-hidden">
-                      {poster ? (
-                        <img src={poster} alt={item.Name} className="w-full h-full object-cover group-hover:scale-105 transition" />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center text-gray-600"><Film size={28} /></div>
+                      <div className="absolute inset-0 flex items-center justify-center text-gray-600"><Film size={28} /></div>
+                      {poster && (
+                        <img
+                          src={poster}
+                          alt={item.Name}
+                          loading="lazy"
+                          onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                          className="relative w-full h-full object-cover group-hover:scale-105 transition"
+                        />
                       )}
                       <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition flex items-center justify-center">
                         <div className="w-10 h-10 rounded-full bg-cyan-500/90 flex items-center justify-center text-white shadow-xl">
@@ -1928,7 +1939,7 @@ export default function LibraryView({
           ) : (
             <div className="grid gap-2.5 sm:gap-3.5" style={{ gridTemplateColumns: `repeat(${effectiveGridColumns}, minmax(0, 1fr))` }}>
               {nextUpList.map(item => {
-                const poster = jellyfin.getImageUrl(item.Id, item.ImageTags?.Primary, 'Primary', 360, 80);
+                const poster = jellyfin.getBestImageUrl(item, { maxWidth: 360 });
                 const epLabel = `${item.ParentIndexNumber !== undefined && item.ParentIndexNumber !== null ? `S${String(item.ParentIndexNumber).padStart(2, '0')}` : ''}${item.IndexNumber !== undefined && item.IndexNumber !== null ? `E${String(item.IndexNumber).padStart(2, '0')}` : ''}`;
                 return (
                   <div
@@ -1937,10 +1948,15 @@ export default function LibraryView({
                     className="group cursor-pointer rounded-xl overflow-hidden bg-slate-900/50 border border-white/5 hover:border-amber-500/40 hover:-translate-y-1 transition"
                   >
                     <div className="relative aspect-[2/3] bg-black overflow-hidden">
-                      {poster ? (
-                        <img src={poster} alt={item.Name} className="w-full h-full object-cover group-hover:scale-105 transition" />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center text-gray-600"><Film size={28} /></div>
+                      <div className="absolute inset-0 flex items-center justify-center text-gray-600"><Film size={28} /></div>
+                      {poster && (
+                        <img
+                          src={poster}
+                          alt={item.Name}
+                          loading="lazy"
+                          onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                          className="relative w-full h-full object-cover group-hover:scale-105 transition"
+                        />
                       )}
                       {epLabel && (
                         <div className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded bg-amber-500/90 text-slate-950 text-[9px] font-mono font-black">
@@ -1972,7 +1988,7 @@ export default function LibraryView({
                 const lastPlayed = item.UserData?.LastPlayedDate
                   ? new Date(item.UserData.LastPlayedDate)
                   : null;
-                const poster = jellyfin.getImageUrl(item.Id, item.ImageTags?.Primary, 'Primary', 360, 80);
+                const poster = jellyfin.getBestImageUrl(item, { maxWidth: 360 });
                 const epLabel = `${item.ParentIndexNumber !== undefined && item.ParentIndexNumber !== null ? `S${String(item.ParentIndexNumber).padStart(2, '0')}` : ''}${item.IndexNumber !== undefined && item.IndexNumber !== null ? `E${String(item.IndexNumber).padStart(2, '0')}` : ''}`;
                 const playedText = lastPlayed
                   ? `${lastPlayed.toLocaleDateString()} ${lastPlayed.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
@@ -1986,10 +2002,15 @@ export default function LibraryView({
                     title={`播放 ${item.SeriesName && epLabel ? `${item.SeriesName} ${epLabel} · ${item.Name}` : item.Name}`}
                   >
                     <div className="relative aspect-[2/3] bg-black overflow-hidden">
-                      {poster ? (
-                        <img src={poster} alt={item.Name} className="w-full h-full object-cover group-hover:scale-105 transition" />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center text-gray-600"><Film size={28} /></div>
+                      <div className="absolute inset-0 flex items-center justify-center text-gray-600"><Film size={28} /></div>
+                      {poster && (
+                        <img
+                          src={poster}
+                          alt={item.Name}
+                          loading="lazy"
+                          onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                          className="relative w-full h-full object-cover group-hover:scale-105 transition"
+                        />
                       )}
                       {epLabel && (
                         <div className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded bg-black/75 border border-cyan-500/40 text-cyan-300 text-[9px] font-mono font-black">

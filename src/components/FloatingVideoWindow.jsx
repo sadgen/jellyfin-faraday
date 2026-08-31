@@ -16,10 +16,11 @@ import InlineVrCanvas from './InlineVrCanvas';
 import SubtitleModal from './SubtitleModal';
 import DeleteConfirmModal from './DeleteConfirmModal';
 import { detectVrVideo } from '../utils/vrDetector';
+import { probeStreamStatus, describeVideoMediaError } from '../utils/playbackDiagnostics';
 import {
   Play, Pause, SkipForward, Volume2, VolumeX,
   X, ExternalLink, Star, Eye, EyeOff, Image as ImageIcon,
-  Glasses, Trash2, FastForward, Sun, Zap, Gauge, RefreshCw, Subtitles
+  Glasses, Trash2, FastForward, Sun, Zap, Gauge, RefreshCw, Subtitles, Film
 } from 'lucide-react';
 
 function formatTime(seconds) {
@@ -114,6 +115,7 @@ export default function FloatingVideoWindow({
   const [playbackSpeed, setPlaybackSpeed] = useState(() => playbackDefaults.speed || 1.0);
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
+  const [errorDetails, setErrorDetails] = useState('');
   const [showPlayerMenu, setShowPlayerMenu] = useState(false);
   const [showPosterModal, setShowPosterModal] = useState(false);
   const [showSubtitleModal, setShowSubtitleModal] = useState(false);
@@ -173,6 +175,8 @@ export default function FloatingVideoWindow({
   // Playback reporting & PlayCount Tracking
   const playReportTimerRef = useRef(null);
   const hasCountedPlayRef = useRef(false);
+  // 播放失败诊断：直连失败原因暂存
+  const directDiagRef = useRef('');
 
   // 播放会话 ID（切换画质前上报 Stopped，防孤儿转码会话）
   const playSessionIdRef = useRef(null);
@@ -237,6 +241,8 @@ export default function FloatingVideoWindow({
   playbackSpeedRef.current = playbackSpeed;
   const isMutedRef = useRef(isMuted);
   isMutedRef.current = isMuted;
+  const isVrActiveRef = useRef(isVrActive);
+  isVrActiveRef.current = isVrActive;
   const streamQualityRef = useRef(streamQuality);
   streamQualityRef.current = streamQuality;
   const itemRef = useRef(item);
@@ -298,6 +304,8 @@ export default function FloatingVideoWindow({
 
     setIsLoading(true);
     setHasError(false);
+    setErrorDetails('');
+    directDiagRef.current = '';
     setProgress(0);
     setHoverScrubberTime(null);
     setIsWheelSeeking(false);
@@ -410,6 +418,18 @@ export default function FloatingVideoWindow({
         hls.on(Hls.Events.ERROR, (_, data) => {
           if (data.fatal) {
             setHasError(true);
+            // 失败诊断（直连失败原因 + HLS 致命错误），屏幕与控制台双输出
+            const parts = [];
+            if (directDiagRef.current) parts.push(directDiagRef.current);
+            parts.push(`HLS: ${data.type}/${data.details}${data.response?.code ? ` (HTTP ${data.response.code})` : ''}`);
+            if (videoEl.videoWidth > 0) {
+              parts.push(`${videoEl.videoWidth}×${videoEl.videoHeight}${isVrActiveRef.current ? ' · VR模式已激活' : ''}`);
+            }
+            setErrorDetails(parts.join(' | '));
+            probeStreamStatus(directStreamUrl).then(status => {
+              setErrorDetails(prev => `${prev} | 直连探测: ${status}`);
+              console.warn('[Faraday] 播放失败诊断:', parts.join(' | '), `| 直连探测: ${status}`);
+            }).catch(() => {});
           }
         });
       } else if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
@@ -422,6 +442,9 @@ export default function FloatingVideoWindow({
     };
 
     const handleDirectError = () => {
+      // 记录直连失败原因（浏览器 MediaError），随后回退 HLS 转码
+      const mediaErrDesc = describeVideoMediaError(videoEl);
+      directDiagRef.current = `直连流: ${mediaErrDesc || '加载失败'}`;
       setupHlsPlay();
     };
 
@@ -848,6 +871,18 @@ export default function FloatingVideoWindow({
     } else {
       video.pause();
       setIsPlaying(false);
+    }
+  };
+
+  // 播放失败重试：重载当前源并恢复播放
+  const handleRetryPlayback = () => {
+    setHasError(false);
+    setIsLoading(true);
+    setErrorDetails('');
+    const video = videoRef.current;
+    if (video) {
+      video.load();
+      video.play().catch(() => {});
     }
   };
 
@@ -1332,6 +1367,23 @@ export default function FloatingVideoWindow({
         {isLoading && !hasError && (
           <div className="absolute z-20 flex flex-col items-center justify-center pointer-events-none gap-1">
             <div className="w-8 h-8 border-2 border-cyan-500/30 border-t-cyan-400 rounded-full animate-spin" />
+          </div>
+        )}
+
+        {/* Playback Error（含失败原因诊断，替代原来的黑屏无提示） */}
+        {hasError && (
+          <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-1.5 bg-black/85 p-2 text-center">
+            <Film size={20} className="text-red-400 flex-shrink-0" />
+            <p className="text-[11px] text-red-300 font-medium">播放失败</p>
+            {errorDetails && (
+              <p className="text-[9px] font-mono text-gray-400 max-w-full break-all leading-relaxed">{errorDetails}</p>
+            )}
+            <button
+              onClick={handleRetryPlayback}
+              className="mt-1 px-3 py-1 rounded-lg bg-jf-accent hover:bg-cyan-400 text-white text-[10px] font-bold transition"
+            >
+              重试
+            </button>
           </div>
         )}
 

@@ -14,6 +14,7 @@ import SubtitleModal from './SubtitleModal';
 import VolumeControl from './VolumeControl';
 import SleepTimerButton from './SleepTimerButton';
 import { detectVrVideo } from '../utils/vrDetector';
+import { probeStreamStatus, describeVideoMediaError } from '../utils/playbackDiagnostics';
 import { QUALITY_OPTIONS, PLAYBACK_SPEED_OPTIONS } from '../utils/qualityPresets';
 import { SEEK_SPEED_OPTIONS, getStoredSeekSpeed, setStoredSeekSpeed, getSeekStepSeconds, getSeekSwipeSpan } from '../utils/seekSettings';
 import { getPlaybackDefaults } from '../utils/playbackDefaults';
@@ -69,6 +70,7 @@ export default function VideoPlayerModal({
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [errorDetails, setErrorDetails] = useState('');
   const [showPlayerMenu, setShowPlayerMenu] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showQualityMenu, setShowQualityMenu] = useState(false);
@@ -119,6 +121,8 @@ export default function VideoPlayerModal({
 
   // 播放会话 ID：同一条目内切换画质/音轨时先上报 Stopped 再换新 ID，防止服务器孤儿转码会话
   const playSessionIdRef = useRef(null);
+  // 播放失败诊断：直连失败原因暂存，致命错误时合并展示
+  const directDiagRef = useRef('');
 
   // 音轨 / 字幕 / 音量 / PlaybackInfo（共享 hooks）
   const { playbackData, setPlaybackData } = useMediaPlaybackInfo(item?.Id);
@@ -278,6 +282,8 @@ export default function VideoPlayerModal({
   volumeRef.current = volume;
   const selectedAudioStreamIndexRef = useRef(selectedAudioStreamIndex);
   selectedAudioStreamIndexRef.current = selectedAudioStreamIndex;
+  const isVrActiveRef = useRef(isVrActive);
+  isVrActiveRef.current = isVrActive;
 
   // Cleanup timers on component unmount
   useEffect(() => {
@@ -337,6 +343,8 @@ export default function VideoPlayerModal({
     setIsLoading(true);
     setHasError(false);
     setErrorMessage('');
+    setErrorDetails('');
+    directDiagRef.current = '';
     setProgress(0);
     setHoverScrubberTime(null);
     setIsWheelSeeking(false);
@@ -455,6 +463,18 @@ export default function VideoPlayerModal({
           if (data.fatal) {
             setHasError(true);
             setErrorMessage('视频加载失败，请重试');
+            // 汇总失败诊断（直连失败原因 + HLS 致命错误 + 分辨率/VR 状态），屏幕与控制台双输出
+            const parts = [];
+            if (directDiagRef.current) parts.push(directDiagRef.current);
+            parts.push(`HLS: ${data.type}/${data.details}${data.response?.code ? ` (HTTP ${data.response.code})` : ''}`);
+            if (videoEl.videoWidth > 0) {
+              parts.push(`${videoEl.videoWidth}×${videoEl.videoHeight}${isVrActiveRef.current ? ' · VR模式已激活' : ''}`);
+            }
+            setErrorDetails(parts.join(' | '));
+            probeStreamStatus(directStreamUrl).then(status => {
+              setErrorDetails(prev => `${prev} | 直连探测: ${status}`);
+              console.warn('[Faraday] 播放失败诊断:', parts.join(' | '), `| 直连探测: ${status}`);
+            }).catch(() => {});
           }
         });
       } else if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
@@ -472,6 +492,9 @@ export default function VideoPlayerModal({
     };
 
     const handleDirectError = () => {
+      // 记录直连失败原因（浏览器 MediaError），随后回退 HLS 转码
+      const mediaErrDesc = describeVideoMediaError(videoEl);
+      directDiagRef.current = `直连流: ${mediaErrDesc || '加载失败'}`;
       setupHlsPlay();
     };
 
@@ -1030,11 +1053,17 @@ export default function VideoPlayerModal({
               <div className="p-3 rounded-full bg-red-500/20 text-red-400 mb-2">
                 <Film size={24} />
               </div>
-              <p className="text-sm text-red-300 font-medium mb-3">{errorMessage}</p>
+              <p className="text-sm text-red-300 font-medium mb-2">{errorMessage}</p>
+              {errorDetails && (
+                <p className="text-[10px] font-mono text-gray-500 max-w-md break-all leading-relaxed mb-3 text-left">
+                  {errorDetails}
+                </p>
+              )}
               <button
                 onClick={() => {
                   setHasError(false);
                   setIsLoading(true);
+                  setErrorDetails('');
                   if (videoRef.current) {
                     videoRef.current.load();
                     videoRef.current.play().catch(() => {});

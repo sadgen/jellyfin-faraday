@@ -27,6 +27,8 @@ credentials.json
 .vscode/*
 !.vscode/extensions.json
 .idea
+.mimosa/
+.zcode/
 .DS_Store
 *.suo
 *.ntvs*

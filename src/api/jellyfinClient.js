@@ -372,6 +372,31 @@ export class JellyfinClient {
   }
 
   /**
+   * 浏览媒体库原始文件夹结构（非递归，返回直接子文件夹与视频文件）
+   * 用于"文件夹"标签页按目录树浏览。
+   */
+  async getFolderChildren(parentId) {
+    if (!this.auth.isConfigured || !parentId) return [];
+    try {
+      const query = new URLSearchParams({
+        ParentId: parentId,
+        SortBy: 'SortName',
+        SortOrder: 'Ascending',
+        Fields: 'PrimaryImageAspectRatio,UserData,RunTimeTicks,ProductionYear,ImageTags,ChildCount,MediaSources,Trickplay'
+      });
+      const res = await fetch(`${this.auth.serverUrl}/Users/${this.auth.userId}/Items?${query.toString()}`, {
+        headers: this.getAuthHeaders()
+      });
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data.Items || [];
+    } catch (err) {
+      console.warn('Failed to fetch folder children:', err);
+      return [];
+    }
+  }
+
+  /**
    * Fetch all genres for current library or global
    */
   async getGenres(parentId = '') {

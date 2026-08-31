@@ -19,6 +19,7 @@ import {
 
 const SUB_TABS = [
   { id: 'items', label: '影片', icon: Film },
+  { id: 'folder', label: '文件夹', icon: Folder },
   { id: 'resume', label: '继续观看', icon: RotateCcw },
   { id: 'nextup', label: 'NextUp', icon: Zap },
   { id: 'history', label: '历史', icon: History },
@@ -32,9 +33,9 @@ const SUB_TABS = [
 // A-Z 字母索引（# 代表非字母开头）
 const LETTER_INDEXES = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', '#'];
 
-// 其他网格视图（继续观看 / NextUp / 历史 / 演员 / 类型 / 年份 / 合集）的默认每行列数
+// 其他网格视图（文件夹 / 继续观看 / NextUp / 历史 / 演员 / 类型 / 年份 / 合集）的默认每行列数
 const SECONDARY_GRID_DEFAULT_COLUMNS = {
-  genres: 6, persons: 5, years: 8, collections: 6, resume: 6, nextup: 6, history: 6
+  folder: 6, genres: 6, persons: 5, years: 8, collections: 6, resume: 6, nextup: 6, history: 6
 };
 
 // 按标签页读取持久化的每行列数（1-12），无记录时使用默认值
@@ -877,6 +878,56 @@ export default function LibraryView({
   const [resumeList, setResumeList] = useState([]);
   const [nextUpList, setNextUpList] = useState([]);
   const [historyList, setHistoryList] = useState([]);
+
+  // 原始目录树结构（文件夹浏览）状态
+  const [folderItems, setFolderItems] = useState([]);
+  const [folderPathStack, setFolderPathStack] = useState([]); // [{ id, name }]
+  const [isFolderLoading, setIsFolderLoading] = useState(false);
+
+  // 当切换库视图时，重置文件夹面包屑栈
+  useEffect(() => {
+    if (selectedViewId && selectedViewId !== 'all') {
+      const view = userViews.find(v => v.Id === selectedViewId);
+      setFolderPathStack([{ id: selectedViewId, name: view?.Name || '根目录' }]);
+    } else {
+      setFolderPathStack([]);
+    }
+  }, [selectedViewId, userViews]);
+
+  // 文件夹当前所在的父节点 ID
+  const currentFolderNode = folderPathStack[folderPathStack.length - 1];
+  const currentFolderId = currentFolderNode?.id || (selectedViewId !== 'all' ? selectedViewId : '');
+
+  // 加载当前文件夹的直接子项（文件夹 + 视频）
+  useEffect(() => {
+    if (activeSubTab !== 'folder' || !jellyfin.auth.isConfigured) return;
+
+    if (!currentFolderId) {
+      // 在"全部"视图且尚未进入任何库：直接展示各顶级库作为文件夹
+      setFolderItems(userViews.map(v => ({
+        Id: v.Id,
+        Name: v.Name,
+        IsFolder: true,
+        Type: 'Folder',
+        ImageTags: v.ImageTags,
+        ChildCount: v.ChildCount
+      })));
+      return;
+    }
+
+    setIsFolderLoading(true);
+    let cancelled = false;
+    jellyfin.getFolderChildren(currentFolderId).then(items => {
+      if (!cancelled) {
+        setFolderItems(items || []);
+        setIsFolderLoading(false);
+      }
+    }).catch(() => {
+      if (!cancelled) setIsFolderLoading(false);
+    });
+
+    return () => { cancelled = true; };
+  }, [activeSubTab, currentFolderId, userViews]);
 
   // 演职员：从本地缓存聚合"只统计演员"（/Persons 接口会混入导演/编剧等幕后人员）。
   // 依据条目 People 中的 Type 过滤（Actor / GuestStar / 无 Type 视为演员），按出演数量排序。
@@ -1748,6 +1799,195 @@ export default function LibraryView({
                 </button>
               );
             })}
+          </div>
+        )}
+
+        {/* SUB-VIEW 0: Folder Browser（原始文件夹目录树逐层浏览） */}
+        {activeSubTab === 'folder' && (
+          <div className="flex flex-col gap-3">
+            {/* 面包屑导航栏 */}
+            <div className="flex items-center justify-between gap-2 p-2 px-3 rounded-xl bg-slate-900/60 border border-white/10 text-xs">
+              <div className="flex items-center gap-1.5 flex-wrap flex-1 min-w-0">
+                <button
+                  onClick={() => {
+                    if (selectedViewId && selectedViewId !== 'all') {
+                      const root = userViews.find(v => v.Id === selectedViewId);
+                      setFolderPathStack([{ id: selectedViewId, name: root?.Name || '根目录' }]);
+                    } else {
+                      setFolderPathStack([]);
+                    }
+                  }}
+                  className="flex items-center gap-1 text-cyan-400 hover:text-cyan-300 font-bold"
+                >
+                  <Folder size={14} />
+                  <span>{selectedViewId && selectedViewId !== 'all' ? (userViews.find(v => v.Id === selectedViewId)?.Name || '媒体库根目录') : '全部媒体库'}</span>
+                </button>
+
+                {folderPathStack.map((node, idx) => (
+                  <div key={node.id} className="flex items-center gap-1.5">
+                    <ChevronRight size={12} className="text-gray-600" />
+                    {idx === folderPathStack.length - 1 ? (
+                      <span className="font-bold text-white truncate max-w-[200px]">{node.name}</span>
+                    ) : (
+                      <button
+                        onClick={() => setFolderPathStack(prev => prev.slice(0, idx + 1))}
+                        className="text-gray-400 hover:text-cyan-300 truncate max-w-[150px]"
+                      >
+                        {node.name}
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              {folderPathStack.length > (selectedViewId && selectedViewId !== 'all' ? 1 : 0) && (
+                <button
+                  onClick={() => setFolderPathStack(prev => prev.slice(0, prev.length - 1))}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-gray-200 text-xs font-medium transition flex-shrink-0"
+                >
+                  <span>返回上一级</span>
+                </button>
+              )}
+            </div>
+
+            {/* 内容区域：加载中 / 空目录 / 目录内容 */}
+            {isFolderLoading ? (
+              <div className="flex items-center justify-center py-20 text-gray-500 gap-2">
+                <RefreshCw size={18} className="animate-spin text-cyan-400" />
+                <span>正在加载文件夹内容...</span>
+              </div>
+            ) : folderItems.length === 0 ? (
+              <div className="h-full flex flex-col items-center justify-center text-gray-500 gap-3 py-20">
+                <Folder size={48} className="text-gray-700" />
+                <div className="text-sm">当前文件夹为空</div>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-4">
+                {/* 1. 子文件夹区 */}
+                {folderItems.some(it => it.IsFolder || it.Type === 'Folder' || it.Type === 'CollectionFolder') && (
+                  <div className="flex flex-col gap-2">
+                    <div className="text-[11px] font-bold text-gray-400 flex items-center gap-1.5">
+                      <Folder size={12} className="text-cyan-400" />
+                      <span>子文件夹 ({folderItems.filter(it => it.IsFolder || it.Type === 'Folder' || it.Type === 'CollectionFolder').length})</span>
+                    </div>
+                    <div
+                      className="grid gap-2.5 sm:gap-3"
+                      style={{ gridTemplateColumns: `repeat(${effectiveGridColumns}, minmax(0, 1fr))` }}
+                    >
+                      {folderItems
+                        .filter(it => it.IsFolder || it.Type === 'Folder' || it.Type === 'CollectionFolder')
+                        .map(folder => {
+                          const folderPoster = jellyfin.getBestImageUrl(folder, { maxWidth: 300 });
+                          return (
+                            <div
+                              key={folder.Id}
+                              onClick={() => {
+                                setFolderPathStack(prev => [...prev, { id: folder.Id, name: folder.Name }]);
+                              }}
+                              className="group flex flex-col bg-slate-900/50 hover:bg-slate-800/80 rounded-xl overflow-hidden border border-white/5 hover:border-cyan-500/40 hover:-translate-y-0.5 transition cursor-pointer shadow-lg"
+                            >
+                              <div className="aspect-[16/10] bg-black/60 overflow-hidden relative flex items-center justify-center">
+                                {folderPoster ? (
+                                  <img
+                                    src={folderPoster}
+                                    alt={folder.Name}
+                                    onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                                    className="w-full h-full object-cover group-hover:scale-105 transition"
+                                  />
+                                ) : (
+                                  <div className="w-full h-full flex items-center justify-center text-cyan-400/70 group-hover:text-cyan-300">
+                                    <Folder size={38} />
+                                  </div>
+                                )}
+                                {folder.ChildCount !== undefined && folder.ChildCount !== null && (
+                                  <div className="absolute bottom-1.5 right-1.5 px-2 py-0.5 rounded-full bg-black/80 backdrop-blur-md border border-white/15 text-[10px] font-mono text-cyan-300">
+                                    {folder.ChildCount} 项
+                                  </div>
+                                )}
+                              </div>
+                              <div className="p-2.5 flex flex-col gap-0.5">
+                                <div className="text-xs font-bold text-white truncate group-hover:text-cyan-300 transition" title={folder.Name}>
+                                  {folder.Name}
+                                </div>
+                                <div className="text-[10px] text-gray-500">文件夹</div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                    </div>
+                  </div>
+                )}
+
+                {/* 2. 视频文件区 */}
+                {folderItems.some(it => !it.IsFolder && it.Type !== 'Folder' && it.Type !== 'CollectionFolder') && (
+                  <div className="flex flex-col gap-2">
+                    <div className="text-[11px] font-bold text-gray-400 flex items-center gap-1.5">
+                      <Film size={12} className="text-cyan-400" />
+                      <span>视频文件 ({folderItems.filter(it => !it.IsFolder && it.Type !== 'Folder' && it.Type !== 'CollectionFolder').length})</span>
+                    </div>
+                    {viewLayout === 'list' ? (
+                      <div className="flex flex-col gap-2">
+                        {folderItems
+                          .filter(it => !it.IsFolder && it.Type !== 'Folder' && it.Type !== 'CollectionFolder')
+                          .map(file => (
+                            <MediaListRow
+                              key={file.Id}
+                              item={file}
+                              isDuplicate={duplicateItemIds.has(file.Id)}
+                              isSelected={selectedItemIds.has(file.Id)}
+                              isSelecting={isSelecting}
+                              isMobileViewport={isMobileViewport}
+                              onToggleSelect={handleToggleSelect}
+                              onPlay={onPlaySingleItem}
+                              onPlayModal={onPlayModal}
+                              onPlayVr={onPlayVr}
+                              onToggleFavorite={handleToggleFavorite}
+                              onTogglePlayed={handleTogglePlayed}
+                              onOpenDetail={onOpenDetail}
+                              onOpenMetadataEditor={onOpenMetadataEditor}
+                              onOpenIdentify={onOpenIdentify}
+                              onRefreshMetadata={handleRefreshMetadata}
+                              onDelete={handleDelete}
+                              onOpenActionSheet={(it) => setActionSheetItem(it)}
+                            />
+                          ))}
+                      </div>
+                    ) : (
+                      <div
+                        className="grid gap-2.5 sm:gap-3.5"
+                        style={{ gridTemplateColumns: `repeat(${effectiveGridColumns}, minmax(0, 1fr))` }}
+                      >
+                        {folderItems
+                          .filter(it => !it.IsFolder && it.Type !== 'Folder' && it.Type !== 'CollectionFolder')
+                          .map(file => (
+                            <MediaCard
+                              key={file.Id}
+                              item={file}
+                              isDuplicate={duplicateItemIds.has(file.Id)}
+                              viewLayout={viewLayout}
+                              isSelected={selectedItemIds.has(file.Id)}
+                              isSelecting={isSelecting}
+                              isMobileViewport={isMobileViewport}
+                              onToggleSelect={handleToggleSelect}
+                              onPlay={onPlaySingleItem}
+                              onPlayModal={onPlayModal}
+                              onPlayVr={onPlayVr}
+                              onToggleFavorite={handleToggleFavorite}
+                              onTogglePlayed={handleTogglePlayed}
+                              onOpenDetail={onOpenDetail}
+                              onOpenMetadataEditor={onOpenMetadataEditor}
+                              onOpenIdentify={onOpenIdentify}
+                              onRefreshMetadata={handleRefreshMetadata}
+                              onDelete={handleDelete}
+                              onOpenActionSheet={(it) => setActionSheetItem(it)}
+                            />
+                          ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 

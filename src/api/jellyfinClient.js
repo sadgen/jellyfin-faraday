@@ -632,51 +632,77 @@ export class JellyfinClient {
 
   /**
    * Get robust HLS master playlist URL
-   * @param {object} opts - { playSessionId, audioStreamIndex }
+   * 注意：Jellyfin 10.11.11 动态分片控制器禁止在 master.m3u8 及分片请求中携带 StartTimeTicks
+   * （会触发 System.ArgumentException: StartTimeTicks is not allowed 错误）。
+   * 起播定位必须由客户端 hls.js 的 startPosition 负责，Jellyfin 会根据请求的分片序号自适应处理 FFmpeg -ss。
+   * @param {string} itemId
+   * @param {object} opts - { playSessionId, mediaSourceId, audioStreamIndex, subtitleStreamIndex, videoBitrate, audioBitrate, maxStreamingBitrate, videoCodec, audioCodec, segmentContainer, minSegments, segmentLength, requireAvc, transcodingMaxAudioChannels }
    */
-  getHlsUrl(itemId, { playSessionId = null, audioStreamIndex = null } = {}) {
+  getHlsUrl(itemId, {
+    playSessionId = null,
+    mediaSourceId = null,
+    audioStreamIndex = null,
+    subtitleStreamIndex = null,
+    videoBitrate = null,
+    audioBitrate = null,
+    maxStreamingBitrate = null,
+    videoCodec = 'h264',
+    audioCodec = 'aac,mp3',
+    segmentContainer = 'ts',
+    minSegments = 1,
+    segmentLength = null,
+    requireAvc = false,
+    transcodingMaxAudioChannels = 2
+  } = {}) {
     if (!this.auth.serverUrl || !itemId) return '';
+    const maxBitrate = maxStreamingBitrate || videoBitrate || 8000000;
     const query = new URLSearchParams({
-      MediaSourceId: itemId,
+      MediaSourceId: mediaSourceId || itemId,
       api_key: this.auth.token,
-      PlaySessionId: playSessionId || ('jf_' + Math.random().toString(36).substring(2, 10)),
-      VideoCodec: 'h264',
-      AudioCodec: 'aac,mp3',
-      maxStreamingBitrate: '8000000',
-      TranscodingMaxAudioChannels: '2',
-      RequireAvc: 'false',
-      SegmentContainer: 'ts',
-      MinSegments: '2'
+      DeviceId: 'FaradayWebClient',
+      PlaySessionId: playSessionId || this.createPlaySessionId(),
+      VideoCodec: videoCodec,
+      AudioCodec: audioCodec,
+      maxStreamingBitrate: String(maxBitrate),
+      TranscodingMaxAudioChannels: String(transcodingMaxAudioChannels),
+      RequireAvc: String(requireAvc),
+      SegmentContainer: segmentContainer,
+      MinSegments: String(minSegments)
     });
+    if (videoBitrate) {
+      query.set('VideoBitrate', String(videoBitrate));
+    }
+    if (audioBitrate) {
+      query.set('AudioBitrate', String(audioBitrate));
+    }
+    if (segmentLength) {
+      query.set('SegmentLength', String(segmentLength));
+    }
     if (audioStreamIndex !== null && audioStreamIndex !== undefined) {
       query.set('AudioStreamIndex', String(audioStreamIndex));
+    }
+    if (subtitleStreamIndex !== null && subtitleStreamIndex !== undefined) {
+      query.set('SubtitleStreamIndex', String(subtitleStreamIndex));
     }
     return `${this.auth.serverUrl}/Videos/${itemId}/master.m3u8?${query.toString()}`;
   }
 
   /**
    * Get Smooth HLS Transcode URL (Forced bitrate H.264/AAC for 0 frame drops on stuttering / HEVC videos)
-   * @param {object} opts - { playSessionId, audioStreamIndex }
+   * @param {string} itemId
+   * @param {number} maxBitrate
+   * @param {object} opts
    */
-  getSmoothHlsUrl(itemId, maxBitrate = 4000000, { playSessionId = null, audioStreamIndex = null } = {}) {
-    if (!this.auth.serverUrl || !itemId) return '';
-    const query = new URLSearchParams({
-      MediaSourceId: itemId,
-      api_key: this.auth.token,
-      PlaySessionId: playSessionId || ('jf_smooth_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6)),
-      VideoCodec: 'h264',
-      AudioCodec: 'aac',
-      maxStreamingBitrate: String(maxBitrate),
-      VideoBitrate: String(maxBitrate),
-      AudioBitrate: '128000',
-      TranscodingMaxAudioChannels: '2',
-      SegmentContainer: 'ts',
-      MinSegments: '2'
+  getSmoothHlsUrl(itemId, maxBitrate = 4000000, opts = {}) {
+    return this.getHlsUrl(itemId, {
+      maxStreamingBitrate: maxBitrate,
+      videoBitrate: maxBitrate,
+      audioBitrate: opts?.audioBitrate || 128000,
+      audioCodec: opts?.audioCodec || 'aac',
+      minSegments: opts?.minSegments ?? 1,
+      segmentLength: opts?.segmentLength ?? 3,
+      ...opts
     });
-    if (audioStreamIndex !== null && audioStreamIndex !== undefined) {
-      query.set('AudioStreamIndex', String(audioStreamIndex));
-    }
-    return `${this.auth.serverUrl}/Videos/${itemId}/master.m3u8?${query.toString()}`;
   }
 
   /**
@@ -746,21 +772,56 @@ export class JellyfinClient {
 
   /**
    * Report Playback Session progress to Jellyfin server (Increments PlayCount and updates last played)
-   * @param {object} opts - { playSessionId, volumeLevel }
+   * @param {string} itemId
+   * @param {number} positionSec
+   * @param {boolean} isPaused
+   * @param {string} type - 'Started' | 'Progress' | 'Stopped'
+   * @param {object} opts - { playSessionId, mediaSourceId, playMethod, canSeek, playbackRate, audioStreamIndex, subtitleStreamIndex, isMuted, volumeLevel }
    */
-  async reportPlayback(itemId, positionSec = 0, isPaused = false, type = 'Progress', { playSessionId = null, volumeLevel = null } = {}) {
+  async reportPlayback(itemId, positionSec = 0, isPaused = false, type = 'Progress', {
+    playSessionId = null,
+    mediaSourceId = null,
+    playMethod = null,
+    canSeek = true,
+    playbackRate = null,
+    audioStreamIndex = null,
+    subtitleStreamIndex = null,
+    isMuted = null,
+    volumeLevel = null
+  } = {}) {
     if (!this.auth.isConfigured || !itemId) return false;
     const endpoint = type === 'Started' ? '' : `/${type}`;
     const url = `${this.auth.serverUrl}/Sessions/Playing${endpoint}`;
     const body = {
       ItemId: itemId,
       PositionTicks: Math.floor(positionSec * 10000000),
-      IsPaused: isPaused,
+      IsPaused: Boolean(isPaused),
       VolumeLevel: (volumeLevel !== null && volumeLevel !== undefined) ? Math.round(volumeLevel) : 100,
       EventName: type
     };
     if (playSessionId) {
       body.PlaySessionId = playSessionId;
+    }
+    if (mediaSourceId) {
+      body.MediaSourceId = mediaSourceId;
+    }
+    if (playMethod) {
+      body.PlayMethod = playMethod;
+    }
+    if (canSeek !== undefined && canSeek !== null) {
+      body.CanSeek = Boolean(canSeek);
+    }
+    if (playbackRate !== null && playbackRate !== undefined) {
+      body.PlaybackRate = Number(playbackRate);
+    }
+    if (audioStreamIndex !== null && audioStreamIndex !== undefined) {
+      body.AudioStreamIndex = Number(audioStreamIndex);
+    }
+    if (subtitleStreamIndex !== null && subtitleStreamIndex !== undefined) {
+      body.SubtitleStreamIndex = Number(subtitleStreamIndex);
+    }
+    if (isMuted !== null && isMuted !== undefined) {
+      body.IsMuted = Boolean(isMuted);
     }
     try {
       const res = await fetch(url, {
@@ -772,6 +833,24 @@ export class JellyfinClient {
     } catch {
       return false;
     }
+  }
+
+  /**
+   * Explicitly stop an active transcode/playback session on Jellyfin server to release server resources
+   */
+  async stopTranscoding(itemId, playSessionId, {
+    positionSec = 0,
+    mediaSourceId = null,
+    playMethod = 'Transcode',
+    ...rest
+  } = {}) {
+    if (!this.auth.isConfigured || !itemId || !playSessionId) return false;
+    return this.reportPlayback(itemId, positionSec, true, 'Stopped', {
+      playSessionId,
+      mediaSourceId,
+      playMethod,
+      ...rest
+    });
   }
 
   /**

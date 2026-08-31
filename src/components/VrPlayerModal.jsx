@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
-import Hls from 'hls.js';
 import { jellyfin } from '../api/jellyfinClient';
 import TrickplayScrubberThumbnail from './TrickplayScrubberThumbnail';
 import SubtitleOverlay from './SubtitleOverlay';
@@ -12,6 +11,7 @@ import { useMediaPlaybackInfo } from '../hooks/useMediaPlaybackInfo';
 import { useSubtitleTracks } from '../hooks/useSubtitleTracks';
 import { PLAYBACK_SPEED_OPTIONS } from '../utils/qualityPresets';
 import { getStoredSeekSpeed, getSeekStepSeconds } from '../utils/seekSettings';
+import { PlaybackSessionController } from '../utils/playbackSessionController';
 import {
   X, Play, Pause,
   RotateCcw, Glasses,
@@ -47,7 +47,6 @@ export default function VrPlayerModal({
 }) {
   const containerRef = useRef(null);
   const videoRef = useRef(null);
-  const hlsRef = useRef(null);
   const scrubberRef = useRef(null);
   const sceneRef = useRef(null);
   const cameraRef = useRef(null);
@@ -55,10 +54,20 @@ export default function VrPlayerModal({
   const meshRef = useRef(null);
   const textureRef = useRef(null);
   const animFrameRef = useRef(null);
-  const playReportTimerRef = useRef(null);
   const hasCountedPlayRef = useRef(false);
-  const playSessionIdRef = useRef(null);
   const isDraggingScrubberRef = useRef(false);
+  const scrubberDragTimeRef = useRef(null);
+
+  const wheelTimerRef = useRef(null);
+  const wheelSeekingTimeRef = useRef(null);
+
+  // 统一播放会话控制器
+  const sessionControllerRef = useRef(null);
+  if (!sessionControllerRef.current) {
+    sessionControllerRef.current = new PlaybackSessionController({
+      jellyfinClient: jellyfin
+    });
+  }
 
   const isUserInteractingRef = useRef(false);
   const onPointerDownPointerXRef = useRef(0);
@@ -282,25 +291,24 @@ export default function VrPlayerModal({
   // Cleanup timers on component unmount
   useEffect(() => {
     return () => {
-      if (playReportTimerRef.current) clearInterval(playReportTimerRef.current);
+      if (wheelTimerRef.current) clearTimeout(wheelTimerRef.current);
     };
   }, []);
 
-  // Load video stream (Direct / HLS) — 支持续播（此前 VR 模式总是从 0 开始）
+  // Load video stream (Direct / HLS) via PlaybackSessionController
   useEffect(() => {
-    if (!isOpen || !item?.Id || !videoRef.current) return;
+    const controller = sessionControllerRef.current;
+    if (!controller) return;
+
+    if (!isOpen || !item?.Id || !videoRef.current) {
+      controller.destroy();
+      return;
+    }
 
     setIsLoading(true);
     hasCountedPlayRef.current = false;
     const videoEl = videoRef.current;
-
-    if (hlsRef.current) {
-      hlsRef.current.destroy();
-      hlsRef.current = null;
-    }
-
-    const sessionId = jellyfin.createPlaySessionId();
-    playSessionIdRef.current = sessionId;
+    controller.attachVideo(videoEl);
 
     // 续播位置：Trickplay 点击时间 > 服务器上次播放位置 > 0
     const initialSeekTime = (item.startSecond !== undefined && item.startSecond !== null)
@@ -308,102 +316,27 @@ export default function VrPlayerModal({
       : (item.UserData?.PlaybackPositionTicks ? item.UserData.PlaybackPositionTicks / 10000000 : 0);
 
     const onLoadedMetadata = () => {
-      if (initialSeekTime > 0 && videoEl) {
+      if (initialSeekTime > 0 && !controller.isTranscoding() && videoEl) {
         videoEl.currentTime = initialSeekTime;
       }
       syncSubtitleModesRef.current();
     };
     videoEl.addEventListener('loadedmetadata', onLoadedMetadata, { once: true });
-    if (initialSeekTime > 0 && videoEl.readyState >= 1) {
-      videoEl.currentTime = initialSeekTime;
-    }
 
-    // Report playback start to Jellyfin
-    jellyfin.reportPlayback(item.Id, initialSeekTime, false, 'Started', {
-      playSessionId: sessionId,
-      volumeLevel: volumeRef.current * 100
+    controller.loadStream({
+      itemId: item.Id,
+      streamQuality: 'direct',
+      initialSeekTime,
+      playbackSpeed: playbackSpeedRef.current,
+      isMuted: isMutedRef.current,
+      volume: volumeRef.current
     });
 
-    // Periodic progress reporting (every 10s)
-    if (playReportTimerRef.current) clearInterval(playReportTimerRef.current);
-    playReportTimerRef.current = setInterval(() => {
-      if (videoEl && !videoEl.paused && videoEl.currentTime > 0) {
-        jellyfin.reportPlayback(item.Id, videoEl.currentTime, false, 'Progress', {
-          playSessionId: playSessionIdRef.current,
-          volumeLevel: volumeRef.current * 100
-        });
-
-        // Count playback if played for >= 10s
-        if (!hasCountedPlayRef.current && videoEl.currentTime >= 10) {
-          hasCountedPlayRef.current = true;
-          const currentItem = itemRef.current;
-          const nextCount = (currentItem?.UserData?.PlayCount || 0) + 1;
-          if (onUpdateItemRef.current && currentItem) {
-            onUpdateItemRef.current({
-              ...currentItem,
-              UserData: { ...currentItem.UserData, PlayCount: nextCount }
-            });
-          }
-        }
-      }
-    }, 10000);
-
-    const directUrl = jellyfin.getStreamUrl(item.Id);
-    const hlsUrl = jellyfin.getHlsUrl(item.Id, { playSessionId: sessionId });
-
-    const setupDirect = () => {
-      videoEl.src = directUrl;
-      videoEl.muted = isMutedRef.current;
-      videoEl.playbackRate = playbackSpeedRef.current;
-      videoEl.play().catch(() => {
-        videoEl.muted = true;
-        setIsMuted(true);
-        videoEl.play().catch(() => {});
-      });
-    };
-
-    const setupHls = () => {
-      if (Hls.isSupported()) {
-        const hls = new Hls({ enableWorker: true, lowLatencyMode: true });
-        hlsRef.current = hls;
-        hls.loadSource(hlsUrl);
-        hls.attachMedia(videoEl);
-        hls.on(Hls.Events.MANIFEST_PARSED, () => {
-          videoEl.muted = isMutedRef.current;
-          videoEl.playbackRate = playbackSpeedRef.current;
-          if (initialSeekTime > 0) videoEl.currentTime = initialSeekTime;
-          videoEl.play().catch(() => {
-            videoEl.muted = true;
-            setIsMuted(true);
-            videoEl.play().catch(() => {});
-          });
-        });
-      } else {
-        setupDirect();
-      }
-    };
-
-    videoEl.addEventListener('error', setupHls, { once: true });
-    setupDirect();
-
     return () => {
-      if (playReportTimerRef.current) clearInterval(playReportTimerRef.current);
-      if (videoEl && videoEl.currentTime > 0) {
-        jellyfin.reportPlayback(item.Id, videoEl.currentTime, true, 'Stopped', {
-          playSessionId: playSessionIdRef.current,
-          volumeLevel: volumeRef.current * 100
-        });
-      }
-      videoEl.removeEventListener('error', setupHls);
       videoEl.removeEventListener('loadedmetadata', onLoadedMetadata);
-      if (hlsRef.current) {
-        hlsRef.current.destroy();
-        hlsRef.current = null;
-      }
-      videoEl.removeAttribute('src');
-      videoEl.load();
+      controller.destroy();
     };
-  }, [isOpen, item?.Id, setIsMuted]);
+  }, [isOpen, item?.Id]);
 
   // 键盘快捷键（与影院播放器一致）
   useEffect(() => {
@@ -424,13 +357,15 @@ export default function VrPlayerModal({
         case 'ArrowLeft':
           e.preventDefault();
           if (video && video.duration) {
-            video.currentTime = Math.max(0, video.currentTime - getSeekStepSeconds(seekSpeed));
+            const next = Math.max(0, (video.currentTime || 0) - getSeekStepSeconds(seekSpeed));
+            sessionControllerRef.current?.seek(next);
           }
           break;
         case 'ArrowRight':
           e.preventDefault();
           if (video && video.duration) {
-            video.currentTime = Math.min(video.duration, video.currentTime + getSeekStepSeconds(seekSpeed));
+            const next = Math.min(video.duration, (video.currentTime || 0) + getSeekStepSeconds(seekSpeed));
+            sessionControllerRef.current?.seek(next);
           }
           break;
         case 'ArrowUp':
@@ -487,7 +422,7 @@ export default function VrPlayerModal({
     isUserInteractingRef.current = false;
   };
 
-  // Wheel Zoom FOV & Wheel Seek（步长遵循全局快进档位设置）
+  // Wheel Zoom FOV & Wheel Seek（步长遵循全局快进档位设置，防抖提交）
   const handleWheel = (e) => {
     if (e.shiftKey) {
       // Shift + Wheel = Adjust Field of View
@@ -509,7 +444,24 @@ export default function VrPlayerModal({
     if (!video || !video.duration) return;
     const step = getSeekStepSeconds(seekSpeed);
     const delta = e.deltaY > 0 ? step : -step;
-    video.currentTime = Math.max(0, Math.min(video.duration, video.currentTime + delta));
+    const baseTime = wheelSeekingTimeRef.current !== null ? wheelSeekingTimeRef.current : video.currentTime;
+    const nextTime = Math.max(0, Math.min(video.duration, baseTime + delta));
+    wheelSeekingTimeRef.current = nextTime;
+
+    setProgress((nextTime / video.duration) * 100);
+    setCurrentTimeText(formatTime(nextTime));
+    setHoverScrubberTime(nextTime);
+    setHoverScrubberPercent(nextTime / video.duration);
+
+    if (wheelTimerRef.current) clearTimeout(wheelTimerRef.current);
+    wheelTimerRef.current = setTimeout(() => {
+      const commitTime = wheelSeekingTimeRef.current;
+      wheelSeekingTimeRef.current = null;
+      setHoverScrubberTime(null);
+      if (commitTime !== null) {
+        sessionControllerRef.current?.seek(commitTime);
+      }
+    }, 400);
   };
 
   const resetOrientation = () => {
@@ -554,12 +506,12 @@ export default function VrPlayerModal({
     const pos = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
     const targetTime = duration * pos;
 
+    scrubberDragTimeRef.current = targetTime;
     setProgress(pos * 100);
     setCurrentTimeText(formatTime(targetTime));
     setHoverScrubberTime(targetTime);
     setHoverScrubberPercent(pos);
     setScrubberWidth(rect.width);
-    videoRef.current.currentTime = targetTime;
   }, [item?.RunTimeTicks]);
 
   const handleScrubberMouseDown = useCallback((e) => {
@@ -578,6 +530,10 @@ export default function VrPlayerModal({
       if (isDraggingScrubberRef.current) {
         isDraggingScrubberRef.current = false;
         updateScrubberDrag(upEvent.clientX);
+        const commitTarget = scrubberDragTimeRef.current;
+        if (commitTarget !== null && commitTarget !== undefined) {
+          sessionControllerRef.current?.seek(commitTarget);
+        }
       }
       window.removeEventListener('mousemove', handleWindowMouseMove);
       window.removeEventListener('mouseup', handleWindowMouseUp);
@@ -599,7 +555,6 @@ export default function VrPlayerModal({
     if (e.touches.length !== 1) return;
     if (isDraggingScrubberRef.current) {
       e.preventDefault();
-      e.stopPropagation();
       updateScrubberDrag(e.touches[0].clientX);
     }
   }, [updateScrubberDrag]);
@@ -607,6 +562,10 @@ export default function VrPlayerModal({
   const handleScrubberTouchEnd = useCallback(() => {
     if (isDraggingScrubberRef.current) {
       isDraggingScrubberRef.current = false;
+      const commitTarget = scrubberDragTimeRef.current;
+      if (commitTarget !== null && commitTarget !== undefined) {
+        sessionControllerRef.current?.seek(commitTarget);
+      }
       setTimeout(() => setHoverScrubberTime(null), 800);
     }
   }, []);
@@ -630,6 +589,20 @@ export default function VrPlayerModal({
         onLoadedData={syncSubtitleModes}
         onPause={() => setIsPlaying(false)}
         onTimeUpdate={handleTimeUpdate}
+        onEnded={() => {
+          if (!hasCountedPlayRef.current) {
+            hasCountedPlayRef.current = true;
+            const nextCount = (item.UserData?.PlayCount || 0) + 1;
+            if (onUpdateItem) {
+              onUpdateItem({
+                ...item,
+                UserData: { ...item.UserData, Played: true, PlayCount: nextCount }
+              });
+            }
+          }
+          sessionControllerRef.current?.destroy();
+          if (onNext) onNext();
+        }}
       >
         {subtitleStreams.map(s => (
           <track

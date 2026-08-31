@@ -12,6 +12,9 @@ describe('playbackDefaults preferences', () => {
     expect(defaults.speed).toBe(1.0);
     expect(defaults.showPinnedPoster).toBe(true);
     expect(defaults.autoRefill).toBe(false);
+    expect(defaults.smartStart).toBe(false);
+    expect(defaults.patrolMode).toBe(false);
+    expect(defaults.patrolIntervalSeconds).toBe(45);
   });
 
   it('updates preferences and persists to localStorage', () => {
@@ -19,17 +22,26 @@ describe('playbackDefaults preferences', () => {
       quality: '4000000',
       speed: 1.5,
       showPinnedPoster: false,
-      autoRefill: true
+      autoRefill: true,
+      smartStart: true,
+      patrolMode: true,
+      patrolIntervalSeconds: 60
     });
 
     expect(updated.quality).toBe('4000000');
     expect(updated.speed).toBe(1.5);
     expect(updated.showPinnedPoster).toBe(false);
     expect(updated.autoRefill).toBe(true);
+    expect(updated.smartStart).toBe(true);
+    expect(updated.patrolMode).toBe(true);
+    expect(updated.patrolIntervalSeconds).toBe(60);
 
     const reloaded = getPlaybackDefaults();
     expect(reloaded.quality).toBe('4000000');
     expect(reloaded.speed).toBe(1.5);
+    expect(reloaded.smartStart).toBe(true);
+    expect(reloaded.patrolMode).toBe(true);
+    expect(reloaded.patrolIntervalSeconds).toBe(60);
   });
 
   it('has valid quality options and speed presets', () => {

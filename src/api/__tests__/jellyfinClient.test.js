@@ -80,7 +80,7 @@ describe('JellyfinClient authentication and URL generation', () => {
     await expect(client.toggleFavorite('item_999', true)).rejects.toThrow('HTTP 403');
   });
 
-  it('builds HLS URLs with a stable play session id and optional audio stream index', () => {
+  it('builds HLS URLs with a stable play session id, streams, bitrates and NO StartTimeTicks', () => {
     client.auth = {
       serverUrl: 'https://jellyfin.example.com',
       token: 'secret_token_123',
@@ -88,13 +88,28 @@ describe('JellyfinClient authentication and URL generation', () => {
       isConfigured: true
     };
 
-    const url = client.getHlsUrl('item_1', { playSessionId: 'sess_1', audioStreamIndex: 2 });
+    const url = client.getHlsUrl('item_1', {
+      playSessionId: 'sess_1',
+      audioStreamIndex: 2,
+      subtitleStreamIndex: 3,
+      mediaSourceId: 'source_abc',
+      videoBitrate: 1000000,
+      audioBitrate: 128000
+    });
     expect(url).toContain('PlaySessionId=sess_1');
     expect(url).toContain('AudioStreamIndex=2');
+    expect(url).toContain('SubtitleStreamIndex=3');
+    expect(url).toContain('MediaSourceId=source_abc');
+    expect(url).toContain('VideoBitrate=1000000');
+    expect(url).toContain('AudioBitrate=128000');
+    // 回归保护：master.m3u8 绝对不能包含 StartTimeTicks（会导致 Jellyfin 10.11.11 分片控制器拒绝请求）
+    expect(url).not.toContain('StartTimeTicks');
 
     const smooth = client.getSmoothHlsUrl('item_1', 4000000, { playSessionId: 'sess_2' });
     expect(smooth).toContain('PlaySessionId=sess_2');
+    expect(smooth).toContain('VideoBitrate=4000000');
     expect(smooth).not.toContain('AudioStreamIndex');
+    expect(smooth).not.toContain('StartTimeTicks');
 
     // 未传会话时自动生成
     expect(client.getHlsUrl('item_1')).toContain('PlaySessionId=');
@@ -108,7 +123,7 @@ describe('JellyfinClient authentication and URL generation', () => {
     expect(a).not.toBe(b);
   });
 
-  it('reportPlayback includes PlaySessionId and the real volume level', async () => {
+  it('reportPlayback includes PlaySessionId, MediaSourceId, PlayMethod and other metadata', async () => {
     client.auth = {
       serverUrl: 'https://jellyfin.example.com',
       token: 'secret_token_123',
@@ -124,11 +139,50 @@ describe('JellyfinClient authentication and URL generation', () => {
 
     await client.reportPlayback('item_1', 12.5, false, 'Progress', {
       playSessionId: 'sess_9',
-      volumeLevel: 65
+      mediaSourceId: 'src_custom',
+      playMethod: 'Transcode',
+      volumeLevel: 65,
+      canSeek: true,
+      playbackRate: 1.25,
+      audioStreamIndex: 1,
+      subtitleStreamIndex: 2,
+      isMuted: false
     });
 
     expect(capturedBody.PlaySessionId).toBe('sess_9');
+    expect(capturedBody.MediaSourceId).toBe('src_custom');
+    expect(capturedBody.PlayMethod).toBe('Transcode');
     expect(capturedBody.VolumeLevel).toBe(65);
     expect(capturedBody.PositionTicks).toBe(125000000);
+    expect(capturedBody.CanSeek).toBe(true);
+    expect(capturedBody.PlaybackRate).toBe(1.25);
+    expect(capturedBody.AudioStreamIndex).toBe(1);
+    expect(capturedBody.SubtitleStreamIndex).toBe(2);
+    expect(capturedBody.IsMuted).toBe(false);
+  });
+
+  it('stopTranscoding sends Stopped event with PlayMethod Transcode', async () => {
+    client.auth = {
+      serverUrl: 'https://jellyfin.example.com',
+      token: 'secret_token_123',
+      userId: 'user_1',
+      isConfigured: true
+    };
+
+    let capturedUrl = null;
+    let capturedBody = null;
+    vi.stubGlobal('fetch', vi.fn(async (url, opts) => {
+      capturedUrl = url;
+      capturedBody = JSON.parse(opts.body);
+      return { ok: true };
+    }));
+
+    await client.stopTranscoding('item_1', 'sess_transcode', { positionSec: 150, mediaSourceId: 'src_1' });
+
+    expect(capturedUrl).toBe('https://jellyfin.example.com/Sessions/Playing/Stopped');
+    expect(capturedBody.PlaySessionId).toBe('sess_transcode');
+    expect(capturedBody.PlayMethod).toBe('Transcode');
+    expect(capturedBody.EventName).toBe('Stopped');
+    expect(capturedBody.PositionTicks).toBe(1500000000);
   });
 });

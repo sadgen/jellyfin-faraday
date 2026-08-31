@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import Hls from 'hls.js';
 import { jellyfin } from '../api/jellyfinClient';
 import { useExternalPlayer } from '../hooks/useExternalPlayer';
 import { useTouchGestures } from '../hooks/useTouchGestures';
@@ -19,6 +18,8 @@ import { probeStreamStatus, describeVideoMediaError } from '../utils/playbackDia
 import { QUALITY_OPTIONS, PLAYBACK_SPEED_OPTIONS } from '../utils/qualityPresets';
 import { SEEK_SPEED_OPTIONS, getStoredSeekSpeed, setStoredSeekSpeed, getSeekStepSeconds, getSeekSwipeSpan } from '../utils/seekSettings';
 import { getPlaybackDefaults } from '../utils/playbackDefaults';
+import { calculateSmartStartTime } from '../utils/smartStartHelper';
+import { PlaybackSessionController } from '../utils/playbackSessionController';
 import {
   Play, Pause, Maximize,
   Star, Eye, EyeOff, ExternalLink, X, Film,
@@ -60,11 +61,23 @@ export default function VideoPlayerModal({
   onOpenVr: _onOpenVr
 }) {
   const videoRef = useRef(null);
-  const hlsRef = useRef(null);
   const containerRef = useRef(null);
   const scrubberRef = useRef(null);
 
-  const [playbackDefaults] = useState(() => getPlaybackDefaults());
+  const [playbackDefaults, setPlaybackDefaultsState] = useState(() => getPlaybackDefaults());
+  const playbackDefaultsRef = useRef(playbackDefaults);
+  playbackDefaultsRef.current = playbackDefaults;
+
+  useEffect(() => {
+    const handleDefaultsChanged = (e) => {
+      if (e.detail) {
+        setPlaybackDefaultsState(e.detail);
+        playbackDefaultsRef.current = e.detail;
+      }
+    };
+    window.addEventListener('faraday:playback_defaults_changed', handleDefaultsChanged);
+    return () => window.removeEventListener('faraday:playback_defaults_changed', handleDefaultsChanged);
+  }, []);
 
   const [isPlaying, setIsPlaying] = useState(true);
   const [playbackSpeed, setPlaybackSpeed] = useState(() => playbackDefaults.speed || 1.0);
@@ -114,6 +127,7 @@ export default function VideoPlayerModal({
 
   // Scrubber Mouse Dragging
   const isDraggingScrubberRef = useRef(false);
+  const scrubberDragTimeRef = useRef(null);
 
   // Mouse Wheel Seek State
   const [_isWheelSeeking, setIsWheelSeeking] = useState(false);
@@ -121,13 +135,46 @@ export default function VideoPlayerModal({
   const wheelSeekingTimeRef = useRef(null);
 
   // Playback reporting & PlayCount Tracking
-  const playReportTimerRef = useRef(null);
   const hasCountedPlayRef = useRef(false);
 
-  // 播放会话 ID：同一条目内切换画质/音轨时先上报 Stopped 再换新 ID，防止服务器孤儿转码会话
-  const playSessionIdRef = useRef(null);
   // 播放失败诊断：直连失败原因暂存，致命错误时合并展示
   const directDiagRef = useRef('');
+
+  // 统一播放会话控制器
+  const sessionControllerRef = useRef(null);
+  if (!sessionControllerRef.current) {
+    sessionControllerRef.current = new PlaybackSessionController({
+      jellyfinClient: jellyfin,
+      onError: (data) => {
+        setHasError(true);
+        setErrorMessage('视频加载失败，请重试');
+        const parts = [];
+        if (directDiagRef.current) parts.push(directDiagRef.current);
+        parts.push(`HLS: ${data?.type || 'Error'}/${data?.details || 'Unknown'}${data?.response?.code ? ` (HTTP ${data.response.code})` : ''}`);
+        if (videoRef.current?.videoWidth > 0) {
+          parts.push(`${videoRef.current.videoWidth}×${videoRef.current.videoHeight}${isVrActiveRef.current ? ' · VR模式已激活' : ''}`);
+        }
+        setErrorDetails(parts.join(' | '));
+        probeStreamStatus(jellyfin.getStreamUrl(itemRef.current?.Id)).then(status => {
+          setErrorDetails(prev => `${prev} | 直连探测: ${status}`);
+        }).catch(() => {});
+      },
+      onAutoDirectFallback: () => {
+        directDiagRef.current = '直连流: 加载失败，已自动回退到转码流';
+        const defaultQuality = streamQualityRef.current !== 'direct' ? streamQualityRef.current : '4000000';
+        setStreamQuality(defaultQuality);
+        sessionControllerRef.current?.loadStream({
+          itemId: itemRef.current?.Id,
+          mediaSourceId: mediaSourceId,
+          streamQuality: defaultQuality,
+          initialSeekTime: videoRef.current?.currentTime || 0,
+          playbackSpeed: playbackSpeedRef.current,
+          isMuted: isMutedRef.current,
+          volume: volumeRef.current
+        });
+      }
+    });
+  }
 
   // 音轨 / 字幕 / 音量 / PlaybackInfo（共享 hooks）
   const { playbackData, setPlaybackData } = useMediaPlaybackInfo(item?.Id);
@@ -193,13 +240,15 @@ export default function VideoPlayerModal({
         case 'ArrowLeft':
           e.preventDefault();
           if (video && video.duration) {
-            video.currentTime = Math.max(0, video.currentTime - getSeekStepSeconds(seekSpeed));
+            const next = Math.max(0, (video.currentTime || 0) - getSeekStepSeconds(seekSpeed));
+            sessionControllerRef.current?.seek(next);
           }
           break;
         case 'ArrowRight':
           e.preventDefault();
           if (video && video.duration) {
-            video.currentTime = Math.min(video.duration, video.currentTime + getSeekStepSeconds(seekSpeed));
+            const next = Math.min(video.duration, (video.currentTime || 0) + getSeekStepSeconds(seekSpeed));
+            sessionControllerRef.current?.seek(next);
           }
           break;
         case 'ArrowUp':
@@ -247,9 +296,7 @@ export default function VideoPlayerModal({
     currentTime: videoRef.current?.currentTime || 0,
     customSwipeSpan: getSeekSwipeSpan(seekSpeed),
     onSeek: (target) => {
-      if (videoRef.current) {
-        videoRef.current.currentTime = target;
-      }
+      sessionControllerRef.current?.seek(target);
     },
     onSeekPreview: (targetTime, percent) => {
       setHoverScrubberTime(targetTime);
@@ -294,7 +341,6 @@ export default function VideoPlayerModal({
   useEffect(() => {
     return () => {
       if (wheelTimerRef.current) clearTimeout(wheelTimerRef.current);
-      if (playReportTimerRef.current) clearInterval(playReportTimerRef.current);
     };
   }, []);
 
@@ -337,11 +383,11 @@ export default function VideoPlayerModal({
   }, [nextEpisode, onSwitchItem]);
 
   useEffect(() => {
+    const controller = sessionControllerRef.current;
+    if (!controller) return;
+
     if (!isOpen || !item?.Id) {
-      if (hlsRef.current) {
-        hlsRef.current.destroy();
-        hlsRef.current = null;
-      }
+      controller.destroy();
       return;
     }
 
@@ -356,6 +402,7 @@ export default function VideoPlayerModal({
 
     const videoEl = videoRef.current;
     if (!videoEl) return;
+    controller.attachVideo(videoEl);
 
     // Auto-detect VR Video format (pure 2D vs 3D-to-2D vs true VR)
     const initialVr = detectVrVideo(item, videoEl);
@@ -368,29 +415,31 @@ export default function VideoPlayerModal({
 
     hasCountedPlayRef.current = false;
 
-    if (hlsRef.current) {
-      hlsRef.current.destroy();
-      hlsRef.current = null;
-    }
-
-    // 为本次播放创建会话 ID（切换画质/音轨前先以旧 ID 上报 Stopped，防孤儿转码会话）
-    const sessionId = jellyfin.createPlaySessionId();
-    playSessionIdRef.current = sessionId;
-
-    // Determine initial seek time: Trickplay click time > server resumeTicks > smartStart (25%~35%) > 0
-    const runtimeSec = item.RunTimeTicks ? item.RunTimeTicks / 10000000 : 0;
-    const isSmartStart = !item.startSecond && !item.UserData?.PlaybackPositionTicks && playbackDefaults.smartStart && runtimeSec >= 600;
-    const smartStartTime = isSmartStart ? Math.round(runtimeSec * (0.25 + Math.random() * 0.1)) : 0;
-
-    const initialSeekTime = (item.startSecond !== undefined && item.startSecond !== null)
-      ? item.startSecond
-      : (item.UserData?.PlaybackPositionTicks ? item.UserData.PlaybackPositionTicks / 10000000 : smartStartTime);
+    // Determine initial seek time: Trickplay click time > server resumeTicks > smartStart > 0
+    let initialSeekTime = calculateSmartStartTime(item, {
+      explicitStartSecond: item.startSecond,
+      smartStartEnabled: playbackDefaultsRef.current.smartStart
+    });
+    const isExplicitSeek = item.startSecond !== undefined && item.startSecond !== null;
+    const isResumeSeek = !!item.UserData?.PlaybackPositionTicks;
 
     const onLoadedMetadata = () => {
-      if (initialSeekTime > 0 && videoEl) {
-        videoEl.currentTime = initialSeekTime;
+      let targetSeek = initialSeekTime;
+      if (targetSeek === 0 && !isExplicitSeek && !isResumeSeek && playbackDefaultsRef.current.smartStart) {
+        targetSeek = calculateSmartStartTime(item, {
+          smartStartEnabled: true,
+          duration: videoEl.duration
+        });
+        initialSeekTime = targetSeek;
       }
-      // Re-verify with decoded video dimensions
+
+      if (targetSeek > 0 && !controller.isTranscoding() && videoEl) {
+        videoEl.currentTime = targetSeek;
+      }
+      if (targetSeek > 0 && !isExplicitSeek && !isResumeSeek && playbackDefaultsRef.current.smartStart) {
+        setSmoothToast(`🎯 已智能跳过前奏起播 (${formatTime(targetSeek)})`);
+        setTimeout(() => setSmoothToast(''), 3000);
+      }
       const vrCheck = detectVrVideo(item, videoEl);
       if (vrCheck.isVr) {
         setIsVrActive(true);
@@ -398,305 +447,63 @@ export default function VideoPlayerModal({
       }
     };
     videoEl.addEventListener('loadedmetadata', onLoadedMetadata, { once: true });
-    if (initialSeekTime > 0 && videoEl.readyState >= 1) {
-      videoEl.currentTime = initialSeekTime;
-    }
 
-    // Report playback start to Jellyfin (携带会话 ID 与真实音量)
-    jellyfin.reportPlayback(item.Id, initialSeekTime, false, 'Started', {
-      playSessionId: sessionId,
-      volumeLevel: volumeRef.current * 100
+    controller.loadStream({
+      itemId: item.Id,
+      mediaSourceId: mediaSourceId,
+      streamQuality: streamQualityRef.current,
+      audioStreamIndex: selectedAudioStreamIndexRef.current,
+      initialSeekTime,
+      playbackSpeed: playbackSpeedRef.current,
+      isMuted: isMutedRef.current,
+      volume: volumeRef.current
     });
 
-    // Periodic progress reporting (every 10s)
-    if (playReportTimerRef.current) clearInterval(playReportTimerRef.current);
-    playReportTimerRef.current = setInterval(() => {
-      if (videoEl && !videoEl.paused && videoEl.currentTime > 0) {
-        jellyfin.reportPlayback(item.Id, videoEl.currentTime, false, 'Progress', {
-          playSessionId: playSessionIdRef.current,
-          volumeLevel: volumeRef.current * 100
-        });
-
-        // Count playback if played for >= 10s
-        if (!hasCountedPlayRef.current && videoEl.currentTime >= 10) {
-          hasCountedPlayRef.current = true;
-          const currentItem = itemRef.current;
-          const nextCount = (currentItem?.UserData?.PlayCount || 0) + 1;
-          if (onUpdateItemRef.current && currentItem) {
-            onUpdateItemRef.current({
-              ...currentItem,
-              UserData: { ...currentItem.UserData, PlayCount: nextCount }
-            });
-          }
-        }
-      }
-    }, 10000);
-
-    const directStreamUrl = jellyfin.getStreamUrl(item.Id);
-    const hlsUrl = jellyfin.getHlsUrl(item.Id, { playSessionId: sessionId });
-
-    const setupHlsPlay = (customUrl = null) => {
-      const targetUrl = customUrl || (isSmoothMode
-        ? jellyfin.getSmoothHlsUrl(item.Id, parseInt(streamQualityRef.current, 10) || 4000000, {
-            playSessionId: playSessionIdRef.current,
-            audioStreamIndex: selectedAudioStreamIndexRef.current
-          })
-        : hlsUrl);
-
-      if (hlsRef.current) {
-        try { hlsRef.current.destroy(); } catch {}
-        hlsRef.current = null;
-      }
-      videoEl.removeAttribute('src');
-      videoEl.load();
-
-      if (Hls.isSupported()) {
-        const hls = new Hls({
-          enableWorker: true,
-          lowLatencyMode: false,
-          backBufferLength: 30
-        });
-        hlsRef.current = hls;
-        hls.loadSource(targetUrl);
-        hls.attachMedia(videoEl);
-        hls.on(Hls.Events.MANIFEST_PARSED, () => {
-          videoEl.playbackRate = playbackSpeedRef.current;
-          if (initialSeekTime > 0) videoEl.currentTime = initialSeekTime;
-          videoEl.play().catch(() => {
-            videoEl.muted = true;
-            setIsMuted(true);
-            videoEl.play().catch(() => {});
-          });
-        });
-        hls.on(Hls.Events.ERROR, (_, data) => {
-          if (data.fatal) {
-            setHasError(true);
-            setErrorMessage('视频加载失败，请重试');
-            // 汇总失败诊断（直连失败原因 + HLS 致命错误 + 分辨率/VR 状态），屏幕与控制台双输出
-            const parts = [];
-            if (directDiagRef.current) parts.push(directDiagRef.current);
-            parts.push(`HLS: ${data.type}/${data.details}${data.response?.code ? ` (HTTP ${data.response.code})` : ''}`);
-            if (videoEl.videoWidth > 0) {
-              parts.push(`${videoEl.videoWidth}×${videoEl.videoHeight}${isVrActiveRef.current ? ' · VR模式已激活' : ''}`);
-            }
-            setErrorDetails(parts.join(' | '));
-            probeStreamStatus(directStreamUrl).then(status => {
-              setErrorDetails(prev => `${prev} | 直连探测: ${status}`);
-              console.warn('[Faraday] 播放失败诊断:', parts.join(' | '), `| 直连探测: ${status}`);
-            }).catch(() => {});
-          }
-        });
-      } else if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
-        videoEl.src = targetUrl;
-        if (initialSeekTime > 0) videoEl.currentTime = initialSeekTime;
-        videoEl.play().catch(() => {
-          videoEl.muted = true;
-          setIsMuted(true);
-          videoEl.play().catch(() => {});
-        });
-      } else {
-        setHasError(true);
-        setErrorMessage('浏览器不支持此视频流');
-      }
-    };
-
-    const handleDirectError = () => {
-      // 记录直连失败原因（浏览器 MediaError），随后回退 HLS 转码
-      const mediaErrDesc = describeVideoMediaError(videoEl);
-      directDiagRef.current = `直连流: ${mediaErrDesc || '加载失败'}`;
-      setupHlsPlay();
-    };
-
-    const setupDirectPlay = () => {
-      const currentQuality = streamQualityRef.current;
-      if (currentQuality !== 'direct') {
-        const bitrate = parseInt(currentQuality, 10) || 4000000;
-        setupHlsPlay(jellyfin.getSmoothHlsUrl(item.Id, bitrate, {
-          playSessionId: playSessionIdRef.current,
-          audioStreamIndex: selectedAudioStreamIndexRef.current
-        }));
-        return;
-      }
-
-      videoEl.src = directStreamUrl;
-      videoEl.playbackRate = playbackSpeedRef.current;
-      videoEl.muted = isMutedRef.current;
-      videoEl.play().catch(() => {
-        videoEl.muted = true;
-        setIsMuted(true);
-        videoEl.play().catch(() => {
-          setupHlsPlay();
-        });
-      });
-    };
-
-    videoEl.addEventListener('error', handleDirectError, { once: true });
-    setupDirectPlay();
-
     return () => {
-      if (playReportTimerRef.current) clearInterval(playReportTimerRef.current);
-      if (videoEl && videoEl.currentTime > 0) {
-        jellyfin.reportPlayback(item.Id, videoEl.currentTime, true, 'Stopped', {
-          playSessionId: playSessionIdRef.current,
-          volumeLevel: volumeRef.current * 100
-        });
-      }
-      videoEl.removeEventListener('error', handleDirectError);
       videoEl.removeEventListener('loadedmetadata', onLoadedMetadata);
-      if (hlsRef.current) {
-        hlsRef.current.destroy();
-        hlsRef.current = null;
-      }
-      videoEl.removeAttribute('src');
-      videoEl.load();
+      controller.destroy();
     };
-  }, [isOpen, item?.Id, setIsMuted]);
+  }, [isOpen, item?.Id, mediaSourceId]);
 
   // Switch Stream Quality / Transcode Bitrate seamlessly
   const changeStreamQuality = useCallback((qualityId, silent = false) => {
-    const videoEl = videoRef.current;
-    if (!videoEl || !item?.Id) return;
+    if (!item?.Id) return;
 
-    const currentPos = videoEl.currentTime || 0;
-
-    // 以旧会话上报 Stopped，让服务器结束当前转码任务（防孤儿转码会话）
-    jellyfin.reportPlayback(item.Id, currentPos, true, 'Stopped', {
-      playSessionId: playSessionIdRef.current,
-      volumeLevel: volumeRef.current * 100
-    });
-    const newSessionId = jellyfin.createPlaySessionId();
-    playSessionIdRef.current = newSessionId;
-
-    let audioIdx = selectedAudioStreamIndexRef.current;
-    if (qualityId === 'direct' && audioIdx !== null) {
-      // 原画直推无法指定音轨，重置音轨选择为默认
-      audioIdx = null;
+    if (qualityId === 'direct' && selectedAudioStreamIndexRef.current !== null) {
       setSelectedAudioStreamIndex(null);
     }
 
     setStreamQuality(qualityId);
     setShowQualityMenu(false);
-    const speed = playbackSpeedRef.current;
-    const muted = isMutedRef.current;
 
-    if (hlsRef.current) {
-      try { hlsRef.current.destroy(); } catch {}
-      hlsRef.current = null;
-    }
+    sessionControllerRef.current?.changeQuality(qualityId);
 
-    if (qualityId === 'direct') {
-      videoEl.src = jellyfin.getStreamUrl(item.Id);
-      videoEl.currentTime = currentPos;
-      videoEl.playbackRate = speed;
-      videoEl.muted = muted;
-      videoEl.play().catch(() => {});
-      if (!silent) {
+    if (!silent) {
+      if (qualityId === 'direct') {
         setSmoothToast('🎬 已切换为原画直推模式');
-        setTimeout(() => setSmoothToast(''), 3000);
-      }
-    } else {
-      const bitrate = parseInt(qualityId, 10) || 4000000;
-      const smoothUrl = jellyfin.getSmoothHlsUrl(item.Id, bitrate, {
-        playSessionId: newSessionId,
-        audioStreamIndex: audioIdx
-      });
-      if (Hls.isSupported()) {
-        const hls = new Hls({
-          enableWorker: true,
-          lowLatencyMode: false,
-          backBufferLength: 30
-        });
-        hlsRef.current = hls;
-        hls.loadSource(smoothUrl);
-        hls.attachMedia(videoEl);
-        hls.on(Hls.Events.MANIFEST_PARSED, () => {
-          videoEl.playbackRate = speed;
-          videoEl.muted = muted;
-          if (currentPos > 0) videoEl.currentTime = currentPos;
-          videoEl.play().catch(() => {});
-        });
-      } else if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
-        videoEl.src = smoothUrl;
-        videoEl.currentTime = currentPos;
-        videoEl.playbackRate = speed;
-        videoEl.play().catch(() => {});
-      }
-      if (!silent) {
+      } else {
         const opt = QUALITY_OPTIONS.find(q => q.id === qualityId);
         setSmoothToast(`⚡ 已切换为 ${opt?.shortLabel || qualityId} 转码模式`);
-        setTimeout(() => setSmoothToast(''), 3000);
       }
+      setTimeout(() => setSmoothToast(''), 3000);
     }
-
-    // 以新会话继续上报
-    jellyfin.reportPlayback(item.Id, currentPos, false, 'Started', {
-      playSessionId: newSessionId,
-      volumeLevel: volumeRef.current * 100
-    });
   }, [item?.Id]);
 
   // 切换音轨：直推无法指定音轨，切换后进入转码模式并保留播放位置
   const changeAudioTrack = useCallback((stream) => {
-    const videoEl = videoRef.current;
-    if (!videoEl || !item?.Id || !stream) return;
+    if (!item?.Id || !stream) return;
     setShowAudioMenu(false);
     if (selectedAudioStreamIndexRef.current === stream.Index) return;
 
-    const currentPos = videoEl.currentTime || 0;
-    jellyfin.reportPlayback(item.Id, currentPos, true, 'Stopped', {
-      playSessionId: playSessionIdRef.current,
-      volumeLevel: volumeRef.current * 100
-    });
-    const newSessionId = jellyfin.createPlaySessionId();
-    playSessionIdRef.current = newSessionId;
-
     const targetQualityId = streamQualityRef.current !== 'direct' ? streamQualityRef.current : '8000000';
-    const bitrate = parseInt(targetQualityId, 10) || 8000000;
-
     setSelectedAudioStreamIndex(stream.Index);
     setStreamQuality(targetQualityId);
 
-    if (hlsRef.current) {
-      try { hlsRef.current.destroy(); } catch {}
-      hlsRef.current = null;
-    }
-    videoEl.removeAttribute('src');
-    videoEl.load();
-
-    const smoothUrl = jellyfin.getSmoothHlsUrl(item.Id, bitrate, {
-      playSessionId: newSessionId,
-      audioStreamIndex: stream.Index
-    });
-    if (Hls.isSupported()) {
-      const hls = new Hls({
-        enableWorker: true,
-        lowLatencyMode: false,
-        backBufferLength: 30
-      });
-      hlsRef.current = hls;
-      hls.loadSource(smoothUrl);
-      hls.attachMedia(videoEl);
-      hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        videoEl.playbackRate = playbackSpeedRef.current;
-        videoEl.muted = isMutedRef.current;
-        if (currentPos > 0) videoEl.currentTime = currentPos;
-        videoEl.play().catch(() => {});
-      });
-    } else if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
-      videoEl.src = smoothUrl;
-      videoEl.currentTime = currentPos;
-      videoEl.playbackRate = playbackSpeedRef.current;
-      videoEl.play().catch(() => {});
-    }
+    sessionControllerRef.current?.changeAudioTrack(stream.Index, targetQualityId);
 
     const trackName = stream.DisplayTitle || stream.Title || stream.Language || `音轨 ${stream.Index}`;
     setSmoothToast(`🎵 已切换音轨: ${trackName}（转码播放）`);
     setTimeout(() => setSmoothToast(''), 3000);
-
-    jellyfin.reportPlayback(item.Id, currentPos, false, 'Started', {
-      playSessionId: newSessionId,
-      volumeLevel: volumeRef.current * 100
-    });
   }, [item?.Id]);
 
   // Video Ended -> increment play count, then next episode (with countdown) or next item
@@ -711,10 +518,7 @@ export default function VideoPlayerModal({
         });
       }
     }
-    jellyfin.reportPlayback(item.Id, videoRef.current?.duration || 0, true, 'Stopped', {
-      playSessionId: playSessionIdRef.current,
-      volumeLevel: volumeRef.current * 100
-    });
+    sessionControllerRef.current?.destroy();
     if (nextEpisode) {
       setEpisodeCountdown(NEXT_EPISODE_COUNTDOWN_SECONDS);
     } else if (onNext) {
@@ -722,7 +526,7 @@ export default function VideoPlayerModal({
     }
   };
 
-  // Mouse Wheel Fast-Forward / Rewind
+  // Mouse Wheel Fast-Forward / Rewind (Debounced commit)
   const handleWheel = useCallback((e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -737,7 +541,6 @@ export default function VideoPlayerModal({
     const nextTime = Math.max(0, Math.min(duration, baseTime + delta));
 
     wheelSeekingTimeRef.current = nextTime;
-    video.currentTime = nextTime;
 
     const percent = nextTime / duration;
     setProgress(percent * 100);
@@ -752,14 +555,18 @@ export default function VideoPlayerModal({
 
     if (wheelTimerRef.current) clearTimeout(wheelTimerRef.current);
     wheelTimerRef.current = setTimeout(() => {
+      const commitTime = wheelSeekingTimeRef.current;
       wheelSeekingTimeRef.current = null;
       setIsWheelSeeking(false);
       setHoverScrubberTime(null);
-    }, 750);
+      if (commitTime !== null) {
+        sessionControllerRef.current?.seek(commitTime);
+      }
+    }, 400);
   }, [seekSpeed]);
 
   // Scrubber Mouse Drag Seeking
-  const updateScrubberDrag = useCallback((clientX) => {
+  const updateScrubberPreview = useCallback((clientX) => {
     if (!scrubberRef.current || !videoRef.current) return;
     const rect = scrubberRef.current.getBoundingClientRect();
     const duration = videoRef.current.duration || (item?.RunTimeTicks ? item.RunTimeTicks / 10000000 : 0);
@@ -768,30 +575,34 @@ export default function VideoPlayerModal({
     const pos = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
     const targetTime = duration * pos;
 
+    scrubberDragTimeRef.current = targetTime;
     setProgress(pos * 100);
     setCurrentTimeText(formatTime(targetTime));
     setHoverScrubberTime(targetTime);
     setHoverScrubberPercent(pos);
     setScrubberWidth(rect.width);
-    videoRef.current.currentTime = targetTime;
   }, [item?.RunTimeTicks]);
 
   const handleScrubberMouseDown = useCallback((e) => {
     e.preventDefault();
     e.stopPropagation();
     isDraggingScrubberRef.current = true;
-    updateScrubberDrag(e.clientX);
+    updateScrubberPreview(e.clientX);
 
     const handleWindowMouseMove = (moveEvent) => {
       if (isDraggingScrubberRef.current) {
-        updateScrubberDrag(moveEvent.clientX);
+        updateScrubberPreview(moveEvent.clientX);
       }
     };
 
     const handleWindowMouseUp = (upEvent) => {
       if (isDraggingScrubberRef.current) {
         isDraggingScrubberRef.current = false;
-        updateScrubberDrag(upEvent.clientX);
+        updateScrubberPreview(upEvent.clientX);
+        const commitTarget = scrubberDragTimeRef.current;
+        if (commitTarget !== null && commitTarget !== undefined) {
+          sessionControllerRef.current?.seek(commitTarget);
+        }
       }
       window.removeEventListener('mousemove', handleWindowMouseMove);
       window.removeEventListener('mouseup', handleWindowMouseUp);
@@ -799,25 +610,29 @@ export default function VideoPlayerModal({
 
     window.addEventListener('mousemove', handleWindowMouseMove);
     window.addEventListener('mouseup', handleWindowMouseUp);
-  }, [updateScrubberDrag]);
+  }, [updateScrubberPreview]);
 
   const handleScrubberTouchStart = useCallback((e) => {
     if (e.touches.length !== 1) return;
     isDraggingScrubberRef.current = true;
-    updateScrubberDrag(e.touches[0].clientX);
-  }, [updateScrubberDrag]);
+    updateScrubberPreview(e.touches[0].clientX);
+  }, [updateScrubberPreview]);
 
   const handleScrubberTouchMove = useCallback((e) => {
     if (e.touches.length !== 1) return;
     if (isDraggingScrubberRef.current) {
       e.preventDefault();
-      updateScrubberDrag(e.touches[0].clientX);
+      updateScrubberPreview(e.touches[0].clientX);
     }
-  }, [updateScrubberDrag]);
+  }, [updateScrubberPreview]);
 
   const handleScrubberTouchEnd = useCallback(() => {
     if (isDraggingScrubberRef.current) {
       isDraggingScrubberRef.current = false;
+      const commitTarget = scrubberDragTimeRef.current;
+      if (commitTarget !== null && commitTarget !== undefined) {
+        sessionControllerRef.current?.seek(commitTarget);
+      }
       setTimeout(() => setHoverScrubberTime(null), 800);
     }
   }, []);

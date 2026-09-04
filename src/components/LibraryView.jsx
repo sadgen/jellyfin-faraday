@@ -11,6 +11,7 @@ import { SEEK_SPEED_OPTIONS, getStoredSeekSpeed, setStoredSeekSpeed } from '../u
 import MobileActionSheet from './MobileActionSheet';
 import DeleteConfirmModal from './DeleteConfirmModal';
 import CardContextMenu from './CardContextMenu';
+import FaradaySuiteMenu from './FaradaySuiteMenu';
 import {
   Play, Star, Eye, Search,
   Trash2, Folder, Film,
@@ -1651,6 +1652,9 @@ export default function LibraryView({
                 </div>
               )}
             </div>
+
+            {/* Faraday Suite Switcher */}
+            <FaradaySuiteMenu currentApp="stream" direction="down" />
           </div>
         </div>
 

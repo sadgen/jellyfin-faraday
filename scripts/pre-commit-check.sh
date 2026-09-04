@@ -4,13 +4,26 @@
 # Prevents accidental commits of private domains, internal IPs, or Jellyfin tokens
 # =============================================================================
 
-# Sensitive regex patterns to check against codebase (excluding this check script itself)
+# Sensitive regex patterns to check against codebase (excluding this check script itself).
+# Defaults are placeholders. To protect your real domain locally, create an untracked
+# .privacy-patterns.local (ignored via *.local) that defines SENSITIVE_PATTERNS_EXTRA, e.g.:
+#   SENSITIVE_PATTERNS_EXTRA=("your-private-domain\.example\.com")
 SENSITIVE_PATTERNS=(
   "your-private-domain\.example"
   "192\.168\."
   "api_key=[a-zA-Z0-9]{15,}"
   "token=[a-zA-Z0-9]{15,}"
 )
+
+# Merge optional local (untracked) patterns so the hook stays effective on private deployments
+LOCAL_PATTERNS_FILE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/.privacy-patterns.local"
+if [ -f "$LOCAL_PATTERNS_FILE" ]; then
+  # shellcheck disable=SC1090
+  . "$LOCAL_PATTERNS_FILE"
+  if [ -n "${SENSITIVE_PATTERNS_EXTRA:-}" ]; then
+    SENSITIVE_PATTERNS=("${SENSITIVE_PATTERNS[@]}" "${SENSITIVE_PATTERNS_EXTRA[@]}")
+  fi
+fi
 
 HAS_ERROR=0
 

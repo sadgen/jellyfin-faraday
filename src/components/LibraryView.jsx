@@ -1383,20 +1383,6 @@ export default function LibraryView({
               <span>单片随机</span>
             </button>
 
-            {/* Desktop Only: Auto Refill Floating Windows Checkbox */}
-            <label 
-              className="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-black/40 hover:bg-white/10 border border-white/10 text-xs text-gray-300 cursor-pointer select-none transition" 
-              title="勾选后，关闭某个悬浮播放窗口时将自动从当前筛选的媒体库中打开新窗口补充"
-            >
-              <input
-                type="checkbox"
-                checked={autoRefillFloatingWindows}
-                onChange={(e) => onToggleAutoRefill && onToggleAutoRefill(e.target.checked)}
-                className="w-3.5 h-3.5 accent-cyan-400 rounded cursor-pointer"
-              />
-              <span className="font-medium text-gray-200">自动补窗</span>
-            </label>
-
             {/* Default Playback Settings Popover */}
             <div className="relative">
               <button

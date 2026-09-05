@@ -87,6 +87,7 @@ export class PlaybackSessionController {
 
     this.reportTimer = null;
     this.pendingStopTimers = new Set();
+    this.startedArmRemover = null;
     this.lastReportedPosition = 0;
     this.mediaErrorRecoveries = 0;
     this.maxMediaErrorRecoveries = 2;
@@ -161,6 +162,11 @@ export class PlaybackSessionController {
     videoEl.playbackRate = playbackSpeed;
     videoEl.muted = isMuted;
 
+    // Started 上报武装到"实际开始播放"事件：会话在首帧前被替换（dev StrictMode
+    // 双挂载、直连失败回退、重载流）时不得向 Jellyfin 发送 PlaybackStart，
+    // 否则服务器会为一次开窗记录两次播放
+    this.armStartedReport(initialSeekTime);
+
     if (streamQuality === 'direct' && audioStreamIndex === null) {
       this.playMethod = 'DirectPlay';
       const directUrl = this.jellyfin.getStreamUrl(this.itemId);
@@ -174,7 +180,6 @@ export class PlaybackSessionController {
       }
 
       this.startHeartbeat();
-      this.reportStarted(initialSeekTime);
 
       videoEl.play().catch(() => {
         if (this.generationId !== currentGeneration) return;
@@ -228,7 +233,6 @@ export class PlaybackSessionController {
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         if (this.generationId !== generation) return;
         this.startHeartbeat();
-        this.reportStarted(initialSeekTime);
 
         videoEl.play().catch(() => {
           if (this.generationId !== generation) return;
@@ -261,7 +265,6 @@ export class PlaybackSessionController {
         } catch {}
       }
       this.startHeartbeat();
-      this.reportStarted(initialSeekTime);
       videoEl.play().catch(() => {
         if (this.generationId !== generation) return;
         videoEl.muted = true;
@@ -362,6 +365,43 @@ export class PlaybackSessionController {
       isMuted,
       volume
     });
+  }
+
+  /**
+   * 武装 Started 上报：挂一次性 playing 监听，首帧真正播出时才发送 PlaybackStart。
+   * 只按 generation 放行，被替换/销毁的旧会话永远不上报，避免重复计播。
+   */
+  armStartedReport(positionSec = 0) {
+    this.clearStartedArm();
+    const videoEl = this.videoEl;
+    if (!videoEl || typeof videoEl.addEventListener !== 'function') {
+      // 无 DOM 事件能力的兜底（理论仅测试环境）：退回立即上报
+      this.reportStarted(positionSec);
+      return;
+    }
+    const generation = this.generationId;
+    const onPlaying = () => {
+      if (this.generationId !== generation || this.isDestroyed) return;
+      const position = Number.isFinite(videoEl.currentTime) ? videoEl.currentTime : positionSec;
+      this.clearStartedArm();
+      this.reportStarted(position);
+    };
+    videoEl.addEventListener('playing', onPlaying, { once: true });
+    this.startedArmRemover = () => {
+      videoEl.removeEventListener('playing', onPlaying);
+    };
+  }
+
+  /**
+   * 解除 Started 上报武装（会话替换、销毁时调用）
+   */
+  clearStartedArm() {
+    if (this.startedArmRemover) {
+      try {
+        this.startedArmRemover();
+      } catch {}
+      this.startedArmRemover = null;
+    }
   }
 
   /**
@@ -499,6 +539,7 @@ export class PlaybackSessionController {
     this.isDestroyed = true;
     this.generationId++;
     this.stopHeartbeat();
+    this.clearStartedArm();
 
     // 1. 优先保存最后播放位置与旧会话上下文（在清空 src 前）
     const oldVideoEl = this.videoEl;

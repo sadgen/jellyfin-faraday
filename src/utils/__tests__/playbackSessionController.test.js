@@ -103,6 +103,7 @@ describe('PlaybackSessionController', () => {
       stopTranscoding: vi.fn().mockResolvedValue(true)
     };
 
+    const eventListeners = {};
     mockVideo = {
       src: '',
       currentTime: 0,
@@ -114,7 +115,16 @@ describe('PlaybackSessionController', () => {
       load: vi.fn(),
       play: vi.fn().mockResolvedValue(undefined),
       canPlayType: vi.fn().mockReturnValue('maybe'),
-      buffered: createTimeRanges([[0, 20]])
+      buffered: createTimeRanges([[0, 20]]),
+      addEventListener: vi.fn((type, fn) => {
+        (eventListeners[type] = eventListeners[type] || []).push(fn);
+      }),
+      removeEventListener: vi.fn((type, fn) => {
+        eventListeners[type] = (eventListeners[type] || []).filter((f) => f !== fn);
+      })
+    };
+    mockVideo.fireEvent = (type) => {
+      (eventListeners[type] || []).slice().forEach((fn) => fn({ type }));
     };
 
     controller = new PlaybackSessionController({
@@ -144,6 +154,10 @@ describe('PlaybackSessionController', () => {
     expect(mockVideo.src).toBe('https://jf.example/stream/item_100');
     expect(mockVideo.currentTime).toBe(12);
     expect(mockVideo.playbackRate).toBe(1.5);
+
+    // Started must wait for real playback, not fire on load
+    expect(mockJellyfin.reportPlayback).not.toHaveBeenCalled();
+    mockVideo.fireEvent('playing');
     expect(mockJellyfin.reportPlayback).toHaveBeenCalledWith(
       'item_100',
       12,
@@ -153,6 +167,31 @@ describe('PlaybackSessionController', () => {
         playMethod: 'DirectPlay'
       })
     );
+  });
+
+  it('reports Started exactly once when a session is replaced before first play (StrictMode remount safe)', async () => {
+    // First mount: session armed, then destroyed before playback starts
+    await controller.loadStream({ itemId: 'item_800', streamQuality: 'direct', initialSeekTime: 5 });
+    controller.destroy();
+
+    // StrictMode remount: 组件 effect 重跑会先重新 attachVideo 再 loadStream
+    controller.attachVideo(mockVideo);
+    await controller.loadStream({ itemId: 'item_800', streamQuality: 'direct', initialSeekTime: 5 });
+    expect(mockJellyfin.reportPlayback).not.toHaveBeenCalled();
+
+    mockVideo.fireEvent('playing');
+    const startedCalls = mockJellyfin.reportPlayback.mock.calls.filter((c) => c[3] === 'Started');
+    expect(startedCalls).toHaveLength(1);
+    expect(startedCalls[0][0]).toBe('item_800');
+    expect(startedCalls[0][4]).toMatchObject({ playSessionId: 'test_session_2' });
+  });
+
+  it('never reports Started if playback never begins', async () => {
+    await controller.loadStream({ itemId: 'item_900', streamQuality: 'direct' });
+    vi.advanceTimersByTime(30000);
+
+    const startedCalls = mockJellyfin.reportPlayback.mock.calls.filter((c) => c[3] === 'Started');
+    expect(startedCalls).toHaveLength(0);
   });
 
   it('performs native seek when target time is in buffer during transcode mode', async () => {

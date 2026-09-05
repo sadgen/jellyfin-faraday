@@ -1373,16 +1373,6 @@ export default function LibraryView({
               <span>{isMobileViewport ? '随机2窗' : '随机 3 窗'}</span>
             </button>
 
-            {/* Quick Random 1 Play Button (Desktop Only；移动端由底部导航栏承担) */}
-            <button
-              onClick={onPlayRandomItem}
-              className="hidden md:flex items-center gap-1 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl bg-black/40 hover:bg-white/10 border border-white/10 text-gray-300 text-xs font-medium transition"
-              title="随机挑选一部视频立即播放"
-            >
-              <Play size={12} className="text-gray-400" />
-              <span>单片随机</span>
-            </button>
-
             {/* Default Playback Settings Popover */}
             <div className="relative">
               <button

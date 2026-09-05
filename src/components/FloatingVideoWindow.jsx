@@ -37,6 +37,7 @@ function formatTime(seconds) {
 
 export default function FloatingVideoWindow({
   windowData,
+  isFront = false,
   onClose,
   onSkip,
   onExpand: _onExpand,
@@ -583,21 +584,26 @@ export default function FloatingVideoWindow({
     }
   };
 
-  // Dragging the floating window
-  const handleMouseDownHeader = (e) => {
-    if (e.target.closest('button') || e.target.closest('select')) return;
+  // 拖动浮窗（PotPlayer 式：标题栏与视频画面均可按住左键拖动）
+  const startWindowDrag = (e) => {
+    if (e.target.closest('button') || e.target.closest('select') || e.target.closest('input')) return;
     if (e.button !== 0) return;
     e.preventDefault();
     if (onBringToFront) onBringToFront(id);
 
     setIsDragging(true);
-    isCustomPositionRef.current = true;
     const startMouseX = e.clientX;
     const startMouseY = e.clientY;
     const startPosX = layout.left;
     const startPosY = layout.top;
+    // 只在真正发生移动后才视为自定义位置，单纯点击不阻断窗口随窗口尺寸变化自动归位
+    let customPositionMarked = false;
 
     const handleMouseMove = (moveEvent) => {
+      if (!customPositionMarked) {
+        customPositionMarked = true;
+        isCustomPositionRef.current = true;
+      }
       const dx = moveEvent.clientX - startMouseX;
       const dy = moveEvent.clientY - startMouseY;
       const newX = Math.max(10, Math.min(window.innerWidth - 100, startPosX + dx));
@@ -613,6 +619,12 @@ export default function FloatingVideoWindow({
 
     window.addEventListener('mousemove', handleMouseMove);
     window.addEventListener('mouseup', handleMouseUp);
+  };
+
+  // VR 全景开启时，画面上的鼠标用于环视视角，不拖动窗口
+  const handleMouseDownVideoArea = (e) => {
+    if (isVrActive) return;
+    startWindowDrag(e);
   };
 
   const handleTouchStartHeader = (e) => {
@@ -886,13 +898,17 @@ export default function FloatingVideoWindow({
     }
   };
 
-  // Middle Click to Close (Trigger Shift & Next Window Promotion)
-  const handleAuxClick = (e) => {
+  // 按下即处理（不等 click/auxclick）：
+  // - 中键：立即关窗（PotPlayer 习惯；同时 preventDefault 阻止中键自动滚动）
+  // - 左键：把窗口提到最前（z-index 置顶，不移动 DOM，避免吞掉后续点击）
+  const handleContainerMouseDown = (e) => {
     if (e.button === 1) {
       e.preventDefault();
       e.stopPropagation();
       if (onClose) onClose(id);
+      return;
     }
+    if (e.button === 0 && onBringToFront) onBringToFront(id);
   };
 
   const coverUrl = useMemo(() => {
@@ -905,15 +921,14 @@ export default function FloatingVideoWindow({
   return (
     <div
       ref={containerRef}
-      onMouseDown={() => onBringToFront && onBringToFront(id)}
-      onAuxClick={handleAuxClick}
+      onMouseDown={handleContainerMouseDown}
       onWheel={handleWheel}
       onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
       style={{
         left: `${layout.left}px`,
         top: `${layout.top}px`,
         width: `${layout.width}px`,
-        zIndex: hoverScrubberTime !== null ? 9999 : (isDragging || isResizing ? 500 : 50 + (slotIndex === 1 ? 5 : (slotIndex === 0 ? 1 : 0))),
+        zIndex: hoverScrubberTime !== null ? 9999 : (isDragging || isResizing || isFront ? 500 : 50 + (slotIndex === 1 ? 5 : (slotIndex === 0 ? 1 : 0))),
         transition: (isDragging || isResizing)
           ? 'none'
           : 'left 0.3s cubic-bezier(0.2, 0, 0, 1), top 0.3s cubic-bezier(0.2, 0, 0, 1), width 0.3s cubic-bezier(0.2, 0, 0, 1), height 0.3s cubic-bezier(0.2, 0, 0, 1), box-shadow 0.2s',
@@ -943,7 +958,7 @@ export default function FloatingVideoWindow({
 
       {/* Draggable Header */}
       <div
-        onMouseDown={handleMouseDownHeader}
+        onMouseDown={startWindowDrag}
         onTouchStart={handleTouchStartHeader}
         className={`px-3 py-2 border-b border-white/10 rounded-t-2xl flex items-center justify-between cursor-move text-xs ${
           slotIndex === 0 ? 'bg-cyan-950/80 text-cyan-200' : 'bg-slate-950/90 text-gray-300'
@@ -1536,11 +1551,12 @@ export default function FloatingVideoWindow({
         </div>
       )}
 
-      {/* Video Viewport (16:9) with Long-press Drag Support */}
+      {/* Video Viewport (16:9) — 按住左键即可拖动窗口 (PotPlayer 式)，触摸手势由 useTouchGestures 接管 */}
       <div
-        className="relative w-full aspect-video bg-black flex items-center justify-center overflow-hidden touch-none select-none"
+        className="relative w-full aspect-video bg-black flex items-center justify-center overflow-hidden touch-none select-none cursor-move"
         style={{ filter: `brightness(${brightness})`, WebkitTouchCallout: 'none', userSelect: 'none' }}
         onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
+        onMouseDown={handleMouseDownVideoArea}
         {...touchHandlers}
       >
         {/* Long-press Window Dragging Active Feedback Overlay */}
@@ -1577,7 +1593,7 @@ export default function FloatingVideoWindow({
           controlsList="nodownload noplaybackrate"
           disablePictureInPicture={true}
           onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
-          className={`w-full h-full cursor-pointer z-10 select-none pointer-events-auto transition-transform duration-200 ${
+          className={`w-full h-full z-10 select-none pointer-events-auto transition-transform duration-200 ${
             aspectMode === 'cover'
               ? 'object-cover'
               : aspectMode === 'fill'
@@ -1585,7 +1601,6 @@ export default function FloatingVideoWindow({
                 : 'object-contain'
           } ${flipH ? '-scale-x-100' : ''}`}
           style={{ WebkitTouchCallout: 'none', userSelect: 'none', WebkitUserSelect: 'none' }}
-          onClick={togglePlay}
           onWaiting={() => setIsLoading(true)}
           onPlaying={() => {
             setIsLoading(false);
@@ -1689,12 +1704,9 @@ export default function FloatingVideoWindow({
           </div>
         )}
 
-        {/* Paused Indicator */}
+        {/* Paused Indicator (纯指示，不拦截鼠标：画面按住仍可拖动窗口，播放/暂停用底部按钮) */}
         {!isPlaying && !isLoading && !hasError && (
-          <div
-            onClick={togglePlay}
-            className="absolute inset-0 z-20 flex items-center justify-center bg-black/30 cursor-pointer"
-          >
+          <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/30 pointer-events-none">
             <div className="w-11 h-11 rounded-full bg-black/60 border border-white/20 flex items-center justify-center text-white">
               <Play size={20} className="ml-0.5 fill-white" />
             </div>

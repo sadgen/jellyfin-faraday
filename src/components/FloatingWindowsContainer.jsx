@@ -2,12 +2,14 @@ import FloatingVideoWindow from './FloatingVideoWindow';
 
 export default function FloatingWindowsContainer({
   windows = [],
+  frontWindowId = null,
   onCloseWindow,
   onSkipWindow,
   onExpandWindow,
   onBringToFront,
   onUpdateItem,
-  onDeleteItem
+  onDeleteItem,
+  onSwitchItem
 }) {
   if (!windows || windows.length === 0) return null;
 
@@ -17,12 +19,14 @@ export default function FloatingWindowsContainer({
         <div key={win.id} className="pointer-events-auto">
           <FloatingVideoWindow
             windowData={win}
+            isFront={win.id === frontWindowId}
             onClose={onCloseWindow}
             onSkip={onSkipWindow}
             onExpand={onExpandWindow}
             onBringToFront={onBringToFront}
             onUpdateItem={onUpdateItem}
             onDeleteItem={onDeleteItem}
+            onSwitchItem={onSwitchItem}
           />
         </div>
       ))}

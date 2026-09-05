@@ -1363,15 +1363,14 @@ export default function LibraryView({
           </div>
 
           <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
-            {/* Quick Random Windows Button: Mobile shows 随机 2 窗, Desktop shows 随机 3 窗 */}
+            {/* Quick Random Windows Button：补窗语义 —— 保留当前浮窗，随机补齐到 2/3 窗；文案与行为统一由 isMobileViewport 决定 */}
             <button
               onClick={isMobileViewport ? (onOpenRandom2Windows || onPlayRandomItem) : (onOpenRandom3Windows || onPlayRandomItem)}
               className="flex items-center gap-1 px-2 sm:px-3.5 py-1 sm:py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 text-xs font-bold shadow-lg transition transform hover:scale-[1.02]"
-              title={isMobileViewport ? "随机挑选 2 部视频开启双窗播放" : "随机挑选 3 部视频开启 1大+2小 悬浮 3 窗"}
+              title={isMobileViewport ? "随机补充悬浮窗至 2 窗 (保留当前窗口，缺几补几)" : "随机补充悬浮窗至 1大+2小 3 窗 (保留当前窗口，缺几补几)"}
             >
               <Play size={12} className="fill-amber-400 text-amber-400" />
-              <span className="sm:hidden">随机2窗</span>
-              <span className="hidden sm:inline">随机 3 窗</span>
+              <span>{isMobileViewport ? '随机2窗' : '随机 3 窗'}</span>
             </button>
 
             {/* Quick Random 1 Play Button (Desktop Only；移动端由底部导航栏承担) */}

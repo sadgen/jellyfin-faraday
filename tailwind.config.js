@@ -6,11 +6,12 @@ export default {
   ],
   darkMode: 'class',
   theme: {
-    // xs 断点：<420px 的紧凑手机场景（时间显示、播放数徽章等在此之下隐藏）
-    screens: {
-      xs: '420px'
-    },
     extend: {
+      // xs 断点：<420px 的紧凑手机场景（时间显示、播放数徽章等在此之下隐藏）
+      // 注意：screens 必须放在 extend 下，写在 theme 根会覆盖掉 Tailwind 默认的 sm/md/lg 断点
+      screens: {
+        xs: '420px'
+      },
       colors: {
         jf: {
           bg: '#0a0d14',

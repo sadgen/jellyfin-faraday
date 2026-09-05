@@ -384,58 +384,50 @@ export default function App() {
     }
   }, [mediaItems, handlePlaySingleItem]);
 
-  // Open 2 random videos simultaneously (Mobile / Tablet / Desktop)
+  // Top up floating windows to targetCount with random videos (keeps current windows playing, 缺几补几)
+  const handleTopUpFloatingWindows = useCallback((targetCount) => {
+    setFloatingWindows(prev => {
+      if (prev.length >= targetCount) return prev;
+      const pool = currentFilteredItemsRef.current.length > 0 ? currentFilteredItemsRef.current : mediaItemsRef.current;
+      if (pool.length === 0) return prev;
+
+      const activeIds = new Set(prev.map(w => w.item.Id));
+      const notOpen = pool.filter(it => !activeIds.has(it.Id));
+      if (notOpen.length === 0) return prev;
+
+      const unplayed = notOpen.filter(it => !it.UserData?.Played);
+      const candidatePool = unplayed.length > 0 ? unplayed : notOpen;
+
+      // Fisher-Yates 均匀洗牌
+      const shuffled = [...candidatePool];
+      for (let i = shuffled.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+      }
+      const selected = shuffled.slice(0, targetCount - prev.length);
+
+      const now = Date.now();
+      return [
+        ...prev,
+        ...selected.map((it, idx) => ({
+          id: `win-${now}-${prev.length + idx}`,
+          slotIndex: prev.length + idx,
+          item: it,
+          timestamp: now + idx
+        }))
+      ];
+    });
+  }, []);
+
+  // Top up to 2 random videos (Mobile / Tablet / Desktop; current windows keep playing)
   const handleOpenRandom2Windows = useCallback(() => {
-    const pool = currentFilteredItemsRef.current.length > 0 ? currentFilteredItemsRef.current : mediaItems;
-    if (pool.length === 0) return;
+    handleTopUpFloatingWindows(2);
+  }, [handleTopUpFloatingWindows]);
 
-    const unplayed = pool.filter(it => !it.UserData?.Played);
-    const candidatePool = unplayed.length >= 2 ? unplayed : pool;
-
-    const shuffled = [...candidatePool];
-    for (let i = shuffled.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-    }
-    const selected2 = shuffled.slice(0, 2);
-
-    const now = Date.now();
-    setFloatingWindows(
-      selected2.map((it, idx) => ({
-        id: `win-${now}-${idx}`,
-        slotIndex: idx,
-        item: it,
-        timestamp: now + idx
-      }))
-    );
-  }, [mediaItems]);
-
-  // Open 3 random videos simultaneously (from current filtered media pool)
+  // Top up to 3 random videos (1大+2小; current windows keep playing)
   const handleOpenRandom3Windows = useCallback(() => {
-    const pool = currentFilteredItemsRef.current.length > 0 ? currentFilteredItemsRef.current : mediaItems;
-    if (pool.length === 0) return;
-
-    const unplayed = pool.filter(it => !it.UserData?.Played);
-    const candidatePool = unplayed.length >= 3 ? unplayed : pool;
-
-    // Fisher-Yates 均匀洗牌
-    const shuffled = [...candidatePool];
-    for (let i = shuffled.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-    }
-    const selected3 = shuffled.slice(0, 3);
-
-    const now = Date.now();
-    setFloatingWindows(
-      selected3.map((it, idx) => ({
-        id: `win-${now}-${idx}`,
-        slotIndex: idx,
-        item: it,
-        timestamp: now + idx
-      }))
-    );
-  }, [mediaItems]);
+    handleTopUpFloatingWindows(3);
+  }, [handleTopUpFloatingWindows]);
 
   // Close floating window (removes window, subsequent windows shift forward; auto-refills if enabled)
   const handleCloseFloatingWindow = useCallback((targetSlotOrId) => {
@@ -523,12 +515,10 @@ export default function App() {
     });
   }, []);
 
+  // Raise a floating window above the others (z-index based; 不重排数组，避免 mousedown 时移动 DOM 吞掉后续 click/auxclick)
+  const [frontFloatingId, setFrontFloatingId] = useState(null);
   const handleBringFloatingToFront = useCallback((winId) => {
-    setFloatingWindows(prev => {
-      const target = prev.find(w => w.id === winId);
-      if (!target) return prev;
-      return [...prev.filter(w => w.id !== winId), { ...target, timestamp: Date.now() }];
-    });
+    setFrontFloatingId(prev => (prev === winId ? prev : winId));
   }, []);
 
   const handleUpdateItem = useCallback((updatedItem) => {
@@ -698,6 +688,7 @@ export default function App() {
         {/* Floating 3-Window PIP Preview System */}
         <FloatingWindowsContainer
           windows={floatingWindows}
+          frontWindowId={frontFloatingId}
           onCloseWindow={handleCloseFloatingWindow}
           onSkipWindow={handleSkipFloatingWindow}
           onExpandWindow={(item) => setModalPlayingItem(item)}

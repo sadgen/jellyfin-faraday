@@ -27,7 +27,7 @@ export default function MobileNavBar({
       <button
         onClick={onOpenRandom2Windows || onOpenRandomPlay}
         className="flex flex-col items-center gap-0.5 p-1 text-amber-400 hover:text-amber-300 active:scale-95 transition"
-        title="手机双窗同时播放"
+        title="随机补充悬浮窗至 2 窗 (保留当前窗口，缺几补几)"
       >
         <Play size={17} className="fill-amber-400" />
         <span className="font-bold">随机 2 窗</span>
@@ -37,7 +37,7 @@ export default function MobileNavBar({
       <button
         onClick={onOpenRandom3Windows}
         className="flex flex-col items-center gap-0.5 p-1 text-emerald-400 hover:text-emerald-300 active:scale-95 transition"
-        title="开启三窗同时播放"
+        title="随机补充悬浮窗至 3 窗 (保留当前窗口，缺几补几)"
       >
         <Play size={17} className="fill-emerald-400" />
         <span>随机 3 窗</span>

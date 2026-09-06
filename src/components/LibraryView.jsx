@@ -96,6 +96,7 @@ const MediaCard = memo(function MediaCard({
   isSelected = false,
   isSelecting = false,
   isMobileViewport = false,
+  trickplayDisabled = false,
   onToggleSelect,
   onPlay,
   onPlayModal,
@@ -212,10 +213,13 @@ const MediaCard = memo(function MediaCard({
     if (!rect.width) return;
     const percent = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
     setHoverPercent(percent);
-    setTrickplayTime(durationSec * percent);
-    // Auto-detect boundary: if card top is less than 300px from viewport top, display below!
-    setIsNearTop(rect.top < 300);
-  }, [durationSec]);
+    // 浮窗播放期间禁用海报悬停 trickplay：缩略图与提升的 z-index 会盖到播放窗口上
+    if (!trickplayDisabled) {
+      setTrickplayTime(durationSec * percent);
+      // Auto-detect boundary: if card top is less than 300px from viewport top, display below!
+      setIsNearTop(rect.top < 300);
+    }
+  }, [durationSec, trickplayDisabled]);
 
   // Touch tracking for mobile devices (trickplay follows finger)
   const handleCoverTouchMove = useCallback((e) => {
@@ -225,9 +229,11 @@ const MediaCard = memo(function MediaCard({
     if (!rect.width) return;
     const percent = Math.max(0, Math.min(1, (touch.clientX - rect.left) / rect.width));
     setHoverPercent(percent);
-    setTrickplayTime(durationSec * percent);
-    setIsNearTop(rect.top < 240);
-  }, [durationSec]);
+    if (!trickplayDisabled) {
+      setTrickplayTime(durationSec * percent);
+      setIsNearTop(rect.top < 240);
+    }
+  }, [durationSec, trickplayDisabled]);
 
   const handleCoverTouchEnd = useCallback(() => {
     setTimeout(() => {
@@ -254,12 +260,20 @@ const MediaCard = memo(function MediaCard({
     return getTrickplayStyle(item, trickplayTime);
   }, [item, trickplayTime]);
 
+  // 悬停途中浮窗打开时，立即收起已显示的 trickplay 预览
+  useEffect(() => {
+    if (trickplayDisabled) {
+      setTrickplayTime(null);
+    }
+  }, [trickplayDisabled]);
+
   return (
     <div
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={handleCoverMouseLeave}
       style={{
-        zIndex: (isHovered || tpStyle) ? 999 : 1
+        // 浮窗播放期间悬停层级压到所有浮窗（z≥50）之下，避免卡片/按钮盖住播放画面
+        zIndex: (isHovered || tpStyle) ? (trickplayDisabled ? 40 : 999) : 1
       }}
       className={`group relative flex flex-col bg-slate-900/50 rounded-xl transition-all duration-150 select-none will-change-transform ${
         isSelected
@@ -808,7 +822,8 @@ export default function LibraryView({
   onOpenDetail,
   onRefreshLibrary,
   onFilteredItemsChange,
-  isRefreshing
+  isRefreshing,
+  hasFloatingWindows = false
 }) {
   // 默认使用文件夹视图（folder），并持久化记住用户当前所选子标签页
   const [activeSubTab, setActiveSubTab] = useState(() => {
@@ -1325,7 +1340,7 @@ export default function LibraryView({
   }, [onDeleteItem]);
 
   return (
-    <div className="w-full h-full flex flex-col bg-[#080b11] text-gray-100 overflow-hidden select-none">
+    <div className="w-full h-full flex flex-col bg-[#080b11] text-gray-100 overflow-hidden">
       
       {/* Top Navigation Bar */}
       <div className="border-b border-white/5 bg-slate-950/90 backdrop-blur-md px-2.5 sm:px-5 py-2 sm:py-2.5 flex flex-col gap-1.5 sm:gap-2 z-30 pt-[max(0.5rem,env(safe-area-inset-top))]">
@@ -2430,6 +2445,7 @@ export default function LibraryView({
                               isSelected={selectedItemIds.has(file.Id)}
                               isSelecting={isSelecting}
                               isMobileViewport={isMobileViewport}
+                              trickplayDisabled={hasFloatingWindows}
                               onToggleSelect={handleToggleSelect}
                               onPlay={onPlaySingleItem}
                               onPlayModal={onPlayModal}
@@ -2816,6 +2832,7 @@ export default function LibraryView({
                     isSelected={selectedItemIds.has(item.Id)}
                     isSelecting={isSelecting}
                     isMobileViewport={isMobileViewport}
+                    trickplayDisabled={hasFloatingWindows}
                     onToggleSelect={handleToggleSelect}
                     onPlay={onPlaySingleItem}
                     onPlayModal={onPlayModal}

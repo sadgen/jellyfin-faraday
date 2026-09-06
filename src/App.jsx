@@ -629,7 +629,7 @@ export default function App() {
 
   return (
     <ErrorBoundary>
-      <div className="relative w-full h-[100dvh] bg-[#080b11] text-gray-100 overflow-hidden select-none flex flex-col">
+      <div className="relative w-full h-[100dvh] bg-[#080b11] text-gray-100 overflow-hidden flex flex-col">
         
         {/* Global Error Banner */}
         {errorText && (
@@ -682,6 +682,7 @@ export default function App() {
             onOpenDetail={(item) => setDetailItem(item)}
             onRefreshLibrary={handleServerRefreshLibrary}
             isRefreshing={isLoading}
+            hasFloatingWindows={floatingWindows.length > 0}
           />
         </div>
 

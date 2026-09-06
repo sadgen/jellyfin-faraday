@@ -25,7 +25,14 @@ body {
   overscroll-behavior-y: none;
   -webkit-tap-highlight-color: transparent;
   -webkit-touch-callout: none;
+}
+
+/* 文字默认可选中可复制；仅控件保持不可选，避免双击/拖拽时误选中标签 */
+button,
+a,
+[role="button"] {
   user-select: none;
+  -webkit-user-select: none;
 }
 
 /* Safe area padding utilities for OnePlus 12 and notched modern devices */

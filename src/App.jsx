@@ -127,6 +127,64 @@ export default function App() {
     localStorage.setItem(STORAGE_KEY_VIEW, viewId);
   };
 
+  // 路由直达机制：支持外部或油猴通过 ?id=... 或 ?q=... 直达条目/定位
+  const targetRouteRef = useRef(null);
+  useEffect(() => {
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      const targetId = urlParams.get('id') || urlParams.get('itemId');
+      const targetSearch = urlParams.get('q') || urlParams.get('search');
+      const playDirectly = urlParams.get('play') === '1' || urlParams.get('play') === 'true';
+
+      if (targetId || targetSearch) {
+        targetRouteRef.current = { targetId, targetSearch, playDirectly };
+      }
+    } catch (e) {
+      console.warn('[Faraday Route] URL params parse error:', e);
+    }
+  }, []);
+
+  // 执行直达路由定位
+  useEffect(() => {
+    if (!jellyfin.auth.isConfigured || !targetRouteRef.current) return;
+    const { targetId, targetSearch, playDirectly } = targetRouteRef.current;
+
+    if (targetSearch && !searchKeyword) {
+      setSearchKeyword(targetSearch);
+    }
+
+    if (targetId) {
+      jellyfin.getItemDetails(targetId).then(item => {
+        if (item?.Id) {
+          if (playDirectly) {
+            setModalPlayingItem(item);
+          } else {
+            // 打开条目详情弹窗
+            setDetailItem(item);
+          }
+
+          // 如果该条目所属的顶级媒体库不是当前选中的库，自动切换到该条目所在的库
+          if (item.ParentId && userViewsRef.current.some(v => v.Id === item.ParentId)) {
+            setSelectedViewId(item.ParentId);
+          }
+
+          // 定位高亮该卡片
+          const attemptScroll = (retries = 5) => {
+            const el = document.querySelector(`[data-item-id="${item.Id}"]`);
+            if (el) {
+              el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              el.classList.add('ring-4', 'ring-cyan-400', 'transition-all');
+              setTimeout(() => el.classList.remove('ring-4', 'ring-cyan-400'), 3000);
+            } else if (retries > 0) {
+              setTimeout(() => attemptScroll(retries - 1), 500);
+            }
+          };
+          setTimeout(() => attemptScroll(), 600);
+        }
+      }).catch(err => console.warn('[Faraday Route] Direct item locate failed:', err));
+    }
+  }, [isAuthenticated, sessionSeq, mediaItems]);
+
   const handleSortMethodChange = (sort) => {
     setSortMethod(sort);
     localStorage.setItem(STORAGE_KEY_SORT, sort);
@@ -193,6 +251,10 @@ export default function App() {
     if (!isBackground) setIsLoading(true);
     setErrorText('');
 
+    const targetView = (userViewsRef.current || []).find(v => v.Id === viewId);
+    const isTvLibrary = targetView?.CollectionType === 'tvshows';
+    const includeItemTypes = isTvLibrary ? 'Series' : (viewId === 'all' ? 'Movie,Series,Video' : 'Movie,Video,Episode');
+
     try {
       const firstPageData = await jellyfin.queryMediaPage({
         parentId: viewId,
@@ -202,6 +264,7 @@ export default function App() {
         genre,
         year,
         nameStartsWithOrGreater: letter,
+        includeItemTypes,
         startIndex: 0,
         limit: 150
       });
@@ -226,6 +289,7 @@ export default function App() {
           genre,
           year,
           nameStartsWithOrGreater: letter,
+          includeItemTypes,
           startIndex: 0,
           limit: 0
         });
@@ -366,9 +430,54 @@ export default function App() {
   }, [modalNavPool]);
 
   // Single item playback handler (Direct floating window playback)
-  const handlePlaySingleItem = useCallback((item, startSecond = null) => {
+  const handlePlaySingleItem = useCallback(async (item, startSecond = null) => {
+    if (!item) return;
+    if (item.Type === 'Series') {
+      try {
+        const nextUps = await jellyfin.getNextUp(item.Id, 1);
+        if (nextUps && nextUps.length > 0 && nextUps[0].SeriesId === item.Id) {
+          handleOpenFloatingWindow(nextUps[0], startSecond);
+          return;
+        }
+        const eps = await jellyfin.getEpisodes(item.Id);
+        if (eps && eps.length > 0) {
+          const unplayedEp = eps.find(e => !e.UserData?.Played) || eps[0];
+          handleOpenFloatingWindow(unplayedEp, startSecond);
+          return;
+        }
+      } catch (e) {
+        console.warn('Failed to resolve episode for series playback:', e);
+      }
+      setDetailItem(item);
+      return;
+    }
     handleOpenFloatingWindow(item, startSecond);
   }, [handleOpenFloatingWindow]);
+
+  // Full-screen / modal player playback handler
+  const handlePlayModal = useCallback(async (item) => {
+    if (!item) return;
+    if (item.Type === 'Series') {
+      try {
+        const nextUps = await jellyfin.getNextUp(item.Id, 1);
+        if (nextUps && nextUps.length > 0 && nextUps[0].SeriesId === item.Id) {
+          setModalPlayingItem(nextUps[0]);
+          return;
+        }
+        const eps = await jellyfin.getEpisodes(item.Id);
+        if (eps && eps.length > 0) {
+          const unplayedEp = eps.find(e => !e.UserData?.Played) || eps[0];
+          setModalPlayingItem(unplayedEp);
+          return;
+        }
+      } catch (e) {
+        console.warn('Failed to resolve episode for modal playback:', e);
+      }
+      setDetailItem(item);
+      return;
+    }
+    setModalPlayingItem(item);
+  }, []);
 
   // Play a random single video (prioritizes unplayed from current filter pool)
   const handlePlayRandomItem = useCallback(() => {
@@ -536,8 +645,12 @@ export default function App() {
   }, []);
 
   const handleLoginSuccess = () => {
-    // 记住该账号到多账号列表（P14），便于一键切换
-    saveAccount(jellyfin.auth);
+    // 记住该账号到多账号列表（P14），便于一键切换；
+    // 仅当勾选"记住登录状态"（凭据持久化到 localStorage）时才记住服务器
+    const persisted = (() => {
+      try { return !!localStorage.getItem('jellyfin_faraday_auth'); } catch { return false; }
+    })();
+    if (persisted) saveAccount(jellyfin.auth);
     setIsAuthenticated(true);
     setIsLoginModalOpen(false);
     setSessionSeq(seq => seq + 1);
@@ -673,7 +786,7 @@ export default function App() {
             onPlayRandomItem={handlePlayRandomItem}
             onPlaySingleItem={handlePlaySingleItem}
             onOpenFloatingWindow={handleOpenFloatingWindow}
-            onPlayModal={(item) => setModalPlayingItem(item)}
+            onPlayModal={handlePlayModal}
             onPlayVr={(item) => setVrPlayingItem(item)}
             onUpdateItem={handleUpdateItem}
             onDeleteItem={handleDeleteItem}
@@ -681,6 +794,7 @@ export default function App() {
             onOpenIdentify={(item) => setIdentifyingItem(item)}
             onOpenDetail={(item) => setDetailItem(item)}
             onRefreshLibrary={handleServerRefreshLibrary}
+            onLogout={handleLogout}
             isRefreshing={isLoading}
             hasFloatingWindows={floatingWindows.length > 0}
           />

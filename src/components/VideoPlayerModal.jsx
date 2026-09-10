@@ -24,7 +24,7 @@ import {
   Play, Pause, Maximize,
   Star, Eye, EyeOff, ExternalLink, X, Film,
   SkipForward, SkipBack, Sun, Zap, FastForward, Glasses, Trash2, Gauge,
-  Subtitles, Music, Keyboard, ChevronRight, Tag, Scaling, FlipHorizontal
+  Subtitles, Music, Keyboard, ChevronRight, Tag, Scaling, FlipHorizontal, ListVideo, RefreshCw
 } from 'lucide-react';
 
 function formatTime(seconds) {
@@ -349,6 +349,7 @@ export default function VideoPlayerModal({
     setSelectedAudioStreamIndex(null);
     setNextEpisode(null);
     setEpisodeCountdown(null);
+    setShowEpisodeDrawer(false);
   }, [item?.Id]);
 
   // 剧集：预取下一集（自动连播）
@@ -381,6 +382,52 @@ export default function VideoPlayerModal({
     setEpisodeCountdown(null);
     if (nextEpisode && onSwitchItem) onSwitchItem(nextEpisode);
   }, [nextEpisode, onSwitchItem]);
+
+  // 选集抽屉（Episode Drawer）：播放中浏览整季单集并快速换集
+  const [showEpisodeDrawer, setShowEpisodeDrawer] = useState(false);
+  const [drawerSeasons, setDrawerSeasons] = useState([]);
+  const [drawerSeasonId, setDrawerSeasonId] = useState('');
+  const [drawerEpisodes, setDrawerEpisodes] = useState([]);
+  const [drawerLoading, setDrawerLoading] = useState(false);
+  const drawerSeasonsLoadedRef = useRef('');
+
+  // 打开抽屉时拉取季度列表，默认定位当前集所在季
+  useEffect(() => {
+    if (!showEpisodeDrawer || !item?.SeriesId || !jellyfin.auth.isConfigured) return;
+    if (drawerSeasonsLoadedRef.current === item.SeriesId) return;
+    drawerSeasonsLoadedRef.current = item.SeriesId;
+    let cancelled = false;
+    jellyfin.getSeasons(item.SeriesId).then(list => {
+      if (cancelled) return;
+      const seasons = list || [];
+      setDrawerSeasons(seasons);
+      const currentSeason = seasons.find(s => s.Id === item.SeasonId)
+        || seasons.find(s => s.IndexNumber === item.ParentIndexNumber);
+      setDrawerSeasonId(currentSeason?.Id || (seasons[0]?.Id ?? ''));
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [showEpisodeDrawer, item?.SeriesId, item?.SeasonId, item?.ParentIndexNumber]);
+
+  // 换片或切换季度时拉取对应单集
+  useEffect(() => {
+    if (!showEpisodeDrawer || !item?.SeriesId || !drawerSeasonId || !jellyfin.auth.isConfigured) return;
+    let cancelled = false;
+    setDrawerLoading(true);
+    jellyfin.getEpisodes(item.SeriesId, drawerSeasonId).then(list => {
+      if (!cancelled) {
+        setDrawerEpisodes(list || []);
+        setDrawerLoading(false);
+      }
+    }).catch(() => {
+      if (!cancelled) setDrawerLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [showEpisodeDrawer, item?.Id, item?.SeriesId, drawerSeasonId]);
+
+  const handleDrawerSwitchEpisode = useCallback((ep) => {
+    setShowEpisodeDrawer(false);
+    if (onSwitchItem) onSwitchItem(ep);
+  }, [onSwitchItem]);
 
   useEffect(() => {
     const controller = sessionControllerRef.current;
@@ -703,6 +750,17 @@ export default function VideoPlayerModal({
 
   const handleConfirmDelete = async () => {
     try {
+      // 删除前先彻底断开视频流并销毁播放会话，防止服务端底层存储因文件句柄占用拒绝删除
+      if (videoRef.current) {
+        videoRef.current.pause();
+        videoRef.current.removeAttribute('src');
+        videoRef.current.load();
+      }
+      if (sessionControllerRef.current) {
+        sessionControllerRef.current.destroy();
+      }
+      await new Promise(resolve => setTimeout(resolve, 150));
+
       await jellyfin.deleteItem(item.Id);
       if (onDeleteItem) onDeleteItem(item.Id);
       setShowDeleteModal(false);
@@ -940,6 +998,98 @@ export default function VideoPlayerModal({
                 >
                   取消
                 </button>
+              </div>
+            </div>
+          )}
+
+          {/* 选集抽屉（右侧滑出，不中断当前播放） */}
+          {showEpisodeDrawer && (
+            <div className="absolute inset-y-0 right-0 z-50 w-72 sm:w-80 max-w-[85vw] bg-slate-950/95 backdrop-blur-md border-l border-white/10 shadow-2xl flex flex-col animate-in slide-in-from-right-4 fade-in duration-200">
+              <div className="flex items-center justify-between gap-2 p-3 border-b border-white/10 flex-shrink-0">
+                <div className="min-w-0">
+                  <div className="text-xs font-bold text-white truncate">{item?.SeriesName || '选集'}</div>
+                  <div className="text-[10px] text-gray-400 font-mono truncate">{episodeLabel(item)}</div>
+                </div>
+                <button
+                  onClick={() => setShowEpisodeDrawer(false)}
+                  className="p-1.5 rounded-lg bg-black/60 hover:bg-white/10 text-gray-300 hover:text-white transition flex-shrink-0"
+                  title="关闭选集"
+                >
+                  <X size={15} />
+                </button>
+              </div>
+
+              {/* 季度切换 */}
+              {drawerSeasons.length > 1 && (
+                <div className="flex gap-1.5 overflow-x-auto p-2.5 pb-1 no-scrollbar flex-shrink-0 border-b border-white/5">
+                  {drawerSeasons.map(s => {
+                    const active = s.Id === drawerSeasonId;
+                    return (
+                      <button
+                        key={s.Id}
+                        onClick={() => setDrawerSeasonId(s.Id)}
+                        className={`px-2 py-1 rounded-lg text-[10px] font-bold flex-shrink-0 border transition ${
+                          active
+                            ? 'bg-cyan-400 text-slate-950 border-cyan-400'
+                            : 'bg-black/40 border-white/10 text-gray-300 hover:text-white hover:border-cyan-500/40'
+                        }`}
+                      >
+                        {s.Name || `第 ${s.IndexNumber} 季`}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              <div className="flex-1 overflow-y-auto p-2.5 flex flex-col gap-1.5">
+                {drawerLoading ? (
+                  <div className="flex items-center justify-center gap-2 py-10 text-gray-400 text-xs">
+                    <RefreshCw size={14} className="animate-spin" />
+                    <span>加载中…</span>
+                  </div>
+                ) : drawerEpisodes.length === 0 ? (
+                  <div className="text-center py-10 text-gray-500 text-xs">本季暂无剧集</div>
+                ) : (
+                  drawerEpisodes.map(ep => {
+                    const isCurrent = ep.Id === item?.Id;
+                    const epPlayed = !!ep.UserData?.Played;
+                    const epProgress = !epPlayed && ep.UserData?.PlaybackPositionTicks && ep.RunTimeTicks
+                      ? (ep.UserData.PlaybackPositionTicks / ep.RunTimeTicks) * 100
+                      : 0;
+                    return (
+                      <button
+                        key={ep.Id}
+                        onClick={() => handleDrawerSwitchEpisode(ep)}
+                        className={`w-full text-left p-2 rounded-xl border transition flex items-center gap-2 ${
+                          isCurrent
+                            ? 'bg-cyan-950/60 border-cyan-400/60'
+                            : 'bg-black/40 border-white/5 hover:border-cyan-500/40 hover:bg-white/5'
+                        }`}
+                      >
+                        <span className={`w-8 text-center font-mono font-black text-xs flex-shrink-0 ${isCurrent ? 'text-cyan-300' : epPlayed ? 'text-emerald-400/80' : 'text-gray-400'}`}>
+                          {ep.IndexNumber ?? '-'}
+                        </span>
+                        <span className="flex-1 min-w-0 flex flex-col gap-0.5">
+                          <span className={`text-[11px] font-semibold truncate ${isCurrent ? 'text-cyan-200' : 'text-gray-200'}`}>{ep.Name}</span>
+                          {ep.RunTimeTicks && (
+                            <span className="text-[9px] text-gray-500 font-mono">{formatTime(ep.RunTimeTicks / 10000000)}</span>
+                          )}
+                          {epProgress > 0 && (
+                            <span className="block h-0.5 rounded-full bg-white/15 overflow-hidden">
+                              <span className="block h-full bg-cyan-400" style={{ width: `${epProgress}%` }} />
+                            </span>
+                          )}
+                        </span>
+                        {isCurrent && (
+                          <span className="flex-shrink-0 px-1.5 py-0.5 rounded bg-cyan-400 text-slate-950 text-[9px] font-black">播放中</span>
+                        )}
+                        {!isCurrent && epPlayed && (
+                          <span className="flex-shrink-0 text-emerald-400">✓</span>
+                        )}
+                      </button>
+                    );
+                  })
+                )}
               </div>
             </div>
           )}
@@ -1302,6 +1452,22 @@ export default function VideoPlayerModal({
                 >
                   <span>下一集</span>
                   <ChevronRight size={12} />
+                </button>
+              )}
+
+              {/* 选集抽屉按钮 */}
+              {item?.SeriesId && (
+                <button
+                  onClick={() => setShowEpisodeDrawer(prev => !prev)}
+                  className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl border text-[11px] font-bold transition ${
+                    showEpisodeDrawer
+                      ? 'bg-amber-500 text-slate-950 border-amber-400'
+                      : 'border-amber-500/40 bg-amber-950/50 hover:bg-amber-900/60 text-amber-300'
+                  }`}
+                  title="选集"
+                >
+                  <ListVideo size={13} />
+                  <span className="hidden sm:inline">选集</span>
                 </button>
               )}
 

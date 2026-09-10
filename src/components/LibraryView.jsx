@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useRef, useCallback, memo } from 'react';
+import { createPortal } from 'react-dom';
 import { jellyfin } from '../api/jellyfinClient';
 import { getTrickplayStyle } from '../utils/trickplay';
 import { detectDuplicateMedia } from '../utils/duplicateChecker';
@@ -11,7 +12,7 @@ import { SEEK_SPEED_OPTIONS, getStoredSeekSpeed, setStoredSeekSpeed } from '../u
 import MobileActionSheet from './MobileActionSheet';
 import DeleteConfirmModal from './DeleteConfirmModal';
 import CardContextMenu from './CardContextMenu';
-import FaradaySuiteMenu from './FaradaySuiteMenu';
+import ServerSwitchMenu from './ServerSwitchMenu';
 import {
   Play, Star, Eye, Search,
   Trash2, Folder, Film,
@@ -23,9 +24,10 @@ import {
 
 const SUB_TABS = [
   { id: 'items', label: '影片', icon: Film },
-  { id: 'folder', label: '文件夹', icon: Folder },
-  { id: 'resume', label: '继续观看', icon: RotateCcw },
+  { id: 'following', label: '追剧关注', icon: Sparkles },
   { id: 'nextup', label: 'NextUp', icon: Zap },
+  { id: 'resume', label: '继续观看', icon: RotateCcw },
+  { id: 'folder', label: '文件夹', icon: Folder },
   { id: 'history', label: '历史', icon: History },
   { id: 'genres', label: '类型', icon: Tag },
   { id: 'persons', label: '演职员', icon: Users },
@@ -38,9 +40,9 @@ const SUB_TABS = [
 // A-Z 字母索引（# 代表非字母开头）
 const LETTER_INDEXES = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', '#'];
 
-// 其他网格视图（文件夹 / 继续观看 / NextUp / 历史 / 演员 / 类型 / 年份 / 合集 / 损坏排查）的默认每行列数
+// 其他网格视图（文件夹 / 追剧关注 / 继续观看 / NextUp / 历史 / 演员 / 类型 / 年份 / 合集 / 损坏排查）的默认每行列数
 const SECONDARY_GRID_DEFAULT_COLUMNS = {
-  folder: 6, genres: 6, persons: 5, years: 8, collections: 6, resume: 6, nextup: 6, history: 6, health: 6
+  folder: 6, following: 6, genres: 6, persons: 5, years: 8, collections: 6, resume: 6, nextup: 6, history: 6, health: 6
 };
 
 // 按标签页读取持久化的每行列数（1-12），无记录时使用默认值
@@ -127,6 +129,8 @@ const MediaCard = memo(function MediaCard({
   const isFavorite = !!item.UserData?.IsFavorite;
   const isPlayed = !!item.UserData?.Played;
   const playCount = item.UserData?.PlayCount || 0;
+  const isSeries = item.Type === 'Series';
+  const unplayedCount = item.UserData?.UnplayedItemCount || 0;
 
   const durationSec = useMemo(() => {
     return item.RunTimeTicks ? item.RunTimeTicks / 10000000 : 7200;
@@ -140,6 +144,13 @@ const MediaCard = memo(function MediaCard({
     if (hours > 0) return `${hours}小时${mins}分`;
     return `${mins}分钟`;
   }, [item.RunTimeTicks]);
+
+  const seriesInfoText = useMemo(() => {
+    if (!isSeries) return '';
+    const seasons = item.ChildCount;
+    if (seasons) return `${seasons} 季`;
+    return '电视剧';
+  }, [isSeries, item.ChildCount]);
 
   const formatTime = (seconds) => {
     if (!seconds || isNaN(seconds)) return '00:00';
@@ -203,8 +214,12 @@ const MediaCard = memo(function MediaCard({
       if (onToggleSelect) onToggleSelect(item.Id);
       return;
     }
+    if (isSeries) {
+      if (onOpenDetail) onOpenDetail(item);
+      return;
+    }
     onPlay(item, trickplayTime);
-  }, [isSelecting, item, onPlay, onToggleSelect, trickplayTime]);
+  }, [isSelecting, isSeries, item, onOpenDetail, onPlay, onToggleSelect, trickplayTime]);
 
   const handleCoverMouseMove = useCallback((e) => {
     const target = e.currentTarget;
@@ -271,6 +286,7 @@ const MediaCard = memo(function MediaCard({
     <div
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={handleCoverMouseLeave}
+      data-item-id={item.Id}
       style={{
         // 浮窗播放期间悬停层级压到所有浮窗（z≥50）之下，避免卡片/按钮盖住播放画面
         zIndex: (isHovered || tpStyle) ? (trickplayDisabled ? 40 : 999) : 1
@@ -393,9 +409,27 @@ const MediaCard = memo(function MediaCard({
           </div>
         )}
 
-        {/* Top-Right: Played Checkmark */}
+        {/* Top-Right: Played Checkmark / Unplayed Episode Badge */}
         <div className="absolute top-2 right-2 flex items-center gap-1 z-20">
-          {isPlayed ? (
+          {isSeries ? (
+            unplayedCount > 0 ? (
+              <div 
+                onClick={(e) => { e.stopPropagation(); onTogglePlayed(item); }}
+                className="px-1.5 py-0.5 rounded-full bg-amber-500 text-slate-950 text-[10px] font-mono font-black shadow-lg backdrop-blur-md cursor-pointer hover:scale-105 transition"
+                title={`剩余 ${unplayedCount} 集未看`}
+              >
+                {unplayedCount} 未看
+              </div>
+            ) : (
+              <div 
+                onClick={(e) => { e.stopPropagation(); onTogglePlayed(item); }}
+                className="w-5 h-5 rounded-full bg-emerald-500/90 text-white flex items-center justify-center shadow-md backdrop-blur-md cursor-pointer hover:scale-110 transition"
+                title="全部已看"
+              >
+                <Check size={12} className="stroke-[3]" />
+              </div>
+            )
+          ) : isPlayed ? (
             <div 
               onClick={(e) => { e.stopPropagation(); onTogglePlayed(item); }}
               className="w-5 h-5 rounded-full bg-emerald-500/90 text-white flex items-center justify-center shadow-md backdrop-blur-md cursor-pointer hover:scale-110 transition"
@@ -408,12 +442,19 @@ const MediaCard = memo(function MediaCard({
               onClick={(e) => { e.stopPropagation(); onTogglePlayed(item); }}
               className="w-2.5 h-2.5 rounded-full bg-cyan-400 shadow-md shadow-cyan-400/50 cursor-pointer"
               title="未播放"
-            />
+            >
+            </div>
           )}
         </div>
 
         {/* Top-Left: Duplicate Badge / Stacked / Health Issue or Play Count */}
         <div className="absolute top-2 left-2 flex items-center gap-1.5 z-20 pointer-events-none flex-wrap max-w-[85%]">
+          {isSeries && (
+            <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-500/90 backdrop-blur-md text-[10px] font-mono font-black text-slate-950 shadow-md">
+              <span>剧集</span>
+            </div>
+          )}
+
           {item.healthIssue && (
             <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-red-600/95 backdrop-blur-md border border-red-400 text-[10px] font-mono font-bold text-white shadow-lg animate-pulse" title={item.healthReason}>
               <ShieldAlert size={10} />
@@ -532,7 +573,7 @@ const MediaCard = memo(function MediaCard({
       {/* Title & Metadata Footer */}
       <div className="p-2.5 flex flex-col gap-0.5 min-w-0">
         <div 
-          onClick={() => onPlay(item)}
+          onClick={() => isSeries ? (onOpenDetail && onOpenDetail(item)) : onPlay(item)}
           className="text-xs font-semibold text-white truncate group-hover:text-cyan-300 transition cursor-pointer" 
           title={item.Name}
         >
@@ -541,7 +582,9 @@ const MediaCard = memo(function MediaCard({
         <div className="text-[11px] text-gray-400 flex items-center justify-between">
           <div className="flex items-center gap-1.5">
             <span>{item.ProductionYear || '未知年份'}</span>
-            {durationText && <span className="hidden sm:inline">• {durationText}</span>}
+            {(isSeries ? seriesInfoText : durationText) && (
+              <span className="hidden sm:inline">• {isSeries ? seriesInfoText : durationText}</span>
+            )}
           </div>
           {item.OfficialRating && (
             <span className="px-1 py-0.5 bg-white/10 rounded text-[9px] font-mono text-gray-300">
@@ -581,15 +624,25 @@ const MediaListRow = memo(function MediaListRow({
   const posterUrl = jellyfin.getBestImageUrl(item, { maxWidth: 150 });
   const isFavorite = !!item.UserData?.IsFavorite;
   const playCount = item.UserData?.PlayCount || 0;
+  const isSeries = item.Type === 'Series';
+  const unplayedCount = item.UserData?.UnplayedItemCount || 0;
+
+  const seriesInfoText = useMemo(() => {
+    if (!isSeries) return '';
+    const seasons = item.ChildCount;
+    if (seasons) return `${seasons} 季`;
+    return '电视剧';
+  }, [isSeries, item.ChildCount]);
 
   const durationText = useMemo(() => {
+    if (isSeries) return seriesInfoText;
     if (!item.RunTimeTicks) return '-';
     const totalMinutes = Math.floor(item.RunTimeTicks / (10000000 * 60));
     const hours = Math.floor(totalMinutes / 60);
     const mins = totalMinutes % 60;
     if (hours > 0) return `${hours}小时${mins}分`;
     return `${mins}分钟`;
-  }, [item.RunTimeTicks]);
+  }, [isSeries, seriesInfoText, item.RunTimeTicks]);
 
   const longPressTimerRef = useRef(null);
   const isLongPressActiveRef = useRef(false);
@@ -641,8 +694,12 @@ const MediaListRow = memo(function MediaListRow({
       if (onToggleSelect) onToggleSelect(item.Id);
       return;
     }
+    if (isSeries) {
+      if (onOpenDetail) onOpenDetail(item);
+      return;
+    }
     onPlay(item);
-  }, [isSelecting, item, onPlay, onToggleSelect]);
+  }, [isSelecting, isSeries, item, onOpenDetail, onPlay, onToggleSelect]);
 
   return (
     <div 
@@ -651,6 +708,7 @@ const MediaListRow = memo(function MediaListRow({
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerUp}
+      data-item-id={item.Id}
       className={`group flex items-center justify-between p-2.5 px-3 sm:px-4 rounded-xl transition cursor-pointer text-xs select-none ${
         isSelected
           ? 'bg-cyan-950/40 border-2 border-cyan-400 shadow-md shadow-cyan-500/20'
@@ -695,6 +753,16 @@ const MediaListRow = memo(function MediaListRow({
           <div className="flex flex-col min-w-0">
             <div className="font-semibold text-white truncate text-xs sm:text-sm group-hover:text-cyan-300 transition flex items-center gap-1.5" title={item.Name}>
               <span>{item.Name}</span>
+              {isSeries && (
+                <span className="px-1.5 py-0.2 rounded bg-amber-500/90 text-slate-950 text-[9px] font-mono font-black flex-shrink-0">
+                  剧集
+                </span>
+              )}
+              {isSeries && unplayedCount > 0 && (
+                <span className="px-1.5 py-0.2 rounded bg-amber-500 text-slate-950 text-[9px] font-mono font-bold flex-shrink-0">
+                  {unplayedCount} 未看
+                </span>
+              )}
               {item.isStacked && (
                 <span className="px-1.5 py-0.2 rounded bg-cyan-600/90 text-[9px] font-mono text-white flex-shrink-0">
                   {item.stackedCount} 段
@@ -821,27 +889,36 @@ export default function LibraryView({
   onOpenIdentify,
   onOpenDetail,
   onRefreshLibrary,
+  onLogout,
   onFilteredItemsChange,
   isRefreshing,
   hasFloatingWindows = false
 }) {
-  // 默认使用文件夹视图（folder），并持久化记住用户当前所选子标签页
-  const [activeSubTab, setActiveSubTab] = useState(() => {
-    try {
-      return localStorage.getItem('jf_library_active_subtab') || 'folder';
-    } catch {
-      return 'folder';
-    }
-  });
+  // 默认子标签页按媒体库类型决定（电影→影片，电视剧/音乐→文件夹），并按库独立记忆手动选择
+  const [activeSubTab, setActiveSubTab] = useState('items');
 
   const handleSubTabChange = useCallback((tabId) => {
     setActiveSubTab(tabId);
     try {
-      localStorage.setItem('jf_library_active_subtab', tabId);
+      localStorage.setItem(`jf_library_subtab_${selectedViewId || 'all'}`, tabId);
     } catch {
       // ignore storage errors
     }
-  }, []);
+  }, [selectedViewId]);
+
+  // 切换媒体库时：优先恢复该库上次的手动选择，否则按类型给默认子标签页
+  useEffect(() => {
+    const view = (userViews || []).find(v => v.Id === selectedViewId);
+    const collectionType = selectedViewId === 'all' ? 'all' : (view?.CollectionType || '');
+    const defaultTab = (collectionType === 'tvshows' || collectionType === 'music') ? 'folder' : 'items';
+    let stored = null;
+    try {
+      stored = localStorage.getItem(`jf_library_subtab_${selectedViewId || 'all'}`);
+    } catch {
+      // ignore storage errors
+    }
+    setActiveSubTab(stored || defaultTab);
+  }, [selectedViewId, userViews]);
 
   const [viewLayout, setViewLayout] = useState('poster');
   const [favoriteFilter, setFavoriteFilter] = useState('all');
@@ -869,6 +946,21 @@ export default function LibraryView({
   const [showPlaybackDefaultsMenu, setShowPlaybackDefaultsMenu] = useState(false);
   const [playbackDefaults, setPlaybackDefaultsState] = useState(() => getPlaybackDefaults());
   const [seekSpeed, setSeekSpeedState] = useState(() => getStoredSeekSpeed());
+  // 菜单经 Portal 渲染到 body（顶栏 backdrop-blur 的层叠上下文会困住内部 z-index，
+  // 被播放浮窗盖住）；坐标按触发按钮定位，z 10000 高于浮窗最高层 9999
+  const playbackDefaultsBtnRef = useRef(null);
+  const [playbackMenuPos, setPlaybackMenuPos] = useState({ top: 64, right: 8 });
+  const togglePlaybackDefaultsMenu = useCallback(() => {
+    const el = playbackDefaultsBtnRef.current;
+    if (el) {
+      const r = el.getBoundingClientRect();
+      setPlaybackMenuPos({
+        top: Math.min(r.bottom + 8, window.innerHeight - 16),
+        right: Math.max(8, window.innerWidth - r.right)
+      });
+    }
+    setShowPlaybackDefaultsMenu(prev => !prev);
+  }, []);
 
   useEffect(() => {
     const handleDefaultsChange = (e) => {
@@ -959,6 +1051,7 @@ export default function LibraryView({
   const [yearsList, setYearsList] = useState([]);
   const [resumeList, setResumeList] = useState([]);
   const [nextUpList, setNextUpList] = useState([]);
+  const [followedList, setFollowedList] = useState([]);
   const [historyList, setHistoryList] = useState([]);
 
   // 原始目录树结构（文件夹浏览）状态
@@ -1086,6 +1179,13 @@ export default function LibraryView({
         if (reqId === subTabReqIdRef.current) setResumeList(list || []);
       });
     } else if (activeSubTab === 'nextup') {
+      jellyfin.getNextUp(selectedViewId).then(list => {
+        if (reqId === subTabReqIdRef.current) setNextUpList(list || []);
+      });
+    } else if (activeSubTab === 'following') {
+      jellyfin.getFollowedSeries(selectedViewId).then(list => {
+        if (reqId === subTabReqIdRef.current) setFollowedList(list || []);
+      });
       jellyfin.getNextUp(selectedViewId).then(list => {
         if (reqId === subTabReqIdRef.current) setNextUpList(list || []);
       });
@@ -1388,10 +1488,10 @@ export default function LibraryView({
               <span>{isMobileViewport ? '随机2窗' : '随机 3 窗'}</span>
             </button>
 
-            {/* Default Playback Settings Popover */}
-            <div className="relative">
+            {/* Default Playback Settings Popover (Portal: 浮窗之下会遮罩,见 togglePlaybackDefaultsMenu 注释) */}
+            <div className="relative" ref={playbackDefaultsBtnRef}>
               <button
-                onClick={() => setShowPlaybackDefaultsMenu(prev => !prev)}
+                onClick={togglePlaybackDefaultsMenu}
                 className={`flex items-center gap-1 p-1.5 sm:px-3 sm:py-1.5 rounded-xl border text-xs font-bold transition ${
                   showPlaybackDefaultsMenu
                     ? 'bg-cyan-950 border-cyan-400 text-cyan-300 shadow-lg shadow-cyan-500/30'
@@ -1404,17 +1504,19 @@ export default function LibraryView({
               </button>
 
               {/* Backdrop to close on outside click */}
-              {showPlaybackDefaultsMenu && (
-                <div 
-                  className="fixed inset-0 z-40" 
-                  onClick={() => setShowPlaybackDefaultsMenu(false)} 
-                />
+              {showPlaybackDefaultsMenu && createPortal(
+                <div
+                  className="fixed inset-0 z-[9990]"
+                  onClick={() => setShowPlaybackDefaultsMenu(false)}
+                />,
+                document.body
               )}
 
               {/* Solid High-Contrast Dropdown Menu */}
-              {showPlaybackDefaultsMenu && (
-                <div 
-                  className="absolute right-0 top-[calc(100%+8px)] z-50 w-[88vw] max-w-sm sm:w-80 bg-[#0d131f] border-2 border-cyan-400/80 rounded-2xl p-3.5 sm:p-4 shadow-[0_20px_60px_rgba(0,0,0,0.95)] flex flex-col gap-3.5 text-xs animate-in fade-in zoom-in-95 duration-100 max-h-[85vh] overflow-y-auto"
+              {showPlaybackDefaultsMenu && createPortal(
+                <div
+                  className="fixed z-[10000] w-[88vw] max-w-sm sm:w-80 bg-[#0d131f] border-2 border-cyan-400/80 rounded-2xl p-3.5 sm:p-4 shadow-[0_20px_60px_rgba(0,0,0,0.95)] flex flex-col gap-3.5 text-xs animate-in fade-in zoom-in-95 duration-100 max-h-[85vh] overflow-y-auto"
+                  style={{ top: playbackMenuPos.top, right: playbackMenuPos.right }}
                   onClick={(e) => e.stopPropagation()}
                 >
                   <div className="flex items-center justify-between border-b border-white/15 pb-2">
@@ -1639,12 +1741,13 @@ export default function LibraryView({
                       {enableStacking ? '已开启' : '已关闭'}
                     </button>
                   </div>
-                </div>
+                </div>,
+                document.body
               )}
             </div>
 
-            {/* Faraday Suite Switcher */}
-            <FaradaySuiteMenu currentApp="stream" direction="down" />
+            {/* Server Switch / Logout（替换原 Suite 按钮） */}
+            <ServerSwitchMenu onLogout={onLogout} />
           </div>
         </div>
 
@@ -2647,6 +2750,141 @@ export default function LibraryView({
           )
         )}
 
+        {/* SUB-VIEW 3.65: 追剧关注（收藏剧集网格 + 继续追剧 NextUp 横滑条） */}
+        {activeSubTab === 'following' && (
+          <div className="flex flex-col gap-5">
+            {/* 继续追剧：NextUp 横向滑条（点击海报直接续播下一集） */}
+            {nextUpList.length > 0 && (
+              <div>
+                <div className="flex items-center gap-1.5 mb-2 text-xs font-bold text-amber-300">
+                  <Zap size={13} />
+                  <span>继续追剧 · 下一集</span>
+                </div>
+                <div className="flex gap-2.5 overflow-x-auto pb-1.5 no-scrollbar">
+                  {nextUpList.map(item => {
+                    const thumb = jellyfin.getBestImageUrl(item, { maxWidth: 400, preferBackdrop: true });
+                    const epLabel = `${item.ParentIndexNumber !== undefined && item.ParentIndexNumber !== null ? `S${String(item.ParentIndexNumber).padStart(2, '0')}` : ''}${item.IndexNumber !== undefined && item.IndexNumber !== null ? `E${String(item.IndexNumber).padStart(2, '0')}` : ''}`;
+                    const progress = item.UserData?.PlayedPercentage || (item.UserData?.PlaybackPositionTicks && item.RunTimeTicks ? (item.UserData.PlaybackPositionTicks / item.RunTimeTicks) * 100 : 0);
+                    return (
+                      <div
+                        key={item.Id}
+                        className="group flex-shrink-0 w-44 sm:w-52 cursor-pointer rounded-xl overflow-hidden bg-slate-900/50 border border-white/5 hover:border-amber-500/40 hover:-translate-y-1 transition"
+                      >
+                        <div className="relative aspect-video bg-black overflow-hidden" onClick={() => onPlayModal && onPlayModal(item)}>
+                          <div className="absolute inset-0 flex items-center justify-center text-gray-600"><Film size={24} /></div>
+                          {thumb && (
+                            <img
+                              src={thumb}
+                              alt={item.Name}
+                              loading="lazy"
+                              onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                              className="relative w-full h-full object-cover group-hover:scale-105 transition"
+                            />
+                          )}
+                          <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition flex items-center justify-center">
+                            <div className="w-9 h-9 rounded-full bg-amber-500/95 text-slate-950 flex items-center justify-center shadow-lg">
+                              <Play size={16} className="fill-slate-950 ml-0.5" />
+                            </div>
+                          </div>
+                          {epLabel && (
+                            <div className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded bg-amber-500/90 text-slate-950 text-[9px] font-mono font-black">
+                              {epLabel}
+                            </div>
+                          )}
+                          {progress > 0 && (
+                            <div className="absolute bottom-0 inset-x-0 h-1 bg-white/20">
+                              <div className="h-full bg-amber-400" style={{ width: `${progress}%` }} />
+                            </div>
+                          )}
+                        </div>
+                        <div className="p-2">
+                          <div
+                            className="text-[10px] text-amber-300 font-bold truncate hover:underline cursor-pointer"
+                            title={`打开《${item.SeriesName || '剧集'}》详情`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (item.SeriesId && onOpenDetail) {
+                                onOpenDetail({ Id: item.SeriesId, Name: item.SeriesName, Type: 'Series' });
+                              }
+                            }}
+                          >
+                            {item.SeriesName || '剧集'}
+                          </div>
+                          <div className="text-xs font-semibold text-white truncate group-hover:text-amber-300 mt-0.5" onClick={() => onPlayModal && onPlayModal(item)}>
+                            {item.Name}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* 我关注的剧集：收藏的 Series 网格，点击进入剧集详情选集 */}
+            <div>
+              <div className="flex items-center gap-1.5 mb-2 text-xs font-bold text-pink-300">
+                <Sparkles size={13} />
+                <span>我关注的剧集</span>
+                {followedList.length > 0 && <span className="text-[10px] font-mono text-gray-500">{followedList.length} 部</span>}
+              </div>
+              {followedList.length === 0 ? (
+                <div className="h-40 flex flex-col items-center justify-center text-gray-500 gap-3 rounded-xl border border-dashed border-white/10">
+                  <Sparkles size={36} className="text-gray-700" />
+                  <div className="text-sm text-center px-6">暂无关注的剧集<br /><span className="text-xs text-gray-600">在剧集卡片或详情页点击 ★ 收藏即可追更</span></div>
+                </div>
+              ) : (
+                <div className="grid gap-2.5 sm:gap-3.5" style={{ gridTemplateColumns: `repeat(${effectiveGridColumns}, minmax(0, 1fr))` }}>
+                  {followedList.map(series => {
+                    const poster = jellyfin.getBestImageUrl(series, { maxWidth: 360 });
+                    const unplayed = series.UserData?.UnplayedItemCount || 0;
+                    return (
+                      <div
+                        key={series.Id}
+                        onClick={() => onOpenDetail && onOpenDetail(series)}
+                        className="group cursor-pointer rounded-xl overflow-hidden bg-slate-900/50 border border-white/5 hover:border-pink-500/40 hover:-translate-y-1 transition"
+                      >
+                        <div className="relative aspect-[2/3] bg-black overflow-hidden">
+                          <div className="absolute inset-0 flex items-center justify-center text-gray-600"><Film size={28} /></div>
+                          {poster && (
+                            <img
+                              src={poster}
+                              alt={series.Name}
+                              loading="lazy"
+                              onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                              className="relative w-full h-full object-cover group-hover:scale-105 transition"
+                            />
+                          )}
+                          {unplayed > 0 ? (
+                            <div className="absolute top-1.5 right-1.5 px-1.5 py-0.5 rounded-full bg-amber-500 text-slate-950 text-[9px] font-mono font-black shadow" title={`剩余 ${unplayed} 集未看`}>
+                              {unplayed} 未看
+                            </div>
+                          ) : (
+                            <div className="absolute top-1.5 right-1.5 w-4 h-4 rounded-full bg-emerald-500/90 text-white flex items-center justify-center shadow">
+                              <Check size={10} className="stroke-[3]" />
+                            </div>
+                          )}
+                          {series.UserData?.PlayedPercentage > 0 && (
+                            <div className="absolute bottom-0 inset-x-0 h-1 bg-white/20">
+                              <div className="h-full bg-pink-400" style={{ width: `${series.UserData.PlayedPercentage}%` }} />
+                            </div>
+                          )}
+                        </div>
+                        <div className="p-2">
+                          <div className="text-xs font-semibold text-white truncate group-hover:text-pink-300">{series.Name}</div>
+                          <div className="text-[10px] text-gray-500 mt-0.5">
+                            {series.ProductionYear || ''}{series.ProductionYear && series.ChildCount ? ' · ' : ''}{series.ChildCount ? `${series.ChildCount} 季` : '剧集'}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* SUB-VIEW 3.7: NextUp（下一集待看） */}
         {activeSubTab === 'nextup' && (
           nextUpList.length === 0 ? (
@@ -2683,7 +2921,17 @@ export default function LibraryView({
                       )}
                     </div>
                     <div className="p-2">
-                      <div className="text-[10px] text-amber-300 font-bold truncate">{item.SeriesName || '剧集'}</div>
+                      <div
+                        className="text-[10px] text-amber-300 font-bold truncate hover:underline cursor-pointer"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (item.SeriesId && onOpenDetail) {
+                            onOpenDetail({ Id: item.SeriesId, Name: item.SeriesName, Type: 'Series' });
+                          }
+                        }}
+                      >
+                        {item.SeriesName || '剧集'}
+                      </div>
                       <div className="text-xs font-semibold text-white truncate group-hover:text-amber-300 mt-0.5">{item.Name}</div>
                     </div>
                   </div>

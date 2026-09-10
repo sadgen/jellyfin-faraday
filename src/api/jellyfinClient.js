@@ -86,6 +86,7 @@ export class JellyfinClient {
     return {
       'Accept': 'application/json',
       'Content-Type': 'application/json',
+      'Authorization': authHeader,
       'X-Emby-Authorization': authHeader,
       ...(this.auth.token ? { 'X-MediaBrowser-Token': this.auth.token } : {})
     };
@@ -126,6 +127,7 @@ export class JellyfinClient {
       headers: {
         'Accept': 'application/json',
         'Content-Type': 'application/json',
+        'Authorization': authHeader,
         'X-Emby-Authorization': authHeader,
       },
       body: JSON.stringify({
@@ -166,6 +168,7 @@ export class JellyfinClient {
     const res = await fetch(`${cleanUrl}/Users`, {
       headers: {
         'Accept': 'application/json',
+        'Authorization': authHeader,
         'X-Emby-Authorization': authHeader,
         'X-MediaBrowser-Token': apiKey
       }
@@ -254,15 +257,16 @@ export class JellyfinClient {
     year = '',
     nameStartsWithOrGreater = '',
     ids = '',
+    includeItemTypes = '',
     startIndex = 0,
     limit = 0
   } = {}) {
     if (!this.auth.isConfigured) return { Items: [], TotalRecordCount: 0 };
 
     const query = new URLSearchParams({
-      IncludeItemTypes: 'Movie,Video,Episode',
+      IncludeItemTypes: includeItemTypes || 'Movie,Video,Episode',
       Recursive: 'true',
-      Fields: 'PrimaryImageAspectRatio,UserData,CommunityRating,DateCreated,RunTimeTicks,ProductionYear,OfficialRating,ParentId,ImageTags,Trickplay,Genres,Overview,People,ProviderIds',
+      Fields: 'PrimaryImageAspectRatio,UserData,CommunityRating,DateCreated,RunTimeTicks,ProductionYear,OfficialRating,ParentId,ImageTags,Trickplay,Genres,Overview,People,ProviderIds,ChildCount,RecursiveItemCount,SeriesName,SeasonName,IndexNumber,ParentIndexNumber',
       EnableImages: 'true',
       StartIndex: startIndex.toString()
     });
@@ -608,7 +612,10 @@ export class JellyfinClient {
       headers: this.getAuthHeaders()
     });
     if (!res.ok) {
-      throw new Error(`删除失败，可能没有管理员/写权限 (HTTP ${res.status})`);
+      const errJson = await res.json().catch(() => null);
+      const detail = errJson?.detail || errJson?.title || errJson?.message;
+      const statusText = detail ? `${detail} (HTTP ${res.status})` : `可能没有管理员/写权限 (HTTP ${res.status})`;
+      throw new Error(`删除失败，${statusText}`);
     }
     return true;
   }
@@ -618,7 +625,7 @@ export class JellyfinClient {
    */
   getStreamUrl(itemId) {
     if (!this.auth.serverUrl || !itemId) return '';
-    return `${this.auth.serverUrl}/Videos/${itemId}/stream?static=true&api_key=${this.auth.token}`;
+    return `${this.auth.serverUrl}/Videos/${itemId}/stream?static=true&ApiKey=${this.auth.token}&api_key=${this.auth.token}`;
   }
 
   /**
@@ -658,6 +665,7 @@ export class JellyfinClient {
     const maxBitrate = maxStreamingBitrate || videoBitrate || 8000000;
     const query = new URLSearchParams({
       MediaSourceId: mediaSourceId || itemId,
+      ApiKey: this.auth.token,
       api_key: this.auth.token,
       DeviceId: 'FaradayWebClient',
       PlaySessionId: playSessionId || this.createPlaySessionId(),
@@ -715,7 +723,8 @@ export class JellyfinClient {
       url += `&tag=${tag}`;
     }
     if (this.auth.token) {
-      url += `&api_key=${encodeURIComponent(this.auth.token)}`;
+      const encodedToken = encodeURIComponent(this.auth.token);
+      url += `&ApiKey=${encodedToken}&api_key=${encodedToken}`;
     }
     return url;
   }
@@ -947,7 +956,7 @@ export class JellyfinClient {
   getSubtitleTrackUrl(itemId, mediaSourceId, subtitleIndex) {
     if (!this.auth.serverUrl || !itemId || subtitleIndex === undefined) return '';
     const srcId = mediaSourceId || itemId;
-    return `${this.auth.serverUrl}/Videos/${itemId}/${srcId}/Subtitles/${subtitleIndex}/Stream.vtt?api_key=${this.auth.token}`;
+    return `${this.auth.serverUrl}/Videos/${itemId}/${srcId}/Subtitles/${subtitleIndex}/Stream.vtt?ApiKey=${this.auth.token}&api_key=${this.auth.token}`;
   }
 
   /**
@@ -1084,17 +1093,42 @@ export class JellyfinClient {
   }
 
   /**
-   * Fetch episodes of a series sorted by season/episode (剧集连播)
+   * Fetch seasons of a series (电视剧季度列表)
    */
-  async getEpisodes(seriesId) {
+  async getSeasons(seriesId) {
     if (!this.auth.isConfigured || !seriesId) return [];
     try {
       const query = new URLSearchParams({
         userId: this.auth.userId,
-        Fields: 'PrimaryImageAspectRatio,UserData,RunTimeTicks,SeriesName,ParentIndexNumber,IndexNumber',
+        Fields: 'PrimaryImageAspectRatio,UserData,RunTimeTicks,ProductionYear,CommunityRating,IndexNumber,ChildCount,ImageTags'
+      });
+      const res = await fetch(`${this.auth.serverUrl}/Shows/${seriesId}/Seasons?${query.toString()}`, {
+        headers: this.getAuthHeaders()
+      });
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data.Items || [];
+    } catch (err) {
+      console.warn('Failed to fetch seasons:', err);
+      return [];
+    }
+  }
+
+  /**
+   * Fetch episodes of a series sorted by season/episode (剧集连播 / 按季选集)
+   */
+  async getEpisodes(seriesId, seasonId = '') {
+    if (!this.auth.isConfigured || !seriesId) return [];
+    try {
+      const query = new URLSearchParams({
+        userId: this.auth.userId,
+        Fields: 'PrimaryImageAspectRatio,UserData,RunTimeTicks,SeriesName,SeasonName,ParentIndexNumber,IndexNumber,Overview,MediaSources,ImageTags',
         SortBy: 'ParentIndexNumber,IndexNumber',
         SortOrder: 'Ascending'
       });
+      if (seasonId) {
+        query.set('seasonId', seasonId);
+      }
       const res = await fetch(`${this.auth.serverUrl}/Shows/${seriesId}/Episodes?${query.toString()}`, {
         headers: this.getAuthHeaders()
       });
@@ -1108,7 +1142,7 @@ export class JellyfinClient {
   }
 
   /**
-   * Fetch next-up episodes (NextUp 视图)
+   * Fetch next-up episodes (NextUp 追剧更新视图)
    */
   async getNextUp(parentId = '', limit = 50) {
     if (!this.auth.isConfigured) return [];
@@ -1116,7 +1150,7 @@ export class JellyfinClient {
       const query = new URLSearchParams({
         userId: this.auth.userId,
         Limit: String(limit),
-        Fields: 'PrimaryImageAspectRatio,UserData,RunTimeTicks,ProductionYear,CommunityRating,SeriesName,ParentIndexNumber,IndexNumber'
+        Fields: 'PrimaryImageAspectRatio,UserData,RunTimeTicks,ProductionYear,CommunityRating,SeriesName,ParentIndexNumber,IndexNumber,Overview,ImageTags'
       });
       if (parentId && parentId !== 'all') {
         query.set('ParentId', parentId);
@@ -1129,6 +1163,36 @@ export class JellyfinClient {
       return data.Items || [];
     } catch (err) {
       console.warn('Failed to fetch next-up episodes:', err);
+      return [];
+    }
+  }
+
+  /**
+   * Fetch followed/favorite series for current user (追剧关注列表)
+   */
+  async getFollowedSeries(parentId = '', limit = 100) {
+    if (!this.auth.isConfigured) return [];
+    try {
+      const query = new URLSearchParams({
+        Recursive: 'true',
+        IncludeItemTypes: 'Series',
+        Filters: 'IsFavorite',
+        SortBy: 'SortName',
+        SortOrder: 'Ascending',
+        Limit: String(limit),
+        Fields: 'PrimaryImageAspectRatio,UserData,RunTimeTicks,ProductionYear,CommunityRating,ChildCount,ImageTags,Overview'
+      });
+      if (parentId && parentId !== 'all') {
+        query.set('ParentId', parentId);
+      }
+      const res = await fetch(`${this.auth.serverUrl}/Users/${this.auth.userId}/Items?${query.toString()}`, {
+        headers: this.getAuthHeaders()
+      });
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data.Items || [];
+    } catch (err) {
+      console.warn('Failed to fetch followed series:', err);
       return [];
     }
   }

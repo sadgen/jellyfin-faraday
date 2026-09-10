@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { jellyfin } from '../api/jellyfinClient';
-import { getSavedAccounts } from '../utils/accountStore';
-import { Server, Lock, User, Users, Key, CheckCircle2, AlertCircle, Loader2, ArrowLeftRight } from 'lucide-react';
+import { getSavedAccounts, removeAccount } from '../utils/accountStore';
+import { Server, Lock, User, Users, Key, CheckCircle2, AlertCircle, Loader2, ArrowLeftRight, X } from 'lucide-react';
 
 export default function LoginModal({ isOpen, onClose, onLoginSuccess, onQuickLogin }) {
   const [serverUrl, setServerUrl] = useState(jellyfin.auth.serverUrl || '');
@@ -15,8 +15,12 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess, onQuickLog
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
 
-  // 已保存账号（P14 多账号）：一键登录
-  const [savedAccounts] = useState(() => (isOpen ? getSavedAccounts() : []));
+  // 已记住的服务器（多账号一键重连，可单独清理）
+  const [savedAccounts, setSavedAccounts] = useState(() => (isOpen ? getSavedAccounts() : []));
+
+  const handleRemoveAccount = (acc) => {
+    setSavedAccounts(removeAccount(acc.serverUrl, acc.userId));
+  };
 
   // API Key 多用户选择状态（audit #20）：
   // /Users 返回多个账号时先展示选择列表，点选后才完成登录
@@ -113,26 +117,43 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess, onQuickLog
           </div>
         </div>
 
-        {/* Saved accounts quick login (P14 多账号) */}
+        {/* Remembered servers quick reconnect (P14 多账号) */}
         {savedAccounts.length > 0 && (
           <div className="flex flex-col gap-2 text-xs">
             <div className="flex items-center gap-2 text-gray-400 font-medium">
               <Users size={14} className="text-cyan-400" />
-              <span>已保存的账号（点击直接登录）</span>
+              <span>已记住的服务器（点击直接连接）</span>
             </div>
-            <div className="flex flex-wrap gap-1.5">
-              {savedAccounts.map(acc => (
-                <button
-                  key={`${acc.serverUrl}-${acc.userId}`}
-                  type="button"
-                  onClick={() => onQuickLogin && onQuickLogin(acc)}
-                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-black/40 hover:bg-cyan-500/10 border border-white/10 hover:border-cyan-400/50 text-gray-200 hover:text-cyan-300 transition"
-                  title={acc.serverUrl}
-                >
-                  <ArrowLeftRight size={11} className="text-cyan-400" />
-                  <span className="font-bold">{acc.username}</span>
-                </button>
-              ))}
+            <div className="flex flex-col gap-1.5">
+              {savedAccounts.map(acc => {
+                let host = acc.serverUrl;
+                try { host = new URL(acc.serverUrl).host; } catch { /* 保留原始字符串 */ }
+                return (
+                  <div key={`${acc.serverUrl}-${acc.userId}`} className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => onQuickLogin && onQuickLogin(acc)}
+                      className="flex-1 min-w-0 flex items-center gap-2 px-2.5 py-2 rounded-xl bg-black/40 hover:bg-cyan-500/10 border border-white/10 hover:border-cyan-400/50 text-gray-200 hover:text-cyan-300 transition text-left"
+                      title={`连接 ${acc.serverUrl}`}
+                    >
+                      <Server size={13} className="text-cyan-400 flex-shrink-0" />
+                      <span className="flex flex-col items-start min-w-0 flex-1">
+                        <span className="font-bold truncate max-w-full">{host}</span>
+                        <span className="text-[10px] text-gray-500 truncate max-w-full">账号：{acc.username}</span>
+                      </span>
+                      <ArrowLeftRight size={11} className="text-gray-500 flex-shrink-0" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveAccount(acc)}
+                      className="p-1.5 rounded-lg text-gray-500 hover:text-red-400 hover:bg-red-950/40 transition flex-shrink-0"
+                      title={`清除记住的 ${host}（${acc.username}）`}
+                    >
+                      <X size={13} />
+                    </button>
+                  </div>
+                );
+              })}
             </div>
             <div className="h-px bg-white/5" />
           </div>

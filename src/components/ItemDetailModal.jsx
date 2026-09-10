@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { jellyfin } from '../api/jellyfinClient';
 import {
   X, Star, Play, Tv, Glasses, Eye, EyeOff, RefreshCw, Edit3,
-  Sparkles, Trash2, Film, Clock, Copy, Check, Users, ChevronRight, Info, Wand2, Tag
+  Sparkles, Trash2, Film, Clock, Copy, Check, Users, ChevronRight, Info, Wand2, Tag, Zap
 } from 'lucide-react';
 import { useExternalPlayer } from '../hooks/useExternalPlayer';
 import { cleanMediaTitle } from '../utils/titleCleaner';
@@ -55,6 +55,12 @@ export default function ItemDetailModal({
   const [copiedPath, setCopiedPath] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showQuickTags, setShowQuickTags] = useState(false);
+  // 电视剧（Series）选集状态
+  const [seasons, setSeasons] = useState([]);
+  const [selectedSeasonId, setSelectedSeasonId] = useState('');
+  const [episodes, setEpisodes] = useState([]);
+  const [episodesLoading, setEpisodesLoading] = useState(false);
+  const [seriesNextUp, setSeriesNextUp] = useState(null);
   const { launchPlayer } = useExternalPlayer();
 
   const handleCleanTitle = async () => {
@@ -90,6 +96,10 @@ export default function ItemDetailModal({
     setDetails(null);
     setSimilarItems([]);
     setExpandedOverview(false);
+    setSeasons([]);
+    setSelectedSeasonId('');
+    setEpisodes([]);
+    setSeriesNextUp(null);
     if (!isOpen || !item?.Id || !jellyfin.auth.isConfigured) return;
     let cancelled = false;
     jellyfin.getItemDetails(item.Id).then(d => {
@@ -102,6 +112,45 @@ export default function ItemDetailModal({
   }, [isOpen, item?.Id]);
 
   const current = details || item;
+  const isSeries = current?.Type === 'Series';
+
+  // Series：拉取季度列表与该剧行的 NextUp（用于"继续追剧"直达下一集）
+  useEffect(() => {
+    if (!isOpen || !isSeries || !current?.Id || !jellyfin.auth.isConfigured) return;
+    let cancelled = false;
+    jellyfin.getSeasons(current.Id).then(list => {
+      if (cancelled) return;
+      setSeasons(list || []);
+      if (list && list.length > 0) {
+        setSelectedSeasonId(prev => prev || list[0].Id);
+      }
+    }).catch(() => {});
+    jellyfin.getNextUp(current.Id, 1).then(list => {
+      if (!cancelled && list && list.length > 0 && list[0].SeriesId === current.Id) {
+        setSeriesNextUp(list[0]);
+      }
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [isOpen, isSeries, current?.Id]);
+
+  // Series：按所选季度拉取单集列表
+  useEffect(() => {
+    if (!isSeries || !current?.Id || !selectedSeasonId || !jellyfin.auth.isConfigured) {
+      if (!isSeries) setEpisodes([]);
+      return;
+    }
+    let cancelled = false;
+    setEpisodesLoading(true);
+    jellyfin.getEpisodes(current.Id, selectedSeasonId).then(list => {
+      if (!cancelled) {
+        setEpisodes(list || []);
+        setEpisodesLoading(false);
+      }
+    }).catch(() => {
+      if (!cancelled) setEpisodesLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [isSeries, current?.Id, selectedSeasonId]);
   const userData = useMemo(() => current?.UserData || {}, [current]);
   const isFavorite = !!userData.IsFavorite;
   const isPlayed = !!userData.Played;
@@ -146,6 +195,51 @@ export default function ItemDetailModal({
       // ignore
     }
   };
+
+  // Series：解析"下一集"——优先服务端 NextUp，其次第一个未看集，最后第 1 集
+  const resolveSeriesPlaybackItem = useCallback(async () => {
+    if (!current?.Id) return null;
+    try {
+      const nextUps = await jellyfin.getNextUp(current.Id, 1);
+      if (nextUps && nextUps.length > 0 && nextUps[0].SeriesId === current.Id) return nextUps[0];
+      const eps = await jellyfin.getEpisodes(current.Id);
+      if (eps && eps.length > 0) return eps.find(e => !e.UserData?.Played) || eps[0];
+    } catch {
+      // ignore
+    }
+    return null;
+  }, [current?.Id]);
+
+  const handlePlaySeries = useCallback(async () => {
+    if (!onPlayTheater) return;
+    const ep = seriesNextUp || await resolveSeriesPlaybackItem();
+    if (ep) onPlayTheater(ep);
+  }, [seriesNextUp, resolveSeriesPlaybackItem, onPlayTheater]);
+
+  const handlePlaySeriesFloating = useCallback(async () => {
+    if (!onPlayFloating) return;
+    const ep = seriesNextUp || await resolveSeriesPlaybackItem();
+    if (ep) onPlayFloating(ep);
+  }, [seriesNextUp, resolveSeriesPlaybackItem, onPlayFloating]);
+
+  // Series：单集已看/未看快捷切换（本地即时反馈 + 服务端同步）
+  const handleToggleEpisodePlayed = useCallback(async (ep) => {
+    const played = !ep.UserData?.Played;
+    setEpisodes(prev => prev.map(e => e.Id === ep.Id ? {
+      ...e,
+      UserData: {
+        ...(e.UserData || {}),
+        Played: played,
+        PlayCount: played ? Math.max(1, (e.UserData?.PlayCount || 0) + 1) : 0,
+        PlaybackPositionTicks: played ? 0 : (e.UserData?.PlaybackPositionTicks || 0)
+      }
+    } : e));
+    try {
+      await jellyfin.markPlayed(ep.Id, played);
+    } catch {
+      // 服务器失败时保留本地状态，下次拉取会校正
+    }
+  }, []);
 
   if (!isOpen || !item) return null;
 
@@ -203,13 +297,24 @@ export default function ItemDetailModal({
               )}
               <div className="flex items-center gap-2 mt-1.5 flex-wrap text-[11px] text-gray-300">
                 {current?.ProductionYear && <span className="font-mono">{current.ProductionYear}</span>}
-                {current?.CommunityRating && (
+                {isSeries && current?.ChildCount > 0 && (
+                  <span className="px-1.5 py-0.5 bg-amber-500/20 border border-amber-400/40 rounded font-mono text-[10px] text-amber-300">{current.ChildCount} 季</span>
+                )}
+                {isSeries && (current?.UserData?.UnplayedItemCount || 0) > 0 && (
+                  <span className="font-mono text-amber-300">{current.UserData.UnplayedItemCount} 集未看</span>
+                )}
+                {isSeries && current?.Status && (
+                  <span className={`px-1.5 py-0.5 rounded font-mono text-[10px] ${current.Status === 'Ended' ? 'bg-white/10 text-gray-300' : 'bg-emerald-500/15 text-emerald-300 border border-emerald-400/30'}`}>
+                    {current.Status === 'Ended' ? '已完结' : '连载中'}
+                  </span>
+                )}
+                {!isSeries && current?.CommunityRating && (
                   <span className="flex items-center gap-1 text-amber-300 font-mono">
                     <Star size={11} className="fill-amber-400 text-amber-400" />
                     {current.CommunityRating.toFixed(1)}
                   </span>
                 )}
-                {current?.RunTimeTicks && (
+                {current?.RunTimeTicks && !isSeries && (
                   <span className="flex items-center gap-1 font-mono">
                     <Clock size={11} />
                     {formatRuntime(current.RunTimeTicks)}
@@ -228,8 +333,24 @@ export default function ItemDetailModal({
 
         {/* Scrollable Body */}
         <div className="flex flex-col gap-4 p-4 overflow-y-auto flex-1">
+          {/* Series: 继续追剧直达下一集 */}
+          {isSeries && (
+            <button
+              onClick={handlePlaySeries}
+              className="flex items-center gap-2 p-2.5 rounded-xl bg-amber-950/50 border border-amber-500/40 text-amber-200 hover:bg-amber-900/50 transition text-left"
+            >
+              <Zap size={14} className="fill-amber-400 text-amber-400 flex-shrink-0" />
+              <span className="font-bold truncate">
+                {seriesNextUp
+                  ? `继续追剧：S${String(seriesNextUp.ParentIndexNumber ?? 0).padStart(2, '0')}E${String(seriesNextUp.IndexNumber ?? 0).padStart(2, '0')} ${seriesNextUp.Name}`
+                  : '继续追剧 · 播放下一集'}
+              </span>
+              <Play size={13} className="fill-amber-300 ml-auto flex-shrink-0" />
+            </button>
+          )}
+
           {/* Resume hint */}
-          {resumeTicks > 0 && current?.RunTimeTicks && (
+          {!isSeries && resumeTicks > 0 && current?.RunTimeTicks && (
             <button
               onClick={() => onPlayTheater && onPlayTheater(current)}
               className="flex items-center gap-2 p-2.5 rounded-xl bg-cyan-950/60 border border-cyan-500/40 text-cyan-200 hover:bg-cyan-900/60 transition text-left"
@@ -241,28 +362,40 @@ export default function ItemDetailModal({
 
           {/* Action Buttons */}
           <div className="flex flex-wrap items-center gap-2">
+            {isSeries ? (
+              <button
+                onClick={handlePlaySeries}
+                className="px-3.5 py-2 rounded-xl bg-jf-accent hover:bg-cyan-400 text-white font-bold flex items-center gap-1.5 transition shadow-lg shadow-cyan-500/25"
+              >
+                <Play size={13} className="fill-white" />
+                <span>播放下一集</span>
+              </button>
+            ) : (
+              <button
+                onClick={() => onPlayTheater && onPlayTheater(current)}
+                className="px-3.5 py-2 rounded-xl bg-jf-accent hover:bg-cyan-400 text-white font-bold flex items-center gap-1.5 transition shadow-lg shadow-cyan-500/25"
+              >
+                <Play size={13} className="fill-white" />
+                <span>影院播放</span>
+              </button>
+            )}
             <button
-              onClick={() => onPlayTheater && onPlayTheater(current)}
-              className="px-3.5 py-2 rounded-xl bg-jf-accent hover:bg-cyan-400 text-white font-bold flex items-center gap-1.5 transition shadow-lg shadow-cyan-500/25"
-            >
-              <Play size={13} className="fill-white" />
-              <span>影院播放</span>
-            </button>
-            <button
-              onClick={() => onPlayFloating && onPlayFloating(current)}
+              onClick={() => isSeries ? handlePlaySeriesFloating() : onPlayFloating && onPlayFloating(current)}
               className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-cyan-500/30 text-cyan-300 font-bold flex items-center gap-1.5 transition"
-              title="开启悬浮播放窗"
+              title={isSeries ? '开启悬浮播放窗（下一集）' : '开启悬浮播放窗'}
             >
               <Tv size={13} />
               <span>悬浮窗</span>
             </button>
-            <button
-              onClick={() => onPlayVr && onPlayVr(current)}
-              className="px-3 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/40 text-amber-300 font-bold flex items-center gap-1.5 transition"
-            >
-              <Glasses size={13} />
-              <span>VR</span>
-            </button>
+            {!isSeries && (
+              <button
+                onClick={() => onPlayVr && onPlayVr(current)}
+                className="px-3 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/40 text-amber-300 font-bold flex items-center gap-1.5 transition"
+              >
+                <Glasses size={13} />
+                <span>VR</span>
+              </button>
+            )}
             <button
               onClick={handleToggleFavorite}
               className={`px-3 py-2 rounded-xl border font-bold flex items-center gap-1.5 transition ${
@@ -281,14 +414,16 @@ export default function ItemDetailModal({
               {isPlayed ? <EyeOff size={13} /> : <Eye size={13} />}
               <span>{isPlayed ? '标记未看' : '标记已看'}</span>
             </button>
-            <button
-              onClick={handleCleanTitle}
-              className="px-3 py-2 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-300 hover:bg-amber-500/25 font-bold flex items-center gap-1.5 transition"
-              title="自动去除推广后缀(@kbjba等)并提取标准番号"
-            >
-              <Wand2 size={13} />
-              <span>净化标题</span>
-            </button>
+            {!isSeries && (
+              <button
+                onClick={handleCleanTitle}
+                className="px-3 py-2 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-300 hover:bg-amber-500/25 font-bold flex items-center gap-1.5 transition"
+                title="自动去除推广后缀(@kbjba等)并提取标准番号"
+              >
+                <Wand2 size={13} />
+                <span>净化标题</span>
+              </button>
+            )}
             <button
               onClick={() => setShowQuickTags(prev => !prev)}
               className={`px-3 py-2 rounded-xl border font-bold flex items-center gap-1.5 transition ${
@@ -370,6 +505,129 @@ export default function ItemDetailModal({
             </div>
           )}
 
+          {/* Series: 季度切换 + 单集列表 */}
+          {isSeries && (
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center gap-1.5 text-gray-400 font-bold">
+                <Tv size={13} className="text-cyan-400" />
+                <span>选集</span>
+                {episodes.length > 0 && (
+                  <span className="text-[10px] font-mono text-gray-500">
+                    {episodes.filter(e => e.UserData?.Played).length}/{episodes.length} 已看
+                  </span>
+                )}
+              </div>
+
+              {/* 季度切换条 */}
+              {seasons.length > 0 && (
+                <div className="flex gap-1.5 overflow-x-auto pb-1 no-scrollbar">
+                  {seasons.map(s => {
+                    const active = s.Id === selectedSeasonId;
+                    const unplayed = s.UserData?.UnplayedItemCount || 0;
+                    return (
+                      <button
+                        key={s.Id}
+                        onClick={() => setSelectedSeasonId(s.Id)}
+                        className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold flex-shrink-0 border transition ${
+                          active
+                            ? 'bg-cyan-400 text-slate-950 border-cyan-400 shadow-md shadow-cyan-400/30'
+                            : 'bg-black/40 border-white/10 text-gray-300 hover:text-white hover:border-cyan-500/40'
+                        }`}
+                      >
+                        <span>{s.Name || `第 ${s.IndexNumber} 季`}</span>
+                        {unplayed > 0 && (
+                          <span className={`px-1 rounded-full text-[9px] font-mono ${active ? 'bg-slate-950/20 text-slate-900' : 'bg-amber-500 text-slate-950'}`}>
+                            {unplayed}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* 单集列表 */}
+              {episodesLoading ? (
+                <div className="flex items-center justify-center gap-2 py-8 text-gray-500">
+                  <RefreshCw size={14} className="animate-spin" />
+                  <span className="text-xs">正在加载单集…</span>
+                </div>
+              ) : episodes.length === 0 ? (
+                <div className="text-center py-8 text-gray-500 text-xs">本季暂无剧集</div>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  {episodes.map(ep => {
+                    const epPlayed = !!ep.UserData?.Played;
+                    const epProgress = !epPlayed && ep.UserData?.PlaybackPositionTicks && ep.RunTimeTicks
+                      ? (ep.UserData.PlaybackPositionTicks / ep.RunTimeTicks) * 100
+                      : 0;
+                    const epThumb = jellyfin.getBestImageUrl(ep, { maxWidth: 320, preferBackdrop: true });
+                    const epLabel = `S${String(ep.ParentIndexNumber ?? 0).padStart(2, '0')}E${String(ep.IndexNumber ?? 0).padStart(2, '0')}`;
+                    return (
+                      <div
+                        key={ep.Id}
+                        onClick={() => onPlayTheater && onPlayTheater(ep)}
+                        className={`group flex gap-3 p-2 rounded-xl bg-black/40 border transition cursor-pointer ${
+                          epPlayed ? 'border-white/5 opacity-70 hover:opacity-100 hover:border-cyan-500/40' : 'border-white/10 hover:border-cyan-500/40'
+                        }`}
+                      >
+                        <div className="relative w-28 sm:w-36 aspect-video rounded-lg overflow-hidden bg-black flex-shrink-0">
+                          <div className="absolute inset-0 flex items-center justify-center text-gray-600"><Film size={16} /></div>
+                          {epThumb && (
+                            <img
+                              src={epThumb}
+                              alt={ep.Name}
+                              loading="lazy"
+                              onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                              className="relative w-full h-full object-cover group-hover:scale-105 transition"
+                            />
+                          )}
+                          <div className="absolute bottom-1 left-1 px-1 py-0.5 rounded bg-black/80 text-[9px] font-mono font-black text-cyan-300 border border-white/10">
+                            {epLabel}
+                          </div>
+                          {epPlayed && (
+                            <div className="absolute top-1 right-1 w-4 h-4 rounded-full bg-emerald-500/95 text-white flex items-center justify-center shadow">
+                              <Check size={10} className="stroke-[3]" />
+                            </div>
+                          )}
+                          {epProgress > 0 && (
+                            <div className="absolute bottom-0 inset-x-0 h-1 bg-white/20">
+                              <div className="h-full bg-cyan-400" style={{ width: `${epProgress}%` }} />
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0 flex flex-col gap-1">
+                          <div className="flex items-start justify-between gap-2">
+                            <span className="font-semibold text-white truncate text-xs group-hover:text-cyan-300" title={ep.Name}>
+                              {ep.Name}
+                            </span>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); handleToggleEpisodePlayed(ep); }}
+                              className={`flex-shrink-0 p-0.5 rounded transition ${
+                                epPlayed ? 'text-emerald-400 hover:text-emerald-300' : 'text-gray-500 hover:text-emerald-400'
+                              }`}
+                              title={epPlayed ? '标记未看' : '标记已看'}
+                            >
+                              {epPlayed ? <Check size={14} className="stroke-[3]" /> : <Eye size={13} />}
+                            </button>
+                          </div>
+                          <div className="text-[10px] text-gray-500 flex items-center gap-2 flex-wrap">
+                            {ep.RunTimeTicks && <span>{formatRuntime(ep.RunTimeTicks)}</span>}
+                            {ep.PremiereDate && <span>{new Date(ep.PremiereDate).toLocaleDateString()}</span>}
+                            {ep.UserData?.PlayCount > 0 && <span className="text-cyan-400">看过 {ep.UserData.PlayCount} 次</span>}
+                          </div>
+                          {ep.Overview && (
+                            <p className="text-[11px] text-gray-400 leading-relaxed line-clamp-2" title={ep.Overview}>{ep.Overview}</p>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Cast（仅演员） */}
           {cast.length > 0 && (
             <div className="flex flex-col gap-2">
@@ -405,8 +663,9 @@ export default function ItemDetailModal({
             </div>
           )}
 
-          {/* Media Info */}
-          <div className="rounded-xl bg-black/40 border border-white/5 p-3.5 flex flex-col gap-2">
+          {/* Media Info（Series 无媒体流，整块隐藏） */}
+          {!isSeries && (
+            <div className="rounded-xl bg-black/40 border border-white/5 p-3.5 flex flex-col gap-2">
             <div className="flex items-center gap-1.5 text-gray-400 font-bold">
               <Info size={13} className="text-cyan-400" />
               <span>媒体信息</span>
@@ -463,7 +722,8 @@ export default function ItemDetailModal({
                 </button>
               </div>
             </div>
-          </div>
+            </div>
+          )}
 
           {/* Similar Recommendations */}
           {similarItems.length > 0 && (

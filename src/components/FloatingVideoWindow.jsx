@@ -889,6 +889,17 @@ export default function FloatingVideoWindow({
   // Delete Video from Disk — 使用统一样式化确认弹窗（与影院/媒体库一致）
   const handleConfirmDelete = async () => {
     try {
+      // 删除前必须先彻底断开视频流并销毁播放会话，防止服务端底层存储因文件锁占用报错 403
+      if (videoRef.current) {
+        videoRef.current.pause();
+        videoRef.current.removeAttribute('src');
+        videoRef.current.load();
+      }
+      if (sessionControllerRef.current) {
+        sessionControllerRef.current.destroy();
+      }
+      await new Promise(resolve => setTimeout(resolve, 150));
+
       await jellyfin.deleteItem(item.Id);
       setShowDeleteModal(false);
       if (onDeleteItem) onDeleteItem(item.Id);

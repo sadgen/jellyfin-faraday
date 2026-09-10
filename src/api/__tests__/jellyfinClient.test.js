@@ -24,7 +24,7 @@ describe('JellyfinClient authentication and URL generation', () => {
     expect(() => client.sanitizeServerUrl('file:///etc/passwd')).toThrow();
   });
 
-  it('includes api_key query param in getImageUrl when authenticated', () => {
+  it('includes api_key and ApiKey query param in getImageUrl when authenticated', () => {
     client.auth = {
       serverUrl: 'https://jellyfin.example.com',
       token: 'secret_token_123',
@@ -36,6 +36,21 @@ describe('JellyfinClient authentication and URL generation', () => {
     expect(url).toContain('https://jellyfin.example.com/Items/item_999/Images/Primary');
     expect(url).toContain('tag=tag_abc');
     expect(url).toContain('api_key=secret_token_123');
+    expect(url).toContain('ApiKey=secret_token_123');
+  });
+
+  it('generates headers with both Authorization and legacy X-Emby-Authorization', () => {
+    client.auth = {
+      serverUrl: 'https://jellyfin.example.com',
+      token: 'secret_token_123',
+      userId: 'user_1',
+      isConfigured: true
+    };
+
+    const headers = client.getAuthHeaders();
+    expect(headers['Authorization']).toContain('Token="secret_token_123"');
+    expect(headers['X-Emby-Authorization']).toContain('Token="secret_token_123"');
+    expect(headers['X-MediaBrowser-Token']).toBe('secret_token_123');
   });
 
   it('handles rememberMe option (localStorage vs sessionStorage)', () => {

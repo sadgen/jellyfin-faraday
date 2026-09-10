@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { LayoutGrid, Image, Film, ExternalLink, AlertCircle, CheckCircle2, X } from 'lucide-react';
 
 const SUITE_APPS = [
@@ -27,13 +28,28 @@ const SUITE_APPS = [
 export default function FaradaySuiteMenu({ currentApp = 'stream', direction = 'down' }) {
   const [isOpen, setIsOpen] = useState(false);
   const [notice, setNotice] = useState(null); // 提示未配置信息: { appId, message }
-  const menuRef = useRef(null);
+  const [drawerPos, setDrawerPos] = useState(null);
+  const buttonRef = useRef(null);
+  const drawerRef = useRef(null);
 
-  // 点击外部自动关闭
+  const updateDrawerPos = () => {
+    const el = buttonRef.current;
+    if (!el || typeof window === 'undefined') return;
+    const r = el.getBoundingClientRect();
+    setDrawerPos(
+      direction === 'up'
+        ? { bottom: window.innerHeight - r.top + 8, right: Math.max(8, window.innerWidth - r.right) }
+        : { top: r.bottom + 8, right: Math.max(8, window.innerWidth - r.right) }
+    );
+  };
+
+  // 点击外部自动关闭（抽屉经 Portal 渲染在 body 上，须同时排除按钮与抽屉）
   useEffect(() => {
     if (!isOpen) return;
     const handleClickOutside = (e) => {
-      if (menuRef.current && !menuRef.current.contains(e.target)) {
+      const inButton = buttonRef.current && buttonRef.current.contains(e.target);
+      const inDrawer = drawerRef.current && drawerRef.current.contains(e.target);
+      if (!inButton && !inDrawer) {
         setIsOpen(false);
         setNotice(null);
       }
@@ -98,11 +114,12 @@ export default function FaradaySuiteMenu({ currentApp = 'stream', direction = 'd
   };
 
   return (
-    <div ref={menuRef} style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
+    <div ref={buttonRef} style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
       {/* 触发按钮 */}
       <button
         type="button"
         onClick={() => {
+          updateDrawerPos();
           setIsOpen(!isOpen);
           setNotice(null);
         }}
@@ -138,22 +155,22 @@ export default function FaradaySuiteMenu({ currentApp = 'stream', direction = 'd
         <span style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.02em' }}>Suite</span>
       </button>
 
-      {/* 下拉/上拉抽屉卡片 */}
-      {isOpen && (
+      {/* 下拉/上拉抽屉卡片（Portal 到 body：顶栏 backdrop-blur 的层叠上下文会困住
+          内部 z-index 导致被播放浮窗盖住；z 10000 高于浮窗最高层 9999） */}
+      {isOpen && drawerPos && createPortal(
         <div
+          ref={drawerRef}
           style={{
-            position: 'absolute',
-            right: 0,
-            ...(direction === 'up'
-              ? { bottom: 'calc(100% + 8px)' }
-              : { top: 'calc(100% + 8px)' }),
+            position: 'fixed',
+            ...(direction === 'up' ? { bottom: drawerPos.bottom } : { top: drawerPos.top }),
+            right: drawerPos.right,
             width: '280px',
             background: '#0d131f',
             border: '1px solid rgba(255, 255, 255, 0.15)',
             borderRadius: '14px',
             padding: '12px',
             boxShadow: '0 20px 50px rgba(0, 0, 0, 0.85), 0 0 0 1px rgba(255, 255, 255, 0.05)',
-            zIndex: 99999,
+            zIndex: 10000,
             display: 'flex',
             flexDirection: 'column',
             gap: '8px',
@@ -338,7 +355,8 @@ export default function FaradaySuiteMenu({ currentApp = 'stream', direction = 'd
               );
             })}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

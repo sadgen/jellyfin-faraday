@@ -1,9 +1,14 @@
 import { useState, useEffect, useCallback } from 'react';
 import { jellyfin } from '../api/jellyfinClient';
-import { 
-  Subtitles, Download, Check, Search, 
-  X, RefreshCw, Sparkles, FileText, AlertCircle
+import {
+  Subtitles, Download, Check, Search,
+  X, RefreshCw, Sparkles, FileText, AlertCircle, Palette, Clock
 } from 'lucide-react';
+import {
+  getSubtitleStyle, saveSubtitleStyle,
+  SUBTITLE_COLORS, SUBTITLE_OUTLINES, SUBTITLE_BGS,
+  outlineToShadow, bgToCss
+} from '../utils/subtitleStyle';
 
 export default function SubtitleModal({
   isOpen,
@@ -13,7 +18,7 @@ export default function SubtitleModal({
   onSubtitleDownloaded,
   onClose
 }) {
-  const [activeTab, setActiveTab] = useState('local'); // 'local' | 'remote'
+  const [activeTab, setActiveTab] = useState('local'); // 'local' | 'remote' | 'style'
   const [selectedLanguage, setSelectedLanguage] = useState('chi'); // 'chi' | 'eng' | 'jpn' | 'all'
   const [remoteSubtitles, setRemoteSubtitles] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -21,6 +26,9 @@ export default function SubtitleModal({
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [playbackData, setPlaybackData] = useState(null);
+  // 字幕外观（全局持久化，保存即广播给所有播放器实例）
+  const [subStyle, setSubStyle] = useState(() => getSubtitleStyle());
+  const updateSubStyle = (patch) => setSubStyle(saveSubtitleStyle(patch));
 
   // Fetch full playback info with MediaSources & MediaStreams when opened
   useEffect(() => {
@@ -148,13 +156,25 @@ export default function SubtitleModal({
               if (remoteSubtitles.length === 0) handleSearchRemote(selectedLanguage);
             }}
             className={`pb-2.5 font-bold transition border-b-2 flex items-center gap-1.5 ${
-              activeTab === 'remote' 
-                ? 'text-cyan-400 border-cyan-400' 
+              activeTab === 'remote'
+                ? 'text-cyan-400 border-cyan-400'
                 : 'text-gray-400 border-transparent hover:text-gray-200'
             }`}
           >
             <Sparkles size={13} className="text-amber-400" />
             <span>下载在线字幕 (MeiamSub/迅雷)</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('style')}
+            className={`pb-2.5 font-bold transition border-b-2 flex items-center gap-1.5 ${
+              activeTab === 'style'
+                ? 'text-cyan-400 border-cyan-400'
+                : 'text-gray-400 border-transparent hover:text-gray-200'
+            }`}
+          >
+            <Palette size={13} className="text-pink-400" />
+            <span>字幕外观</span>
           </button>
         </div>
 
@@ -305,6 +325,138 @@ export default function SubtitleModal({
                     </button>
                   </div>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {/* TAB 3: SUBTITLE APPEARANCE */}
+          {activeTab === 'style' && (
+            <div className="flex flex-col gap-4">
+              {/* 实时预览 */}
+              <div className="rounded-xl bg-gradient-to-b from-slate-800 to-slate-900 border border-white/10 h-20 flex items-end justify-center pb-3 overflow-hidden">
+                <div
+                  className="max-w-[92%] whitespace-pre-line text-center leading-snug font-medium rounded-md px-3 py-1"
+                  style={{
+                    color: subStyle.color,
+                    fontSize: `${Math.round(20 * (subStyle.scale || 1))}px`,
+                    textShadow: outlineToShadow(subStyle.outline),
+                    background: bgToCss(subStyle.bg)
+                  }}
+                >
+                  字幕样式预览 Subtitle Preview
+                </div>
+              </div>
+
+              {/* 字号 */}
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-center justify-between text-gray-300 font-bold">
+                  <span>字号</span>
+                  <span className="font-mono text-cyan-400">{Math.round((subStyle.scale || 1) * 100)}%</span>
+                </div>
+                <input
+                  type="range"
+                  min="0.7"
+                  max="2"
+                  step="0.05"
+                  value={subStyle.scale || 1}
+                  onChange={(e) => updateSubStyle({ scale: parseFloat(e.target.value) })}
+                  className="w-full accent-cyan-400 cursor-pointer"
+                />
+              </div>
+
+              {/* 颜色 */}
+              <div className="flex flex-col gap-1.5">
+                <span className="text-gray-300 font-bold">字体颜色</span>
+                <div className="flex items-center gap-2">
+                  {SUBTITLE_COLORS.map(c => (
+                    <button
+                      key={c}
+                      onClick={() => updateSubStyle({ color: c })}
+                      className={`w-7 h-7 rounded-full border-2 transition flex items-center justify-center ${
+                        subStyle.color === c ? 'border-cyan-400 scale-110' : 'border-white/20 hover:border-white/50'
+                      }`}
+                      style={{ background: c }}
+                      title={c}
+                    >
+                      {subStyle.color === c && <Check size={13} className="text-slate-900 stroke-[3]" />}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* 描边 + 背景 */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="flex flex-col gap-1.5">
+                  <span className="text-gray-300 font-bold">描边</span>
+                  <div className="flex gap-1">
+                    {SUBTITLE_OUTLINES.map(o => (
+                      <button
+                        key={o.id}
+                        onClick={() => updateSubStyle({ outline: o.id })}
+                        className={`flex-1 px-1 py-1.5 rounded-lg text-[11px] font-bold border transition ${
+                          subStyle.outline === o.id
+                            ? 'bg-cyan-400 text-slate-950 border-cyan-400'
+                            : 'bg-black/40 border-white/10 text-gray-300 hover:border-cyan-500/40'
+                        }`}
+                      >
+                        {o.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <span className="text-gray-300 font-bold">背景</span>
+                  <div className="flex gap-1">
+                    {SUBTITLE_BGS.map(b => (
+                      <button
+                        key={b.id}
+                        onClick={() => updateSubStyle({ bg: b.id })}
+                        className={`flex-1 px-1 py-1.5 rounded-lg text-[11px] font-bold border transition ${
+                          subStyle.bg === b.id
+                            ? 'bg-cyan-400 text-slate-950 border-cyan-400'
+                            : 'bg-black/40 border-white/10 text-gray-300 hover:border-cyan-500/40'
+                        }`}
+                      >
+                        {b.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* 延迟补偿 */}
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-center justify-between text-gray-300 font-bold">
+                  <span className="flex items-center gap-1.5"><Clock size={13} className="text-cyan-400" />延迟补偿</span>
+                  <span className={`font-mono ${(subStyle.delaySec || 0) === 0 ? 'text-gray-500' : 'text-amber-300'}`}>
+                    {(subStyle.delaySec || 0) > 0 ? '+' : ''}{(subStyle.delaySec || 0).toFixed(1)}s
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={() => updateSubStyle({ delaySec: Math.max(-30, Math.round(((subStyle.delaySec || 0) - 0.5) * 10) / 10) })}
+                    className="flex-1 py-1.5 rounded-lg bg-black/40 border border-white/10 text-gray-300 hover:border-cyan-500/40 font-mono font-bold text-xs"
+                  >
+                    −0.5s
+                  </button>
+                  <button
+                    onClick={() => updateSubStyle({ delaySec: 0 })}
+                    className="px-3 py-1.5 rounded-lg bg-black/40 border border-white/10 text-gray-300 hover:border-cyan-500/40 text-[11px] font-bold"
+                  >
+                    归零
+                  </button>
+                  <button
+                    onClick={() => updateSubStyle({ delaySec: Math.min(30, Math.round(((subStyle.delaySec || 0) + 0.5) * 10) / 10) })}
+                    className="flex-1 py-1.5 rounded-lg bg-black/40 border border-white/10 text-gray-300 hover:border-cyan-500/40 font-mono font-bold text-xs"
+                  >
+                    +0.5s
+                  </button>
+                </div>
+                <span className="text-[10px] text-gray-500">正值 = 字幕延后显示（画面先出、字幕慢半拍时使用）</span>
+              </div>
+
+              <div className="text-[10px] text-gray-500 border-t border-white/5 pt-2">
+                样式全局生效：影院播放、悬浮小窗与 VR 模式共享同一套设置。
               </div>
             </div>
           )}

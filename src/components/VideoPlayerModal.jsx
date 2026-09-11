@@ -8,6 +8,7 @@ import { useSubtitleTracks } from '../hooks/useSubtitleTracks';
 import { useViewport } from '../hooks/useViewport';
 import TrickplayScrubberThumbnail from './TrickplayScrubberThumbnail';
 import InlineVrCanvas from './InlineVrCanvas';
+import SubtitleOverlay from './SubtitleOverlay';
 import DeleteConfirmModal from './DeleteConfirmModal';
 import SubtitleModal from './SubtitleModal';
 import VolumeControl from './VolumeControl';
@@ -24,7 +25,7 @@ import {
   Play, Pause, Maximize,
   Star, Eye, EyeOff, ExternalLink, X, Film,
   SkipForward, SkipBack, Sun, Zap, FastForward, Glasses, Trash2, Gauge,
-  Subtitles, Music, Keyboard, ChevronRight, Tag, Scaling, FlipHorizontal, ListVideo, RefreshCw
+  Subtitles, Music, Keyboard, ChevronRight, Tag, Scaling, FlipHorizontal, ListVideo, RefreshCw, Flag
 } from 'lucide-react';
 
 function formatTime(seconds) {
@@ -194,6 +195,10 @@ export default function VideoPlayerModal({
   // 下一集预取（剧集连播）
   const [nextEpisode, setNextEpisode] = useState(null);
   const [episodeCountdown, setEpisodeCountdown] = useState(null);
+  // 章节导航与跳过片头/片尾标记
+  const [chapters, setChapters] = useState([]);
+  const [showChapterMenu, setShowChapterMenu] = useState(false);
+  const [introMarkers, setIntroMarkers] = useState(null);
 
   const { launchPlayer } = useExternalPlayer();
 
@@ -350,6 +355,28 @@ export default function VideoPlayerModal({
     setNextEpisode(null);
     setEpisodeCountdown(null);
     setShowEpisodeDrawer(false);
+    setChapters([]);
+    setIntroMarkers(null);
+  }, [item?.Id]);
+
+  // 章节：详情 DTO 自带 Chapters（无需额外 Fields），换片后拉取
+  useEffect(() => {
+    if (!item?.Id || !jellyfin.auth.isConfigured) return;
+    let cancelled = false;
+    jellyfin.getItemDetails(item.Id).then(d => {
+      if (!cancelled && d?.Chapters) setChapters(d.Chapters);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [item?.Id]);
+
+  // 跳过片头/片尾标记：来自 Intro Skipper 插件，未安装/无标记时静默为 null
+  useEffect(() => {
+    if (!item?.Id || !jellyfin.auth.isConfigured) return;
+    let cancelled = false;
+    jellyfin.getIntroTimestamps(item.Id).then(markers => {
+      if (!cancelled) setIntroMarkers(markers);
+    });
+    return () => { cancelled = true; };
   }, [item?.Id]);
 
   // 剧集：预取下一集（自动连播）
@@ -382,6 +409,36 @@ export default function VideoPlayerModal({
     setEpisodeCountdown(null);
     if (nextEpisode && onSwitchItem) onSwitchItem(nextEpisode);
   }, [nextEpisode, onSwitchItem]);
+
+  // 统一跳转：转码会话走 controller.seek（处理 HLS 分片定位），直连直接设 currentTime
+  const seekToSeconds = useCallback((sec) => {
+    const video = videoRef.current;
+    const duration = video?.duration || (item?.RunTimeTicks ? item.RunTimeTicks / 10000000 : 0);
+    const target = Math.max(0, duration ? Math.min(sec, duration - 0.5) : sec);
+    if (sessionControllerRef.current) {
+      sessionControllerRef.current.seek(target);
+    } else if (video) {
+      video.currentTime = target;
+    }
+  }, [item?.RunTimeTicks]);
+
+  // 当前播放位置（秒）：progress 状态随 timeupdate 刷新
+  const currentTimeSec = ((progress / 100) * (rawDuration || (item?.RunTimeTicks ? item.RunTimeTicks / 10000000 : 0))) || 0;
+  const currentChapterIdx = chapters.length >= 2
+    ? chapters.findIndex((ch, i) => {
+        const start = (ch.StartPositionTicks ?? ch.StartPositionPositionTicks ?? 0) / 10000000;
+        const nextStart = i + 1 < chapters.length ? (chapters[i + 1].StartPositionPositionTicks || 0) / 10000000 : Infinity;
+        return currentTimeSec >= start && currentTimeSec < nextStart;
+      })
+    : -1;
+
+  // 跳过片头/片尾按钮的可见性：位于标记区间内才显示
+  const introSeg = introMarkers?.Introduction;
+  const creditsSeg = introMarkers?.Credits;
+  const showSkipIntro = !!(introSeg && introSeg.IntroEnd > introSeg.IntroStart
+    && currentTimeSec >= introSeg.IntroStart && currentTimeSec < introSeg.IntroEnd - 1);
+  const showSkipCredits = !!(creditsSeg && creditsSeg.CreditsEnd > creditsSeg.CreditsStart
+    && currentTimeSec >= creditsSeg.CreditsStart && currentTimeSec < creditsSeg.CreditsEnd - 1);
 
   // 选集抽屉（Episode Drawer）：播放中浏览整季单集并快速换集
   const [showEpisodeDrawer, setShowEpisodeDrawer] = useState(false);
@@ -929,6 +986,39 @@ export default function VideoPlayerModal({
             initialMode={detectedVrMode}
           />
 
+          {/* 自定义字幕渲染层：字号/颜色/描边/背景/延迟补偿（设置见字幕弹窗） */}
+          {!isVrActive && (
+            <SubtitleOverlay
+              videoRef={videoRef}
+              visible={selectedSubtitleIndex !== -1}
+              selectedSubtitleIndex={selectedSubtitleIndex}
+            />
+          )}
+
+          {/* 跳过片头 / 跳过片尾（Intro Skipper 插件标记区间内显示） */}
+          {(showSkipIntro || showSkipCredits) && (
+            <div className="absolute bottom-16 right-3 sm:right-5 z-40 flex flex-col gap-2 items-end animate-in fade-in slide-in-from-bottom-2 duration-200">
+              {showSkipIntro && (
+                <button
+                  onClick={() => seekToSeconds(introSeg.IntroEnd + 0.2)}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-black shadow-2xl shadow-black/50 transition"
+                >
+                  <SkipForward size={14} />
+                  <span>跳过片头</span>
+                </button>
+              )}
+              {showSkipCredits && (
+                <button
+                  onClick={() => seekToSeconds(creditsSeg.CreditsEnd + 0.2)}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-slate-800/95 hover:bg-slate-700 border border-white/20 text-gray-100 text-xs font-bold shadow-2xl shadow-black/50 transition"
+                >
+                  <SkipForward size={14} />
+                  <span>跳过片尾</span>
+                </button>
+              )}
+            </div>
+          )}
+
           {isLoading && !hasError && (
             <div className="absolute z-20 flex flex-col items-center justify-center pointer-events-none gap-2">
               <div className="w-10 h-10 border-3 border-cyan-500/30 border-t-cyan-400 rounded-full animate-spin" />
@@ -1134,6 +1224,28 @@ export default function VideoPlayerModal({
               >
                 <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 rounded-full bg-white shadow-md shadow-black scale-0 group-hover/bar:scale-100 transition-transform" />
               </div>
+
+              {/* 章节刻度线：点击直接跳转章首 */}
+              {chapters.length >= 2 && (rawDuration > 0 || item?.RunTimeTicks) && chapters.map((ch, i) => {
+                const sec = (ch.StartPositionTicks ?? ch.StartPositionPositionTicks ?? 0) / 10000000;
+                const dur = rawDuration || (item?.RunTimeTicks ? item.RunTimeTicks / 10000000 : 0);
+                const pct = dur ? (sec / dur) * 100 : 0;
+                if (!pct || pct <= 0.2 || pct >= 99.8) return null;
+                return (
+                  <div
+                    key={`${ch.StartPositionPositionTicks}-${i}`}
+                    title={ch.Name ? `章节：${ch.Name}` : '章节'}
+                    className="absolute top-0 bottom-0 w-[3px] -ml-[1.5px] bg-white/80 hover:bg-amber-300 cursor-pointer z-10"
+                    style={{ left: `${pct}%` }}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onTouchStart={(e) => e.stopPropagation()}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      seekToSeconds(sec);
+                    }}
+                  />
+                );
+              })}
             </div>
           </div>
 
@@ -1453,6 +1565,50 @@ export default function VideoPlayerModal({
                   <span>下一集</span>
                   <ChevronRight size={12} />
                 </button>
+              )}
+
+              {/* 章节菜单按钮（≥2 章节显示） */}
+              {chapters.length >= 2 && (
+                <div className="relative">
+                  <button
+                    onClick={() => setShowChapterMenu(prev => !prev)}
+                    className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl border text-[11px] font-bold transition ${
+                      showChapterMenu
+                        ? 'bg-cyan-400 text-slate-950 border-cyan-400'
+                        : 'border-cyan-500/40 bg-cyan-950/60 hover:bg-cyan-900 text-cyan-300'
+                    }`}
+                    title="章节"
+                  >
+                    <Flag size={13} />
+                    <span className="hidden sm:inline">章节</span>
+                  </button>
+                  {showChapterMenu && (
+                    <div
+                      className="absolute right-0 bottom-10 w-56 max-h-72 overflow-y-auto glass-panel rounded-xl shadow-2xl py-1 z-50 text-xs text-gray-200 divide-y divide-white/5 animate-in fade-in zoom-in-95 duration-100"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {chapters.map((ch, i) => {
+                        const sec = (ch.StartPositionTicks ?? ch.StartPositionPositionTicks ?? 0) / 10000000;
+                        const active = i === currentChapterIdx;
+                        return (
+                          <button
+                            key={`${ch.StartPositionPositionTicks}-${i}`}
+                            onClick={() => {
+                              seekToSeconds(sec);
+                              setShowChapterMenu(false);
+                            }}
+                            className={`w-full px-3 py-2 text-left flex items-center justify-between gap-2 transition ${
+                              active ? 'bg-cyan-500/20 text-cyan-300 font-bold' : 'hover:bg-white/10 text-gray-300'
+                            }`}
+                          >
+                            <span className="truncate">{ch.Name || `章节 ${i + 1}`}</span>
+                            <span className="font-mono text-[10px] flex-shrink-0 text-gray-400">{formatTime(sec)}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               )}
 
               {/* 选集抽屉按钮 */}

@@ -40,6 +40,8 @@ export function useSubtitleTracks({ item, playbackData, videoRef }) {
   }, [item, subtitleStreams]);
 
   // 将选择同步到 video 内的 <track> 元素（通过 data-index 精确映射，不依赖 DOM 顺序）
+  // 选中轨使用 hidden 模式：cue 照常加载，但不原生渲染——由 SubtitleOverlay 覆盖层
+  // 按字幕样式（字号/颜色/描边/背景/延迟补偿）接管渲染
   const syncSubtitleModes = useCallback(() => {
     const video = videoRef?.current;
     if (!video || !video.querySelectorAll) return;
@@ -47,11 +49,8 @@ export function useSubtitleTracks({ item, playbackData, videoRef }) {
     trackEls.forEach(el => {
       const textTrack = el.track;
       if (!textTrack) return;
-      const streamIndex = Number(el.getAttribute('data-index'));
-      textTrack.mode =
-        selectedSubtitleIndex !== -1 && streamIndex === selectedSubtitleIndex
-          ? 'showing'
-          : 'hidden';
+      // 统一 hidden：cue 照常加载但不原生渲染，选中轨由 SubtitleOverlay 按样式接管
+      textTrack.mode = 'hidden';
     });
   }, [selectedSubtitleIndex, videoRef]);
 

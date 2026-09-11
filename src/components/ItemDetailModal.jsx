@@ -250,6 +250,7 @@ export default function ItemDetailModal({
     .filter(p => !p.Type || ['Actor', 'GuestStar'].includes(p.Type))
     .slice(0, 8);
   const videoStream = (current?.MediaStreams || []).find(s => s.Type === 'Video');
+  const itemChapters = details?.Chapters || current?.Chapters || [];
   const audioStreams = (current?.MediaStreams || []).filter(s => s.Type === 'Audio');
   const subtitleCount = (current?.MediaStreams || []).filter(s => s.Type === 'Subtitle').length;
 
@@ -502,6 +503,33 @@ export default function ItemDetailModal({
                   <ChevronRight size={12} className={expandedOverview ? '-rotate-90' : 'rotate-90'} />
                 </button>
               )}
+            </div>
+          )}
+
+          {/* Chapters（章节导航，≥2 章节显示；点击从该章节起播） */}
+          {itemChapters.length >= 2 && (
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center gap-1.5 text-gray-400 font-bold">
+                <Clock size={13} className="text-cyan-400" />
+                <span>章节</span>
+                <span className="text-[10px] font-mono text-gray-500">{itemChapters.length} 段</span>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                {itemChapters.map((ch, i) => {
+                  const sec = (ch.StartPositionTicks ?? ch.StartPositionPositionTicks ?? 0) / 10000000;
+                  return (
+                    <button
+                      key={`${ch.StartPositionPositionTicks}-${i}`}
+                      onClick={() => onPlayTheater && onPlayTheater({ ...current, startSecond: sec })}
+                      className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg bg-black/40 border border-white/10 text-left hover:border-cyan-500/40 hover:bg-white/5 transition"
+                      title={`从 ${formatTime(sec)} 开始播放`}
+                    >
+                      <span className="text-[11px] text-gray-200 truncate">{ch.Name || `章节 ${i + 1}`}</span>
+                      <span className="text-[10px] font-mono text-cyan-400 flex-shrink-0">{formatTime(sec)}</span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           )}
 

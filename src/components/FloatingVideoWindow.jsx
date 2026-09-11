@@ -13,6 +13,7 @@ import { calculateSmartStartTime } from '../utils/smartStartHelper';
 import { QUALITY_OPTIONS, PLAYBACK_SPEED_OPTIONS } from '../utils/qualityPresets';
 import TrickplayScrubberThumbnail from './TrickplayScrubberThumbnail';
 import InlineVrCanvas from './InlineVrCanvas';
+import SubtitleOverlay from './SubtitleOverlay';
 import SubtitleModal from './SubtitleModal';
 import DeleteConfirmModal from './DeleteConfirmModal';
 import QuickTagSelector from './QuickTagSelector';
@@ -1634,6 +1635,13 @@ export default function FloatingVideoWindow({
             />
           ))}
         </video>
+
+        {/* 自定义字幕渲染层（与影院播放器共享样式设置） */}
+        <SubtitleOverlay
+          videoRef={videoRef}
+          visible={selectedSubtitleIndex !== -1}
+          selectedSubtitleIndex={selectedSubtitleIndex}
+        />
 
         {/* INLINE VR WEBGL CANVAS */}
         <InlineVrCanvas

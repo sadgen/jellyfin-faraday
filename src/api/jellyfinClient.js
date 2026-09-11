@@ -1095,6 +1095,25 @@ export class JellyfinClient {
   }
 
   /**
+   * Fetch intro/credits timestamps from the Intro Skipper plugin (跳过片头/片尾).
+   * Returns { Introduction: {IntroStart, IntroEnd}, Credits: {...} } or null
+   * when the plugin is not installed / no markers exist for the item.
+   */
+  async getIntroTimestamps(itemId) {
+    if (!this.auth.isConfigured || !itemId) return null;
+    try {
+      const res = await fetch(`${this.auth.serverUrl}/Episode/${itemId}/IntroTimestamps/V1`, {
+        headers: this.getAuthHeaders()
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      return data?.Result || null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Fetch seasons of a series (电视剧季度列表)
    */
   async getSeasons(seriesId) {

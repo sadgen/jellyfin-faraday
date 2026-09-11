@@ -894,31 +894,23 @@ export default function LibraryView({
   isRefreshing,
   hasFloatingWindows = false
 }) {
-  // 默认子标签页按媒体库类型决定（电影→影片，电视剧/音乐→文件夹），并按库独立记忆手动选择
-  const [activeSubTab, setActiveSubTab] = useState('items');
+  // 子标签页全局记忆（切换媒体库时保持不变），默认影片视图
+  const [activeSubTab, setActiveSubTab] = useState(() => {
+    try {
+      return localStorage.getItem('jf_library_active_subtab') || 'items';
+    } catch {
+      return 'items';
+    }
+  });
 
   const handleSubTabChange = useCallback((tabId) => {
     setActiveSubTab(tabId);
     try {
-      localStorage.setItem(`jf_library_subtab_${selectedViewId || 'all'}`, tabId);
+      localStorage.setItem('jf_library_active_subtab', tabId);
     } catch {
       // ignore storage errors
     }
-  }, [selectedViewId]);
-
-  // 切换媒体库时：优先恢复该库上次的手动选择，否则按类型给默认子标签页
-  useEffect(() => {
-    const view = (userViews || []).find(v => v.Id === selectedViewId);
-    const collectionType = selectedViewId === 'all' ? 'all' : (view?.CollectionType || '');
-    const defaultTab = (collectionType === 'tvshows' || collectionType === 'music') ? 'folder' : 'items';
-    let stored = null;
-    try {
-      stored = localStorage.getItem(`jf_library_subtab_${selectedViewId || 'all'}`);
-    } catch {
-      // ignore storage errors
-    }
-    setActiveSubTab(stored || defaultTab);
-  }, [selectedViewId, userViews]);
+  }, []);
 
   const [viewLayout, setViewLayout] = useState('poster');
   const [favoriteFilter, setFavoriteFilter] = useState('all');
@@ -1058,6 +1050,9 @@ export default function LibraryView({
   const [folderItems, setFolderItems] = useState([]);
   const [folderPathStack, setFolderPathStack] = useState([]); // [{ id, name }]
   const [isFolderLoading, setIsFolderLoading] = useState(false);
+
+  // 文件夹视图同样响应顶部排序选择（子文件夹与视频文件分区各自按当前排序展示）
+  const sortedFolderItems = useMemo(() => sortMediaItems(folderItems, sortMethod), [folderItems, sortMethod]);
 
   // 当切换库视图时，重置文件夹面包屑栈
   useEffect(() => {
@@ -1448,6 +1443,21 @@ export default function LibraryView({
         {/* Row 1: Primary Library Tabs & Random Play Launcher */}
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-1.5 overflow-x-auto py-0.5 flex-1 min-w-0 no-scrollbar">
+            <button
+              onClick={() => onSelectView('all')}
+              className={`flex items-center gap-1 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl text-xs font-medium transition flex-shrink-0 ${
+                selectedViewId === 'all'
+                  ? 'bg-jf-accent text-white shadow-lg shadow-cyan-500/25'
+                  : 'bg-black/40 hover:bg-white/10 text-gray-400 border border-white/5'
+              }`}
+              title="跨库全量浏览 (全部媒体)"
+            >
+              <Film size={12} />
+              <span>全部</span>
+            </button>
+
+            <div className="w-px h-4 bg-white/10 flex-shrink-0 mx-0.5" />
+
             {userViews.map(view => (
               <button
                 key={view.Id}
@@ -1462,19 +1472,6 @@ export default function LibraryView({
                 <span>{view.Name}</span>
               </button>
             ))}
-
-            <button
-              onClick={() => onSelectView('all')}
-              className={`flex items-center gap-1 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl text-xs font-medium transition flex-shrink-0 ${
-                selectedViewId === 'all'
-                  ? 'bg-jf-accent text-white shadow-lg shadow-cyan-500/25'
-                  : 'bg-black/40 hover:bg-white/10 text-gray-400 border border-white/5'
-              }`}
-              title="跨库全量浏览 (全部媒体)"
-            >
-              <Film size={12} />
-              <span>全部</span>
-            </button>
           </div>
 
           <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
@@ -2444,17 +2441,17 @@ export default function LibraryView({
             ) : (
               <div className="flex flex-col gap-4">
                 {/* 1. 子文件夹区 */}
-                {folderItems.some(it => it.IsFolder || it.Type === 'Folder' || it.Type === 'CollectionFolder') && (
+                {sortedFolderItems.some(it => it.IsFolder || it.Type === 'Folder' || it.Type === 'CollectionFolder') && (
                   <div className="flex flex-col gap-2">
                     <div className="text-[11px] font-bold text-gray-400 flex items-center gap-1.5">
                       <Folder size={12} className="text-cyan-400" />
-                      <span>子文件夹 ({folderItems.filter(it => it.IsFolder || it.Type === 'Folder' || it.Type === 'CollectionFolder').length})</span>
+                      <span>子文件夹 ({sortedFolderItems.filter(it => it.IsFolder || it.Type === 'Folder' || it.Type === 'CollectionFolder').length})</span>
                     </div>
                     <div
                       className="grid gap-2.5 sm:gap-3"
                       style={{ gridTemplateColumns: `repeat(${effectiveGridColumns}, minmax(0, 1fr))` }}
                     >
-                      {folderItems
+                      {sortedFolderItems
                         .filter(it => it.IsFolder || it.Type === 'Folder' || it.Type === 'CollectionFolder')
                         .map(folder => {
                           const folderPoster = jellyfin.getBestImageUrl(folder, { maxWidth: 300 });
@@ -2499,15 +2496,15 @@ export default function LibraryView({
                 )}
 
                 {/* 2. 视频文件区 */}
-                {folderItems.some(it => !it.IsFolder && it.Type !== 'Folder' && it.Type !== 'CollectionFolder') && (
+                {sortedFolderItems.some(it => !it.IsFolder && it.Type !== 'Folder' && it.Type !== 'CollectionFolder') && (
                   <div className="flex flex-col gap-2">
                     <div className="text-[11px] font-bold text-gray-400 flex items-center gap-1.5">
                       <Film size={12} className="text-cyan-400" />
-                      <span>视频文件 ({folderItems.filter(it => !it.IsFolder && it.Type !== 'Folder' && it.Type !== 'CollectionFolder').length})</span>
+                      <span>视频文件 ({sortedFolderItems.filter(it => !it.IsFolder && it.Type !== 'Folder' && it.Type !== 'CollectionFolder').length})</span>
                     </div>
                     {viewLayout === 'list' ? (
                       <div className="flex flex-col gap-2">
-                        {folderItems
+                        {sortedFolderItems
                           .filter(it => !it.IsFolder && it.Type !== 'Folder' && it.Type !== 'CollectionFolder')
                           .map(file => (
                             <MediaListRow
@@ -2537,7 +2534,7 @@ export default function LibraryView({
                         className="grid gap-2.5 sm:gap-3.5"
                         style={{ gridTemplateColumns: `repeat(${effectiveGridColumns}, minmax(0, 1fr))` }}
                       >
-                        {folderItems
+                        {sortedFolderItems
                           .filter(it => !it.IsFolder && it.Type !== 'Folder' && it.Type !== 'CollectionFolder')
                           .map(file => (
                             <MediaCard

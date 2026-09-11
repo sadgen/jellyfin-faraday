@@ -41,15 +41,11 @@ export default function App() {
     }
   });
   
-  // Synchronously initialize to saved library or first cached library
+  // Synchronously initialize to saved library, defaulting to the「全部」cross-library view
   const [selectedViewId, setSelectedViewId] = useState(() => {
     const saved = localStorage.getItem(STORAGE_KEY_VIEW);
     if (saved) return saved;
-    try {
-      const cachedViews = JSON.parse(localStorage.getItem('jf_cached_views') || '[]');
-      if (cachedViews.length > 0 && cachedViews[0]?.Id) return cachedViews[0].Id;
-    } catch {}
-    return '';
+    return 'all';
   });
 
   const [sortMethod, setSortMethod] = useState(() => {
@@ -226,9 +222,9 @@ export default function App() {
       if (views && views.length > 0) {
         setUserViews(views);
         if (!savedViewId && !selectedViewIdRef.current) {
-          const firstId = views[0]?.Id || 'all';
-          setSelectedViewId(firstId);
-          localStorage.setItem(STORAGE_KEY_VIEW, firstId);
+          // 默认落在「全部」跨库视图
+          setSelectedViewId('all');
+          localStorage.setItem(STORAGE_KEY_VIEW, 'all');
         }
       }
     }).catch(err => {

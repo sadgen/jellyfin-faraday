@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { jellyfin } from '../api/jellyfinClient';
+import { deriveFilenameSearchTerm } from '../utils/titleCleaner';
 import { Edit3, Save, X, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
 
 export default function MetadataEditorModal({
@@ -26,29 +27,16 @@ export default function MetadataEditorModal({
     if (isOpen && item?.Id) {
       setIsLoading(true);
       setStatusMsg({ type: '', text: '' });
-      setName(item.Name || '');
-      setOriginalTitle(item.OriginalTitle || '');
-      setProductionYear(item.ProductionYear ? item.ProductionYear.toString() : '');
-      setCommunityRating(item.CommunityRating ? item.CommunityRating.toString() : '');
-      setOverview(item.Overview || '');
-      setGenres((item.Genres || []).join(', '));
-      setTags((item.Tags || []).join(', '));
+      applyDefaults(item.Path, item);
 
       jellyfin.getItemDetails(item.Id)
         .then(details => {
           if (isCancelled || !details) return;
-          setName(details.Name || '');
-          setOriginalTitle(details.OriginalTitle || '');
-          setProductionYear(details.ProductionYear ? details.ProductionYear.toString() : '');
-          setCommunityRating(details.CommunityRating ? details.CommunityRating.toString() : '');
-          setOverview(details.Overview || '');
-          setGenres((details.Genres || []).join(', '));
-          setTags((details.Tags || []).join(', '));
+          applyDefaults(details.Path, details);
         })
         .catch(err => {
           if (isCancelled) return;
           console.error('Failed to load item details:', err);
-          setName(item.Name || '');
         })
         .finally(() => {
           if (!isCancelled) setIsLoading(false);
@@ -58,7 +46,23 @@ export default function MetadataEditorModal({
     return () => {
       isCancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, item]);
+
+  // 标题默认值取文件名（打开编辑多半是刮削结果不可信，文件名才是可靠线索），
+  // 其余字段维持现有元数据；有文件名年份时也优先文件名
+  const applyDefaults = (path, source) => {
+    const defaults = deriveFilenameSearchTerm(path);
+    setName(defaults?.term ?? source.Name ?? '');
+    setOriginalTitle(source.OriginalTitle ?? '');
+    setProductionYear(
+      defaults?.year ?? (source.ProductionYear ? source.ProductionYear.toString() : '')
+    );
+    setCommunityRating(source.CommunityRating ? source.CommunityRating.toString() : '');
+    setOverview(source.Overview ?? '');
+    setGenres((source.Genres ?? []).join(', '));
+    setTags((source.Tags ?? []).join(', '));
+  };
 
   if (!isOpen || !item) return null;
 

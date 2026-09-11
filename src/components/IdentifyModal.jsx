@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { jellyfin } from '../api/jellyfinClient';
+import { deriveFilenameSearchTerm } from '../utils/titleCleaner';
 import { Search, Sparkles, Check, X, Loader2, AlertCircle, Film } from 'lucide-react';
 
 export default function IdentifyModal({
@@ -8,13 +9,35 @@ export default function IdentifyModal({
   item,
   onIdentified
 }) {
-  const [searchTerm, setSearchTerm] = useState(item?.Name || '');
-  const [searchYear, setSearchYear] = useState(item?.ProductionYear ? item.ProductionYear.toString() : '');
+  // 打开识别通常意味着当前刮削结果不可信，默认值取文件名而不是现有元数据
+  const fileDefaults = deriveFilenameSearchTerm(item?.Path);
+  const [searchTerm, setSearchTerm] = useState(fileDefaults?.term ?? item?.Name ?? '');
+  const [searchYear, setSearchYear] = useState(
+    fileDefaults?.year ?? (item?.ProductionYear ? item.ProductionYear.toString() : '')
+  );
+  const searchTermTouched = useRef(false);
+  const searchYearTouched = useRef(false);
   const [results, setResults] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
   const [isApplying, setIsApplying] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [hasSearched, setHasSearched] = useState(false);
+
+  // 右键/手机端入口传入的是列表条目，不带 Path：打开后补拉全量详情再刷新默认值，
+  // 用户若已抢先手动输入则不覆盖
+  useEffect(() => {
+    if (!isOpen || !item?.Id || item.Path || !jellyfin.auth.isConfigured) return;
+    let cancelled = false;
+    jellyfin.getItemDetails(item.Id).then(details => {
+      if (cancelled || !details?.Path) return;
+      const defaults = deriveFilenameSearchTerm(details.Path);
+      if (!defaults) return;
+      if (!searchTermTouched.current) setSearchTerm(defaults.term);
+      if (!searchYearTouched.current && defaults.year) setSearchYear(defaults.year);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, item?.Id]);
 
   if (!isOpen || !item) return null;
 
@@ -96,14 +119,14 @@ export default function IdentifyModal({
           <input
             type="text"
             value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+            onChange={(e) => { searchTermTouched.current = true; setSearchTerm(e.target.value); }}
             placeholder="搜索番号 / 电影名称..."
             className="flex-1 px-3 py-2 rounded-xl bg-black/50 border border-white/10 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-cyan-400 transition"
           />
           <input
             type="number"
             value={searchYear}
-            onChange={(e) => setSearchYear(e.target.value)}
+            onChange={(e) => { searchYearTouched.current = true; setSearchYear(e.target.value); }}
             placeholder="年份 (可选)"
             className="w-24 px-3 py-2 rounded-xl bg-black/50 border border-white/10 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-cyan-400 transition font-mono"
           />

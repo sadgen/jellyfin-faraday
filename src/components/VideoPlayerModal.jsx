@@ -369,13 +369,30 @@ export default function VideoPlayerModal({
     return () => { cancelled = true; };
   }, [item?.Id]);
 
-  // 跳过片头/片尾标记：来自 Intro Skipper 插件，未安装/无标记时静默为 null
+  // 跳过片头/片尾标记：优先 Jellyfin 12 原生 MediaSegments（Intro Skipper 插件写入），
+  // 无数据时回退插件自有 V1 端点；都没有则静默隐藏按钮
   useEffect(() => {
     if (!item?.Id || !jellyfin.auth.isConfigured) return;
     let cancelled = false;
-    jellyfin.getIntroTimestamps(item.Id).then(markers => {
+    (async () => {
+      let markers = null;
+      try {
+        const d = await jellyfin.getMediaSegments(item.Id);
+        const intro = (d?.Items || []).find(s => s.Type === 'Intro');
+        const credits = (d?.Items || []).filter(s => s.Type === 'Credits').pop();
+        if (intro || credits) {
+          markers = {};
+          if (intro) markers.Introduction = { IntroStart: intro.StartTicks / 1e7, IntroEnd: intro.EndTicks / 1e7 };
+          if (credits) markers.Credits = { CreditsStart: credits.StartTicks / 1e7, CreditsEnd: credits.EndTicks / 1e7 };
+        }
+      } catch {
+        // 原生分段不可用时走 V1 兜底
+      }
+      if (!markers) {
+        markers = await jellyfin.getIntroTimestamps(item.Id);
+      }
       if (!cancelled) setIntroMarkers(markers);
-    });
+    })();
     return () => { cancelled = true; };
   }, [item?.Id]);
 

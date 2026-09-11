@@ -43,3 +43,21 @@ export function cleanMediaTitle(title = '') {
     isChanged
   };
 }
+
+/**
+ * 从文件路径推导编辑/识别弹窗的默认搜索词。
+ * 用户打开编辑或识别，多半是因为当前刮削结果不对，文件名才是最可靠的线索，
+ * 因此默认值取文件名（去扩展名后净化，命中标准番号时优先番号）而非现有元数据。
+ */
+export function deriveFilenameSearchTerm(filePath = '') {
+  if (!filePath) return null;
+  const base = filePath.split(/[\\/]/).pop().replace(/\.(mp4|mkv|avi|mov|wmv|flv|webm|ts|m4v)$/i, '');
+  if (!base) return null;
+  const { cleanedTitle, extractedCode } = cleanMediaTitle(base);
+  // 年份只在有明确分隔的语境下提取，避免误命中番号/分辨率里的数字（如 FC2-PPV-2920232）
+  const yearMatch = base.match(/(?:^|[\s._-])((?:19|20)\d{2})(?:$|[\s._-])/);
+  return {
+    term: extractedCode || cleanedTitle || base,
+    year: yearMatch ? yearMatch[1] : null
+  };
+}

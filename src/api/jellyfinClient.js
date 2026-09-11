@@ -1095,6 +1095,23 @@ export class JellyfinClient {
   }
 
   /**
+   * Fetch media segments (Jellyfin 12 原生分段：Intro/Credits/Recap 等).
+   * Intro Skipper 等插件把分析结果写入原生分段存储，比其自有 V1 端点更可靠。
+   */
+  async getMediaSegments(itemId) {
+    if (!this.auth.isConfigured || !itemId) return { Items: [] };
+    try {
+      const res = await fetch(`${this.auth.serverUrl}/MediaSegments/${itemId}`, {
+        headers: this.getAuthHeaders()
+      });
+      if (!res.ok) return { Items: [] };
+      return await res.json();
+    } catch {
+      return { Items: [] };
+    }
+  }
+
+  /**
    * Fetch intro/credits timestamps from the Intro Skipper plugin (跳过片头/片尾).
    * Returns { Introduction: {IntroStart, IntroEnd}, Credits: {...} } or null
    * when the plugin is not installed / no markers exist for the item.

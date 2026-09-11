@@ -144,6 +144,9 @@ export default function App() {
   useEffect(() => {
     if (!jellyfin.auth.isConfigured || !targetRouteRef.current) return;
     const { targetId, targetSearch, playDirectly } = targetRouteRef.current;
+    // 深链只消费一次：mediaItems 后续变化（扫描/播放状态更新）不得重新触发，
+    // 否则用户已关闭的详情弹窗会在每次列表刷新时反复重开
+    targetRouteRef.current = null;
 
     if (targetSearch && !searchKeyword) {
       setSearchKeyword(targetSearch);
@@ -160,8 +163,16 @@ export default function App() {
           }
 
           // 如果该条目所属的顶级媒体库不是当前选中的库，自动切换到该条目所在的库
-          if (item.ParentId && userViewsRef.current.some(v => v.Id === item.ParentId)) {
-            setSelectedViewId(item.ParentId);
+          // （视图列表可能尚未加载完成，有界重试等待）
+          if (item.ParentId) {
+            const attemptViewSwitch = (retries = 10) => {
+              if (userViewsRef.current.some(v => v.Id === item.ParentId)) {
+                setSelectedViewId(item.ParentId);
+              } else if (retries > 0) {
+                setTimeout(() => attemptViewSwitch(retries - 1), 500);
+              }
+            };
+            setTimeout(() => attemptViewSwitch(), 600);
           }
 
           // 定位高亮该卡片

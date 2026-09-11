@@ -42,4 +42,17 @@ describe('mediaSorter sorting utilities', () => {
     // 不修改原数组
     expect(many[0].Id).toBe('0');
   });
+
+  it('keeps random order stable across recomputes and new item insertion', () => {
+    const many = Array.from({ length: 60 }, (_, i) => ({ Id: String(i), Name: `V${i}` }));
+    const first = sortMediaItems(many, 'random').map(i => i.Id);
+    const second = sortMediaItems(many, 'random').map(i => i.Id);
+    expect(second).toEqual(first);
+
+    // 追加新条目后，既有条目相对顺序不变，新条目按自己的键插入
+    const extended = [...many, { Id: '60', Name: 'V60' }, { Id: '61', Name: 'V61' }];
+    const after = sortMediaItems(extended, 'random').map(i => i.Id);
+    const before = after.filter(id => id !== '60' && id !== '61');
+    expect(before).toEqual(first);
+  });
 });

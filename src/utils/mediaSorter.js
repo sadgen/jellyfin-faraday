@@ -3,6 +3,19 @@
  * Ensures identical ordering between client-side cache hydration and server-side responses.
  */
 
+// 稳定随机排序：按条目 Id 固定随机键，列表因扫描/播放状态更新而重算时顺序保持不变；
+// 新条目按自己的键插入，不打乱既有相对顺序
+const randomKeyCache = new Map();
+function getRandomKey(id) {
+  let key = randomKeyCache.get(id);
+  if (key === undefined) {
+    key = Math.random();
+    randomKeyCache.set(id, key);
+    if (randomKeyCache.size > 20000) randomKeyCache.clear();
+  }
+  return key;
+}
+
 export function sortMediaItems(items, sortMethod = 'date_desc') {
   if (!items || !Array.isArray(items)) return [];
   const copy = [...items];
@@ -31,12 +44,8 @@ export function sortMediaItems(items, sortMethod = 'date_desc') {
     case 'runtime_desc':
       return copy.sort((a, b) => (b.RunTimeTicks || 0) - (a.RunTimeTicks || 0));
     case 'random':
-      // Fisher-Yates 均匀洗牌，使客户端缓存水合与服务端 Random 排序行为一致
-      for (let i = copy.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [copy[i], copy[j]] = [copy[j], copy[i]];
-      }
-      return copy;
+      // 依据 Id 固定随机键排序（会话内稳定），缓存水合与服务端刷新结果一致
+      return copy.sort((a, b) => getRandomKey(a.Id) - getRandomKey(b.Id));
     default:
       return copy;
   }

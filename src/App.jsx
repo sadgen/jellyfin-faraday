@@ -252,7 +252,9 @@ export default function App() {
     const includeItemTypes = isTvLibrary ? 'Series' : (viewId === 'all' ? 'Movie,Series,Video' : 'Movie,Video,Episode');
 
     try {
-      const firstPageData = await jellyfin.queryMediaPage({
+      // 一次拉取全量：媒体库条目量级为数百，分页两波（150 + 全量）会让慢服务端的
+      // 切库耗时翻倍；单次全量配合前端懒渲染（visibleCount）已足够流畅
+      const data = await jellyfin.queryMediaPage({
         parentId: viewId,
         searchTerm: search,
         statusFilter: status,
@@ -262,47 +264,18 @@ export default function App() {
         nameStartsWithOrGreater: letter,
         includeItemTypes,
         startIndex: 0,
-        limit: 150
+        limit: 0
       });
 
       if (isStale()) return; // 已有更新的请求发出，丢弃本次响应
 
-      const rawInitial = firstPageData.Items || [];
-      const initialItems = sortMediaItems(rawInitial, sort);
-      const total = firstPageData.TotalRecordCount || initialItems.length;
+      const items = sortMediaItems(data.Items || [], sort);
+      setMediaItems(items);
+      setTotalRecordCount(data.TotalRecordCount || items.length);
 
-      setMediaItems(initialItems);
-      setTotalRecordCount(total);
-
-      if (!isBackground) setIsLoading(false);
-
-      if (total > 150) {
-        const fullData = await jellyfin.queryMediaPage({
-          parentId: viewId,
-          searchTerm: search,
-          statusFilter: status,
-          sortMethod: sort,
-          genre,
-          year,
-          nameStartsWithOrGreater: letter,
-          includeItemTypes,
-          startIndex: 0,
-          limit: 0
-        });
-
-        if (isStale()) return;
-
-        if (fullData.Items && fullData.Items.length > 0) {
-          const sortedFull = sortMediaItems(fullData.Items, sort);
-          setMediaItems(sortedFull);
-          setTotalRecordCount(fullData.TotalRecordCount || sortedFull.length);
-          // 仅全量未筛选结果才写入全库缓存；筛选/搜索子集只更新内存状态
-          if (isUnfilteredQuery) {
-            saveFullCache(sortedFull, userViewsRef.current);
-          }
-        }
-      } else if (initialItems.length > 0 && isUnfilteredQuery) {
-        saveFullCache(initialItems, userViewsRef.current);
+      // 仅全量未筛选结果才写入全库缓存；筛选/搜索子集只更新内存状态
+      if (items.length > 0 && isUnfilteredQuery) {
+        saveFullCache(items, userViewsRef.current);
       }
     } catch (err) {
       console.error('Failed to load media items:', err);

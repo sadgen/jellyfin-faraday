@@ -327,6 +327,26 @@ export default function VideoPlayerModal({
 
   const playbackSpeedRef = useRef(playbackSpeed);
   playbackSpeedRef.current = playbackSpeed;
+
+  // 把当前倍速同步到 video 元素：初始挂载即生效，换片（src 更新会重置倍速）
+  // 与暂停恢复（playing 事件）后也重新校准，保证"默认倍速"真正作用于播放
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return undefined;
+    const apply = () => {
+      video.defaultPlaybackRate = playbackSpeedRef.current;
+      if (Math.abs(video.playbackRate - playbackSpeedRef.current) > 0.001) {
+        video.playbackRate = playbackSpeedRef.current;
+      }
+    };
+    apply();
+    video.addEventListener('loadedmetadata', apply);
+    video.addEventListener('playing', apply);
+    return () => {
+      video.removeEventListener('loadedmetadata', apply);
+      video.removeEventListener('playing', apply);
+    };
+  }, [playbackSpeed, videoRef]);
   const isMutedRef = useRef(isMuted);
   isMutedRef.current = isMuted;
   const streamQualityRef = useRef(streamQuality);

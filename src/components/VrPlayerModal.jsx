@@ -10,6 +10,7 @@ import { useVolumeControl } from '../hooks/useVolumeControl';
 import { useMediaPlaybackInfo } from '../hooks/useMediaPlaybackInfo';
 import { useSubtitleTracks } from '../hooks/useSubtitleTracks';
 import { PLAYBACK_SPEED_OPTIONS } from '../utils/qualityPresets';
+import { getPlaybackDefaults } from '../utils/playbackDefaults';
 import { getStoredSeekSpeed, getSeekStepSeconds } from '../utils/seekSettings';
 import { PlaybackSessionController } from '../utils/playbackSessionController';
 import {
@@ -83,7 +84,7 @@ export default function VrPlayerModal({
   const [vrMode, setVrMode] = useState(initialMode);
   const [swapEyes, setSwapEyes] = useState(false);
   const [isPlaying, setIsPlaying] = useState(true);
-  const [playbackSpeed, setPlaybackSpeed] = useState(1.0);
+  const [playbackSpeed, setPlaybackSpeed] = useState(() => getPlaybackDefaults().speed || 1.0);
   const [isLoading, setIsLoading] = useState(true);
   const [progress, setProgress] = useState(0);
   const [currentTimeText, setCurrentTimeText] = useState('00:00');
@@ -281,6 +282,25 @@ export default function VrPlayerModal({
 
   const playbackSpeedRef = useRef(playbackSpeed);
   playbackSpeedRef.current = playbackSpeed;
+
+  // 把当前倍速同步到 video 元素（默认倍速初始生效；VR 重挂载/换片后同样校准）
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return undefined;
+    const apply = () => {
+      video.defaultPlaybackRate = playbackSpeedRef.current;
+      if (Math.abs(video.playbackRate - playbackSpeedRef.current) > 0.001) {
+        video.playbackRate = playbackSpeedRef.current;
+      }
+    };
+    apply();
+    video.addEventListener('loadedmetadata', apply);
+    video.addEventListener('playing', apply);
+    return () => {
+      video.removeEventListener('loadedmetadata', apply);
+      video.removeEventListener('playing', apply);
+    };
+  }, [playbackSpeed, videoRef]);
   const volumeRef = useRef(volume);
   volumeRef.current = volume;
   const itemRef = useRef(item);

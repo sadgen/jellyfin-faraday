@@ -116,29 +116,77 @@ export class JellyfinClient {
   }
 
   /**
+   * 服务器地址候选列表（协议自动探测）：
+   * - 用户显式写了 http(s):// → 只返回该地址，不猜测
+   * - 未写协议（如 "jellyfin.example.com:8443"）→ https 优先、http 回退。
+   *   背景：公网反代（如 :8443）几乎都是 TLS，而旧版默认补 http:// 会导致
+   *   明文请求 TLS 端口被网关拒绝（HTTP 400）或被浏览器按混合内容拦截，
+   *   登录请求根本到不了服务器。
+   */
+  getServerUrlCandidates(serverUrl) {
+    if (!serverUrl) return [];
+    const clean = serverUrl.trim().replace(/\/+$/, '');
+    if (/^https?:\/\//i.test(clean)) {
+      return [this.sanitizeServerUrl(clean)];
+    }
+    return [
+      this.sanitizeServerUrl('https://' + clean),
+      this.sanitizeServerUrl('http://' + clean)
+    ];
+  }
+
+  /**
    * Authenticate user with Username & Password
    */
   async authenticateByName(serverUrl, username, password, rememberMe = true) {
-    const cleanUrl = this.sanitizeServerUrl(serverUrl);
+    const candidates = this.getServerUrlCandidates(serverUrl);
+    let lastError = null;
+    for (const cleanUrl of candidates) {
+      try {
+        return await this.authenticateByNameOn(cleanUrl, username, password, rememberMe);
+      } catch (err) {
+        if (err.isAuthError) throw err; // 凭据错误：服务器已可达，换协议无意义
+        lastError = err;
+      }
+    }
+    throw lastError || new Error('登录失败');
+  }
+
+  async authenticateByNameOn(cleanUrl, username, password, rememberMe = true) {
     const authHeader = `MediaBrowser Client="${this.clientName}", Device="${this.deviceName}", DeviceId="${this.deviceId}", Version="${this.clientVersion}"`;
 
-    const res = await fetch(`${cleanUrl}/Users/AuthenticateByName`, {
-      method: 'POST',
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-        'Authorization': authHeader,
-        'X-Emby-Authorization': authHeader,
-      },
-      body: JSON.stringify({
-        Username: username,
-        Pw: password || ''
-      })
-    });
+    let res;
+    try {
+      res = await fetch(`${cleanUrl}/Users/AuthenticateByName`, {
+        method: 'POST',
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+          'Authorization': authHeader,
+          'X-Emby-Authorization': authHeader,
+        },
+        body: JSON.stringify({
+          Username: username,
+          Pw: password || ''
+        })
+      });
+    } catch (e) {
+      // 网络层失败（协议不匹配 / 混合内容拦截 / 不可达）→ 允许换协议重试
+      const err = new Error(`无法连接 ${cleanUrl}`, { cause: e });
+      throw err;
+    }
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(err.message || `登录失败 (HTTP ${res.status})`);
+      const message = err.message || `登录失败 (HTTP ${res.status})`;
+      if (res.status === 401 || res.status === 403) {
+        const authErr = new Error(message);
+        authErr.isAuthError = true; // 服务器明确拒绝凭据，不重试其他协议
+        throw authErr;
+      }
+      // 400 等：明文打 TLS 端口等协议错位 → 允许换协议重试
+      const retryable = new Error(message);
+      throw retryable;
     }
 
     const data = await res.json();
@@ -162,37 +210,54 @@ export class JellyfinClient {
    *   由 UI 展示用户列表，用户点选后调用 completeApiKeyLogin 完成登录
    */
   async connectWithApiKey(serverUrl, apiKey, rememberMe = true) {
-    const cleanUrl = this.sanitizeServerUrl(serverUrl);
-    const authHeader = `MediaBrowser Client="${this.clientName}", Device="${this.deviceName}", DeviceId="${this.deviceId}", Version="${this.clientVersion}", Token="${apiKey}"`;
+    const candidates = this.getServerUrlCandidates(serverUrl);
+    let lastError = null;
+    for (const cleanUrl of candidates) {
+      const authHeader = `MediaBrowser Client="${this.clientName}", Device="${this.deviceName}", DeviceId="${this.deviceId}", Version="${this.clientVersion}", Token="${apiKey}"`;
 
-    const res = await fetch(`${cleanUrl}/Users`, {
-      headers: {
-        'Accept': 'application/json',
-        'Authorization': authHeader,
-        'X-Emby-Authorization': authHeader,
-        'X-MediaBrowser-Token': apiKey
+      let res;
+      try {
+        res = await fetch(`${cleanUrl}/Users`, {
+          headers: {
+            'Accept': 'application/json',
+            'Authorization': authHeader,
+            'X-Emby-Authorization': authHeader,
+            'X-MediaBrowser-Token': apiKey
+          }
+        });
+      } catch (e) {
+        lastError = new Error(`无法连接 ${cleanUrl}`, { cause: e });
+        continue; // 网络层失败 → 换协议重试
       }
-    });
 
-    if (!res.ok) {
-      throw new Error(`连接失败，请检查服务器地址与 API Key (HTTP ${res.status})`);
+      if (res.status === 401 || res.status === 403) {
+        const authErr = new Error(`连接失败，API Key 无效 (HTTP ${res.status})`);
+        authErr.isAuthError = true;
+        throw authErr; // 服务器明确拒绝 Key，不换协议重试
+      }
+
+      if (!res.ok) {
+        lastError = new Error(`连接失败，请检查服务器地址与 API Key (HTTP ${res.status})`);
+        continue;
+      }
+
+      const users = await res.json();
+      if (!users || users.length === 0) {
+        throw new Error('未在服务器上找到可用用户');
+      }
+
+      if (users.length > 1) {
+        return {
+          status: 'select_user',
+          serverUrl: cleanUrl,
+          users: users.map(u => ({ Id: u.Id, Name: u.Name }))
+        };
+      }
+
+      const auth = this.completeApiKeyLogin(cleanUrl, apiKey, users[0], rememberMe);
+      return { status: 'connected', auth };
     }
-
-    const users = await res.json();
-    if (!users || users.length === 0) {
-      throw new Error('未在服务器上找到可用用户');
-    }
-
-    if (users.length > 1) {
-      return {
-        status: 'select_user',
-        serverUrl: cleanUrl,
-        users: users.map(u => ({ Id: u.Id, Name: u.Name }))
-      };
-    }
-
-    const auth = this.completeApiKeyLogin(cleanUrl, apiKey, users[0], rememberMe);
-    return { status: 'connected', auth };
+    throw lastError || new Error('连接失败');
   }
 
   /**

@@ -1,5 +1,6 @@
 import Hls from 'hls.js';
 import { jellyfin } from '../api/jellyfinClient';
+import { isNativePlayerAvailable, nativePlayerBridge } from './nativePlayerBridge';
 
 /**
  * 默认统一 HLS 配置（遵循 JELLYFIN_PLAYBACK_FIX_PLAN.md）
@@ -145,7 +146,10 @@ export class PlaybackSessionController {
 
     // 4. 客户端请求终止后，留出短暂网络排空缓冲（150ms），确保客户端已发送的取消信号
     // 先于服务端的转码目录删除到达，彻底消除 Could not find file 404 竞态
-    this.scheduleSessionStop(oldSession);
+    // 安卓壳模式下 web 侧从未向服务器上报过会话，无旧会话可停
+    if (!isNativePlayerAvailable()) {
+      this.scheduleSessionStop(oldSession);
+    }
 
     this.itemId = itemId;
     this.mediaSourceId = mediaSourceId || itemId;
@@ -158,6 +162,33 @@ export class PlaybackSessionController {
     this.playSessionId = this.jellyfin.createPlaySessionId();
 
     if (!videoEl || !this.itemId) return;
+
+    // 安卓壳（Capacitor）：原生 ExoPlayer 全权接管播放与 Jellyfin PlaybackEvents
+    // 上报，页面 video 元素退化为状态镜像。web 侧不武装 Started/心跳，防止双计。
+    if (isNativePlayerAvailable()) {
+      this.playMethod =
+        streamQuality === 'direct' && audioStreamIndex === null ? 'DirectPlay' : 'Transcode';
+      const streamUrl =
+        this.playMethod === 'DirectPlay'
+          ? this.jellyfin.getStreamUrl(this.itemId)
+          : this.jellyfin.getSmoothHlsUrl(this.itemId, parseInt(streamQuality, 10) || 4000000, {
+              playSessionId: this.playSessionId,
+              mediaSourceId: this.mediaSourceId,
+              audioStreamIndex: this.audioStreamIndex,
+              subtitleStreamIndex: this.subtitleStreamIndex
+            });
+      this.notifyState();
+      await nativePlayerBridge.loadStream(this, {
+        itemId: this.itemId,
+        mediaSourceId: this.mediaSourceId,
+        playMethod: this.playMethod,
+        streamUrl,
+        initialSeekTime,
+        audioStreamIndex: this.audioStreamIndex,
+        subtitleStreamIndex: this.subtitleStreamIndex
+      });
+      return;
+    }
 
     videoEl.playbackRate = playbackSpeed;
     videoEl.muted = isMuted;
@@ -290,6 +321,12 @@ export class PlaybackSessionController {
 
     const clampedTime = Math.max(0, targetTime);
     this.lastReportedPosition = clampedTime;
+
+    // 安卓壳：seek 一律交原生（ExoPlayer 流内 seek / HLS 播放列表自适应）
+    if (isNativePlayerAvailable()) {
+      nativePlayerBridge.seek(clampedTime);
+      return;
+    }
 
     // 原画直推 或 处于转码但目标已在已下载的缓冲队列中
     if (!this.isTranscoding() || isTimeInBuffer(videoEl, clampedTime)) {
@@ -540,6 +577,24 @@ export class PlaybackSessionController {
     this.generationId++;
     this.stopHeartbeat();
     this.clearStartedArm();
+
+    // 安卓壳：web 侧会话从未上报服务器，结束交原生（Stopped/资源释放）
+    if (isNativePlayerAvailable()) {
+      nativePlayerBridge.notifyClosed(this.itemId);
+      const oldVideoEl = this.videoEl;
+      this.itemId = null;
+      this.mediaSourceId = null;
+      this.playSessionId = null;
+      this.destroyHls();
+      if (oldVideoEl) {
+        try {
+          oldVideoEl.removeAttribute('src');
+          oldVideoEl.load();
+        } catch {}
+        this.videoEl = null;
+      }
+      return;
+    }
 
     // 1. 优先保存最后播放位置与旧会话上下文（在清空 src 前）
     const oldVideoEl = this.videoEl;

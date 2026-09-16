@@ -1225,7 +1225,7 @@ export class JellyfinClient {
     try {
       const query = new URLSearchParams({
         userId: this.auth.userId,
-        Fields: 'PrimaryImageAspectRatio,UserData,RunTimeTicks,SeriesName,SeasonName,ParentIndexNumber,IndexNumber,Overview,MediaSources,ImageTags',
+        Fields: 'PrimaryImageAspectRatio,UserData,RunTimeTicks,SeriesName,SeasonName,ParentIndexNumber,IndexNumber,Overview,MediaSources,ImageTags,Trickplay',
         SortBy: 'ParentIndexNumber,IndexNumber',
         SortOrder: 'Ascending'
       });

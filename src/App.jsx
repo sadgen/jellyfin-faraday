@@ -375,6 +375,20 @@ export default function App() {
     });
   }, []);
 
+  // 桌面壳（desktop-faraday）多窗口入口：按 itemId 打开页面浮窗，
+  // 画面由壳的嵌入 mpv 接管（浮窗 video 同样走 play 拦截）
+  useEffect(() => {
+    const onOpenFloating = (e) => {
+      const itemId = e.detail?.itemId;
+      if (!itemId) return;
+      const item = mediaItems.find((m) => m.Id === itemId);
+      if (item) handleOpenFloatingWindow(item);
+    };
+    window.addEventListener('faraday:open-floating', onOpenFloating);
+    return () => window.removeEventListener('faraday:open-floating', onOpenFloating);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mediaItems]);
+
   // 影院/VR Modal 上一个·下一个：合并查找域（mediaItems ∪ floatingWindows），
   // 悬浮窗来源的条目不在 mediaItems 时也能定位相邻条目
   const modalNavPool = useMemo(() => {

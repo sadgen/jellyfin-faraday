@@ -120,7 +120,8 @@ export class PlaybackSessionController {
     initialSeekTime = 0,
     playbackSpeed = 1,
     isMuted = false,
-    volume = 1
+    volume = 1,
+    nativeFloating = false
   }) {
     this.isDestroyed = false;
 
@@ -185,7 +186,8 @@ export class PlaybackSessionController {
         streamUrl,
         initialSeekTime,
         audioStreamIndex: this.audioStreamIndex,
-        subtitleStreamIndex: this.subtitleStreamIndex
+        subtitleStreamIndex: this.subtitleStreamIndex,
+        floating: nativeFloating
       });
       return;
     }
@@ -324,7 +326,7 @@ export class PlaybackSessionController {
 
     // 安卓壳：seek 一律交原生（ExoPlayer 流内 seek / HLS 播放列表自适应）
     if (isNativePlayerAvailable()) {
-      nativePlayerBridge.seek(clampedTime);
+      nativePlayerBridge.seek(this.itemId, clampedTime);
       return;
     }
 

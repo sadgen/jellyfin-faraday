@@ -10,7 +10,8 @@
  *     负责 ExoPlayer 播放与 Jellyfin PlaybackEvents 上报（web 端不再武装
  *     Started/心跳，避免同一部片双重计播）；
  *   - 状态回写：原生按节流频率回推 position/paused/started，写回页面
- *     video 元素（影子 paused + 合成事件）驱动页面 UI（进度条/图标）；
+ *     video 元素（影子 paused + 合成事件）驱动页面 UI（进度条/图标）。
+ *     支持多窗镜像：按 itemId 路由，网页浮窗与单片全屏各自的元素互不干扰；
  *   - 页面控制转发：seeking/volumechange/ratechange 转发给原生；
  *   - 会话收尾：controller.destroy() → close 通知原生结束会话；原生侧
  *     结束/浮窗化时向页面派发合成 Escape，让全屏播放弹窗自行关闭。
@@ -36,29 +37,32 @@ function getPlugin() {
 
 class NativePlayerBridge {
   constructor() {
-    this.activeItemId = null;
-    this.videoEl = null;
-    this.paused = true;
-    this.positionSec = 0;
-    this.suppressSeek = false;
-    this._removeStateListener = null;
+    /** itemId -> { videoEl, paused, positionSec, floating } */
+    this.mirrors = new Map();
+    this.suppressSeek = new Map();
+    this._handles = [];
+    this._listening = false;
   }
 
   /**
    * 移交播放。controller 仅用于读取 jellyfin 凭据与 itemId；必须在
    * web 侧 armStartedReport/startHeartbeat 之前调用。
+   * floating=true 表示来源是网页浮窗（原生侧开迷你窗，不进全屏覆盖层）。
    */
-  async loadStream(controller, { itemId, mediaSourceId, playMethod, streamUrl, initialSeekTime, audioStreamIndex, subtitleStreamIndex }) {
+  async loadStream(controller, { itemId, mediaSourceId, playMethod, streamUrl, initialSeekTime, audioStreamIndex, subtitleStreamIndex, floating }) {
     const plugin = getPlugin();
     if (!plugin || !itemId) return;
 
-    this.detach();
-    this.activeItemId = itemId;
-    this.paused = true;
-    this.positionSec = initialSeekTime || 0;
+    this.detach(itemId);
+    this.mirrors.set(itemId, {
+      videoEl: controller.videoEl || null,
+      paused: true,
+      positionSec: Number.isFinite(initialSeekTime) ? initialSeekTime : 0,
+      floating: Boolean(floating)
+    });
 
-    this._attachElementMirror(controller.videoEl);
-    this._listenNativeEvents(controller);
+    this._attachElementMirror(controller.videoEl, itemId);
+    this._ensureNativeListeners();
 
     try {
       await plugin.play({
@@ -69,6 +73,7 @@ class NativePlayerBridge {
         startPositionSec: Number.isFinite(initialSeekTime) ? initialSeekTime : 0,
         audioStreamIndex: audioStreamIndex ?? null,
         subtitleStreamIndex: subtitleStreamIndex ?? null,
+        floating: Boolean(floating),
         serverUrl: controller.jellyfin.auth.serverUrl || '',
         token: controller.jellyfin.auth.token || '',
         userId: controller.jellyfin.auth.userId || ''
@@ -78,133 +83,118 @@ class NativePlayerBridge {
     }
   }
 
-  seek(positionSec) {
+  seek(itemId, positionSec) {
     const plugin = getPlugin();
-    if (!plugin || !this.activeItemId) return;
-    plugin.seek({ positionSec }).catch(() => {});
+    if (!plugin || !this.mirrors.has(itemId || this._anyItemId())) return;
+    plugin.seek({ itemId, positionSec }).catch(() => {});
   }
 
-  setPaused(paused) {
+  setPaused(itemId, paused) {
     const plugin = getPlugin();
-    if (!plugin || !this.activeItemId) return;
-    plugin.pause({ paused: Boolean(paused) }).catch(() => {});
+    if (!plugin || !this.mirrors.has(itemId || this._anyItemId())) return;
+    plugin.pause({ itemId, paused: Boolean(paused) }).catch(() => {});
   }
 
-  /** controller.destroy() → 通知原生结束会话（上报 Stopped、收 overlay） */
+  /** controller.destroy() → 通知原生结束会话（上报 Stopped、收窗） */
   notifyClosed(itemId) {
     const plugin = getPlugin();
-    const closedId = itemId || this.activeItemId;
+    const closedId = itemId || this._anyItemId();
     if (!plugin || !closedId) return;
-    if (this.activeItemId === closedId) this.detach();
+    this.detach(closedId);
     plugin.close({ itemId: closedId }).catch(() => {});
   }
 
-  /** 解绑元素镜像与原生事件监听（会话移交/关闭时） */
-  detach() {
-    if (this._removeStateListener) {
-      try {
-        this._removeStateListener();
-      } catch {}
-      this._removeStateListener = null;
-    }
-    this.videoEl = null;
-    this.activeItemId = null;
+  _anyItemId() {
+    return this.mirrors.keys().next().value || null;
+  }
+
+  /** 解绑指定会话的镜像与元素监听（会话移交/关闭时） */
+  detach(itemId) {
+    this.mirrors.delete(itemId);
+    this.suppressSeek.delete(itemId);
   }
 
   /**
    * 页面 video 元素退化为"状态镜像"：永不真正播放，原生回写
    * currentTime/paused 驱动 UI；元素上的 seek/volume/rate 操作转发原生。
    */
-  _attachElementMirror(videoEl) {
-    this.videoEl = videoEl || null;
+  _attachElementMirror(videoEl, itemId) {
     if (!videoEl) return;
-
-    // 影子 paused：元素从未真正播放，原生 paused 才是 UI 判断依据
+    const bridge = this;
     try {
-      const bridge = this;
       Object.defineProperty(videoEl, 'paused', {
         configurable: true,
         get() {
-          return bridge.paused;
+          const m = bridge.mirrors.get(itemId);
+          return m ? m.paused : true;
         }
       });
     } catch {}
 
-    videoEl.addEventListener('seeking', this._onSeeking);
-    videoEl.addEventListener('volumechange', this._onVolumeChange);
-    videoEl.addEventListener('ratechange', this._onRateChange);
+    videoEl.addEventListener('seeking', () => {
+      if (bridge.suppressSeek.get(itemId) || !bridge.mirrors.has(itemId)) return;
+      const t = videoEl.currentTime;
+      if (Number.isFinite(t)) bridge.seek(itemId, t);
+    });
+    videoEl.addEventListener('volumechange', () => {
+      const plugin = getPlugin();
+      if (!plugin || !bridge.mirrors.has(itemId)) return;
+      plugin
+        .setVolume({ itemId, volume: videoEl.volume, muted: videoEl.muted })
+        .catch(() => {});
+    });
+    videoEl.addEventListener('ratechange', () => {
+      const plugin = getPlugin();
+      if (!plugin || !bridge.mirrors.has(itemId)) return;
+      plugin.setRate({ itemId, rate: videoEl.playbackRate || 1 }).catch(() => {});
+    });
   }
 
-  _onSeeking = () => {
-    if (this.suppressSeek || !this.videoEl) return;
-    const t = this.videoEl.currentTime;
-    if (Number.isFinite(t)) this.seek(t);
-  };
-
-  _onVolumeChange = () => {
-    const plugin = getPlugin();
-    if (!plugin || !this.videoEl) return;
-    plugin
-      .setVolume({ volume: this.videoEl.volume, muted: this.videoEl.muted })
-      .catch(() => {});
-  };
-
-  _onRateChange = () => {
-    const plugin = getPlugin();
-    if (!plugin || !this.videoEl) return;
-    plugin.setRate({ rate: this.videoEl.playbackRate || 1 }).catch(() => {});
-  };
-
-  _listenNativeEvents() {
+  _ensureNativeListeners() {
+    if (this._listening) return;
     const plugin = getPlugin();
     if (!plugin || typeof plugin.addListener !== 'function') return;
-    const handles = [];
+    this._listening = true;
     const keep = (h) => {
-      if (h && typeof h.remove === 'function') handles.push(h);
+      if (h && typeof h.remove === 'function') this._handles.push(h);
     };
     try {
       keep(plugin.addListener('faradayState', (state) => {
-        if (!state || state.itemId !== this.activeItemId) return;
         this._applyNativeState(state);
       }));
       keep(plugin.addListener('faradayEnded', (payload) => {
-        if (!payload || payload.itemId !== this.activeItemId) return;
-        this.detach();
-        this._dispatchEscape();
+        const m = payload && this.mirrors.get(payload.itemId);
+        this.detach(payload && payload.itemId);
+        if (m && !m.floating) this._dispatchEscape();
       }));
-      // 原生切到浮窗：全屏弹窗自行关闭，浏览不被打断（会话继续）
+      // 原生切到浮窗/PiP：全屏播放弹窗自行关闭（会话继续）
       keep(plugin.addListener('faradayFloated', (payload) => {
-        if (!payload || payload.itemId !== this.activeItemId) return;
-        this._dispatchEscape();
+        if (payload && this.mirrors.has(payload.itemId)) this._dispatchEscape();
       }));
     } catch {}
-    this._removeStateListener = () => {
-      for (const h of handles) {
-        try {
-          h.remove();
-        } catch {}
-      }
-    };
   }
 
   _applyNativeState(state) {
-    const el = this.videoEl;
-    if (typeof state.paused === 'boolean' && state.paused !== this.paused) {
-      this.paused = state.paused;
+    if (!state) return;
+    const m = this.mirrors.get(state.itemId);
+    if (!m) return;
+    const el = m.videoEl;
+    if (typeof state.paused === 'boolean' && state.paused !== m.paused) {
+      m.paused = state.paused;
       if (el) {
         el.dispatchEvent(new Event(state.paused ? 'pause' : 'play'));
         if (!state.paused) el.dispatchEvent(new Event('playing'));
       }
     }
     if (Number.isFinite(state.positionSec)) {
-      this.positionSec = state.positionSec;
+      m.positionSec = state.positionSec;
       if (el && Math.abs((el.currentTime || 0) - state.positionSec) > 1.2) {
-        this.suppressSeek = true;
+        this.suppressSeek.set(state.itemId, true);
         try {
           el.currentTime = state.positionSec;
         } catch {}
         setTimeout(() => {
-          this.suppressSeek = false;
+          this.suppressSeek.set(state.itemId, false);
         }, 50);
       }
     }

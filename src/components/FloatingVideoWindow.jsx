@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { isNativePlayerAvailable } from '../utils/nativePlayerBridge';
 import { jellyfin } from '../api/jellyfinClient';
 import { calculateSlotStyle } from '../utils/windowLayout';
 import { useExternalPlayer } from '../hooks/useExternalPlayer';
@@ -468,15 +469,22 @@ export default function FloatingVideoWindow({
     };
     videoEl.addEventListener('loadedmetadata', onLoadedMetadata, { once: true });
 
-    controller.loadStream({
-      itemId: currentPartId,
-      mediaSourceId: currentPartId,
-      streamQuality: streamQualityRef.current,
-      initialSeekTime,
-      playbackSpeed: playbackSpeedRef.current,
-      isMuted: isMutedRef.current,
-      volume: volumeRef.current
-    });
+    controller
+      .loadStream({
+        itemId: currentPartId,
+        mediaSourceId: currentPartId,
+        streamQuality: streamQualityRef.current,
+        initialSeekTime,
+        playbackSpeed: playbackSpeedRef.current,
+        isMuted: isMutedRef.current,
+        volume: volumeRef.current,
+        nativeFloating: true
+      })
+      .then(() => {
+        // 安卓壳：画面已交原生迷你窗，网页窗格自动收起（原生豁免 close，会话继续）
+        if (isNativePlayerAvailable() && onClose) onClose(id);
+      })
+      .catch(() => {});
 
     return () => {
       videoEl.removeEventListener('loadedmetadata', onLoadedMetadata);
@@ -505,7 +513,8 @@ export default function FloatingVideoWindow({
         initialSeekTime: currentPos,
         playbackSpeed: playbackSpeedRef.current,
         isMuted: isMutedRef.current,
-        volume: volumeRef.current
+        volume: volumeRef.current,
+        nativeFloating: true
       });
       syncSubtitleModes();
     }

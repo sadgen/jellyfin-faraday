@@ -10,7 +10,6 @@ import {
 import { sortMediaItems } from './utils/mediaSorter';
 import { getPlaybackDefaults, setPlaybackDefaults } from './utils/playbackDefaults';
 import { saveAccount } from './utils/accountStore';
-import { isNativePlayerAvailable } from './utils/nativePlayerBridge';
 import LibraryView from './components/LibraryView';
 import FloatingWindowsContainer from './components/FloatingWindowsContainer';
 import LoginModal from './components/LoginModal';
@@ -325,10 +324,6 @@ export default function App() {
   // 多窗同播属 v2 多实例范围，入口直接降级提示
   const handleOpenFloatingWindow = useCallback((item, startSecond = null) => {
     if (!item?.Id) return;
-    if (isNativePlayerAvailable()) {
-      alert('安卓客户端 v1 为单实例原生播放：请直接点播，全屏播放器右上角「浮窗」可切小窗；网页多窗同播暂不支持。');
-      return;
-    }
     setFloatingWindows(prev => {
       // If already playing in one of the windows, bring it to front
       const existing = prev.find(w => w.item.Id === item.Id);
@@ -495,10 +490,6 @@ export default function App() {
 
   // Top up floating windows to targetCount with random videos (keeps current windows playing, 缺几补几)
   const handleTopUpFloatingWindows = useCallback((targetCount) => {
-    if (isNativePlayerAvailable()) {
-      alert('安卓客户端 v1 为单实例原生播放：请直接点播，全屏播放器右上角「浮窗」可切小窗；网页多窗同播暂不支持。');
-      return;
-    }
     setFloatingWindows(prev => {
       if (prev.length >= targetCount) return prev;
       const pool = currentFilteredItemsRef.current.length > 0 ? currentFilteredItemsRef.current : mediaItemsRef.current;

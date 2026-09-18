@@ -210,6 +210,22 @@ class NativePlayerBridge {
 
 export const nativePlayerBridge = new NativePlayerBridge();
 
+// 竖滑手势配置（左/右半屏：亮度/音量/倍速）推送到原生壳：
+// 模块加载时推一次当前值，面板改动经事件即时重推
+import { getGestureSettings } from './gestureSettings';
+function pushGestureSettings() {
+  const plugin = getPlugin();
+  if (!plugin || typeof plugin.setGestureConfig !== 'function') return;
+  const s = getGestureSettings();
+  plugin.setGestureConfig({ left: s.left, right: s.right }).catch(() => {});
+}
+if (isNativePlayerAvailable()) {
+  pushGestureSettings();
+  if (typeof window !== 'undefined') {
+    window.addEventListener('faraday:gesture_settings_changed', pushGestureSettings);
+  }
+}
+
 // Capacitor WebView 内禁用 PWA Service Worker：壳自带资产版本管理，
 // SW 缓存会把 WebView 钉死在旧版本（sw.js 本体已由打包脚本剔除，这里
 // 只清理上一版本可能注册的遗留）

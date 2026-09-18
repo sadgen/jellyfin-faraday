@@ -9,6 +9,7 @@ import { sortMediaItems } from '../utils/mediaSorter';
 import { useViewport } from '../hooks/useViewport';
 import { getPlaybackDefaults, setPlaybackDefaults, QUALITY_OPTIONS, SPEED_PRESETS, PATROL_INTERVALS } from '../utils/playbackDefaults';
 import { SEEK_SPEED_OPTIONS, getStoredSeekSpeed, setStoredSeekSpeed } from '../utils/seekSettings';
+import { GESTURE_ACTIONS, getGestureSettings, setGestureSettings } from '../utils/gestureSettings';
 import MobileActionSheet from './MobileActionSheet';
 import DeleteConfirmModal from './DeleteConfirmModal';
 import CardContextMenu from './CardContextMenu';
@@ -938,6 +939,7 @@ export default function LibraryView({
   const [showPlaybackDefaultsMenu, setShowPlaybackDefaultsMenu] = useState(false);
   const [playbackDefaults, setPlaybackDefaultsState] = useState(() => getPlaybackDefaults());
   const [seekSpeed, setSeekSpeedState] = useState(() => getStoredSeekSpeed());
+  const [gestureCfg, setGestureCfgState] = useState(() => getGestureSettings());
   // 菜单经 Portal 渲染到 body（顶栏 backdrop-blur 的层叠上下文会困住内部 z-index，
   // 被播放浮窗盖住）；坐标按触发按钮定位，z 10000 高于浮窗最高层 9999
   const playbackDefaultsBtnRef = useRef(null);
@@ -1629,6 +1631,38 @@ export default function LibraryView({
                         </button>
                       ))}
                     </div>
+                  </div>
+
+                  {/* 4.5 Android Shell Vertical Gesture Binding (swipe up/down on left and right halves) */}
+                  <div className="flex flex-col gap-1.5 pt-1 border-t border-white/10">
+                    <span className="text-[11px] text-cyan-300 font-bold">📱 Vertical swipe gestures - Android shell (left/right half screen can be the same or different)</span>
+                    {[
+                      { side: 'left', label: 'Left half screen' },
+                      { side: 'right', label: 'Right half screen' }
+                    ].map(({ side, label }) => (
+                      <div key={side} className="flex items-center gap-2">
+                        <span className="text-[11px] text-gray-200 font-medium w-14 flex-shrink-0">{label}</span>
+                        <div className="grid grid-cols-3 gap-1.5 flex-1">
+                          {GESTURE_ACTIONS.map(act => (
+                            <button
+                              key={act.id}
+                              onClick={() => {
+                                const updated = setGestureSettings({ [side]: act.id });
+                                setGestureCfgState(updated);
+                              }}
+                              className={`py-1.5 rounded-lg text-[11px] text-center transition ${
+                                gestureCfg[side] === act.id
+                                  ? 'bg-cyan-400 text-slate-950 font-extrabold shadow-md shadow-cyan-400/40'
+                                  : 'bg-slate-800 hover:bg-slate-700 text-gray-200 border border-white/10 font-medium'
+                              }`}
+                            >
+                              {act.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                    <span className="text-[9px] text-gray-500">↑ Swipe up to increase, swipe down to decrease; takes effect after restart in browser/desktop environments without effect</span>
                   </div>
 
                   {/* 5. Auto Refill Floating Windows */}

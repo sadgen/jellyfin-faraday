@@ -18,6 +18,7 @@ import { detectVrVideo } from '../utils/vrDetector';
 import { probeStreamStatus, describeVideoMediaError } from '../utils/playbackDiagnostics';
 import { QUALITY_OPTIONS, PLAYBACK_SPEED_OPTIONS } from '../utils/qualityPresets';
 import { SEEK_SPEED_OPTIONS, getStoredSeekSpeed, setStoredSeekSpeed, getSeekStepSeconds, getSeekSwipeSpan } from '../utils/seekSettings';
+import { createSeekLock } from '../utils/seekLock';
 import { getPlaybackDefaults } from '../utils/playbackDefaults';
 import { calculateSmartStartTime } from '../utils/smartStartHelper';
 import { PlaybackSessionController } from '../utils/playbackSessionController';
@@ -134,6 +135,12 @@ export default function VideoPlayerModal({
   const [_isWheelSeeking, setIsWheelSeeking] = useState(false);
   const wheelTimerRef = useRef(null);
   const wheelSeekingTimeRef = useRef(null);
+  // Seek 锁：seek 提交后到视频真正到达目标前，冻结进度条显示，
+  // 防止 timeupdate 用旧播放位置把进度条弹回（加载完成后又跳走）
+  const seekLockRef = useRef(null);
+  if (!seekLockRef.current) {
+    seekLockRef.current = createSeekLock({ videoElRef: videoRef });
+  }
 
   // Playback reporting & PlayCount Tracking
   const hasCountedPlayRef = useRef(false);
@@ -245,14 +252,24 @@ export default function VideoPlayerModal({
         case 'ArrowLeft':
           e.preventDefault();
           if (video && video.duration) {
-            const next = Math.max(0, (video.currentTime || 0) - getSeekStepSeconds(seekSpeed));
+            const kbPending = seekLockRef.current.getPendingTarget();
+            const kbBase = kbPending !== null ? kbPending : (video.currentTime || 0);
+            const next = Math.max(0, kbBase - getSeekStepSeconds(seekSpeed));
+            seekLockRef.current.arm(next);
+            setProgress((next / video.duration) * 100);
+            setCurrentTimeText(formatTime(next));
             sessionControllerRef.current?.seek(next);
           }
           break;
         case 'ArrowRight':
           e.preventDefault();
           if (video && video.duration) {
-            const next = Math.min(video.duration, (video.currentTime || 0) + getSeekStepSeconds(seekSpeed));
+            const kbPending = seekLockRef.current.getPendingTarget();
+            const kbBase = kbPending !== null ? kbPending : (video.currentTime || 0);
+            const next = Math.min(video.duration, kbBase + getSeekStepSeconds(seekSpeed));
+            seekLockRef.current.arm(next);
+            setProgress((next / video.duration) * 100);
+            setCurrentTimeText(formatTime(next));
             sessionControllerRef.current?.seek(next);
           }
           break;
@@ -301,6 +318,7 @@ export default function VideoPlayerModal({
     currentTime: videoRef.current?.currentTime || 0,
     customSwipeSpan: getSeekSwipeSpan(seekSpeed),
     onSeek: (target) => {
+      seekLockRef.current.arm(target);
       sessionControllerRef.current?.seek(target);
     },
     onSeekPreview: (targetTime, percent) => {
@@ -453,6 +471,11 @@ export default function VideoPlayerModal({
     const duration = video?.duration || (item?.RunTimeTicks ? item.RunTimeTicks / 10000000 : 0);
     const target = Math.max(0, duration ? Math.min(sec, duration - 0.5) : sec);
     if (sessionControllerRef.current) {
+      seekLockRef.current.arm(target);
+      if (duration) {
+        setProgress((target / duration) * 100);
+        setCurrentTimeText(formatTime(target));
+      }
       sessionControllerRef.current.seek(target);
     } else if (video) {
       video.currentTime = target;
@@ -538,6 +561,7 @@ export default function VideoPlayerModal({
     setErrorDetails('');
     directDiagRef.current = '';
     setProgress(0);
+    seekLockRef.current.release();
     setHoverScrubberTime(null);
     setIsWheelSeeking(false);
 
@@ -678,12 +702,20 @@ export default function VideoPlayerModal({
     const step = getSeekStepSeconds(seekSpeed);
     const delta = e.deltaY > 0 ? step : -step;
 
-    const baseTime = wheelSeekingTimeRef.current !== null ? wheelSeekingTimeRef.current : video.currentTime;
+    // seek 在途时以在途目标为基准（video.currentTime 尚停留在旧位置，
+    // 用它累加会让连续滚轮的目标点计算回跳）
+    const pendingTarget = seekLockRef.current.getPendingTarget();
+    const baseTime = wheelSeekingTimeRef.current !== null
+      ? wheelSeekingTimeRef.current
+      : pendingTarget !== null ? pendingTarget : video.currentTime;
     const nextTime = Math.max(0, Math.min(duration, baseTime + delta));
 
     wheelSeekingTimeRef.current = nextTime;
 
     const percent = nextTime / duration;
+    // 锁要立刻上：乐观显示从滚动瞬间开始，若等到 400ms 防抖提交才上锁，
+    // 空窗期内的 timeupdate 会先把进度条弹回旧位置（用户看到的回跳）
+    seekLockRef.current.arm(nextTime);
     setProgress(percent * 100);
     setCurrentTimeText(formatTime(nextTime));
     setHoverScrubberTime(nextTime);
@@ -701,6 +733,7 @@ export default function VideoPlayerModal({
       setIsWheelSeeking(false);
       setHoverScrubberTime(null);
       if (commitTime !== null) {
+        seekLockRef.current.arm(commitTime);
         sessionControllerRef.current?.seek(commitTime);
       }
     }, 400);
@@ -742,6 +775,7 @@ export default function VideoPlayerModal({
         updateScrubberPreview(upEvent.clientX);
         const commitTarget = scrubberDragTimeRef.current;
         if (commitTarget !== null && commitTarget !== undefined) {
+          seekLockRef.current.arm(commitTarget);
           sessionControllerRef.current?.seek(commitTarget);
         }
       }
@@ -772,6 +806,7 @@ export default function VideoPlayerModal({
       isDraggingScrubberRef.current = false;
       const commitTarget = scrubberDragTimeRef.current;
       if (commitTarget !== null && commitTarget !== undefined) {
+        seekLockRef.current.arm(commitTarget);
         sessionControllerRef.current?.seek(commitTarget);
       }
       setTimeout(() => setHoverScrubberTime(null), 800);
@@ -782,6 +817,8 @@ export default function VideoPlayerModal({
     const video = videoRef.current;
     if (!video || !video.duration || isDraggingScrubberRef.current) return;
     setRawDuration(video.duration);
+    // Seek 锁生效期间视频仍在旧位置，timeupdate 不得刷新进度条
+    if (seekLockRef.current.isActive()) return;
     const p = (video.currentTime / video.duration) * 100;
     setProgress(p);
     setCurrentTimeText(formatTime(video.currentTime));

@@ -9,6 +9,7 @@ import { useMediaPlaybackInfo } from '../hooks/useMediaPlaybackInfo';
 import { useSubtitleTracks } from '../hooks/useSubtitleTracks';
 import { useViewport } from '../hooks/useViewport';
 import { SEEK_SPEED_OPTIONS, getStoredSeekSpeed, setStoredSeekSpeed, getSeekStepSeconds, getSeekSwipeSpan } from '../utils/seekSettings';
+import { createSeekLock } from '../utils/seekLock';
 import { getPlaybackDefaults } from '../utils/playbackDefaults';
 import { calculateSmartStartTime } from '../utils/smartStartHelper';
 import { QUALITY_OPTIONS, PLAYBACK_SPEED_OPTIONS } from '../utils/qualityPresets';
@@ -200,6 +201,12 @@ export default function FloatingVideoWindow({
   const [isWheelSeeking, setIsWheelSeeking] = useState(false);
   const wheelTimerRef = useRef(null);
   const wheelSeekingTimeRef = useRef(null);
+  // Seek 锁：seek 提交后到视频真正到达目标前，冻结进度条显示，
+  // 防止 timeupdate 用旧播放位置把进度条弹回（加载完成后又跳走）
+  const seekLockRef = useRef(null);
+  if (!seekLockRef.current) {
+    seekLockRef.current = createSeekLock({ videoElRef: videoRef });
+  }
 
   // Playback reporting & PlayCount Tracking
   const hasCountedPlayRef = useRef(false);
@@ -277,6 +284,7 @@ export default function FloatingVideoWindow({
     },
     customSwipeSpan: getSeekSwipeSpan(seekSpeed),
     onSeek: (target) => {
+      seekLockRef.current.arm(target);
       sessionControllerRef.current?.seek(target);
     },
     onSeekPreview: (targetTime, percent) => {
@@ -410,6 +418,7 @@ export default function FloatingVideoWindow({
     setProgress(0);
     setHoverScrubberTime(null);
     setIsWheelSeeking(false);
+    seekLockRef.current.release();
     hasCountedPlayRef.current = false;
 
     // Reset patrol tracking on item/part load with multi-window stagger
@@ -545,6 +554,8 @@ export default function FloatingVideoWindow({
     const video = videoRef.current;
     if (!video || !video.duration || isDraggingScrubberRef.current) return;
     setRawDuration(video.duration);
+    // Seek 锁生效期间视频仍在旧位置，timeupdate 不得刷新进度条
+    if (seekLockRef.current.isActive()) return;
     const p = (video.currentTime / video.duration) * 100;
     setProgress(p);
     setCurrentTimeText(formatTime(video.currentTime));
@@ -740,12 +751,20 @@ export default function FloatingVideoWindow({
     const step = getSeekStepSeconds(seekSpeed);
     const delta = e.deltaY > 0 ? step : -step;
 
-    const baseTime = wheelSeekingTimeRef.current !== null ? wheelSeekingTimeRef.current : video.currentTime;
+    // seek 在途时以在途目标为基准（video.currentTime 尚停留在旧位置，
+    // 用它累加会让连续滚轮的目标点计算回跳）
+    const pendingTarget = seekLockRef.current.getPendingTarget();
+    const baseTime = wheelSeekingTimeRef.current !== null
+      ? wheelSeekingTimeRef.current
+      : pendingTarget !== null ? pendingTarget : video.currentTime;
     const nextTime = Math.max(0, Math.min(duration, baseTime + delta));
 
     wheelSeekingTimeRef.current = nextTime;
 
     const percent = nextTime / duration;
+    // 锁要立刻上：乐观显示从滚动瞬间开始，若等到 400ms 防抖提交才上锁，
+    // 空窗期内的 timeupdate 会先把进度条弹回旧位置（用户看到的回跳）
+    seekLockRef.current.arm(nextTime);
     setProgress(percent * 100);
     setCurrentTimeText(formatTime(nextTime));
     setHoverScrubberTime(nextTime);
@@ -763,6 +782,7 @@ export default function FloatingVideoWindow({
       setIsWheelSeeking(false);
       setHoverScrubberTime(null);
       if (commitTime !== null) {
+        seekLockRef.current.arm(commitTime);
         sessionControllerRef.current?.seek(commitTime);
       }
     }, 400);
@@ -804,6 +824,7 @@ export default function FloatingVideoWindow({
         updateScrubberPreview(upEvent.clientX);
         const commitTarget = scrubberDragTimeRef.current;
         if (commitTarget !== null && commitTarget !== undefined) {
+          seekLockRef.current.arm(commitTarget);
           sessionControllerRef.current?.seek(commitTarget);
         }
       }
@@ -834,6 +855,7 @@ export default function FloatingVideoWindow({
       isDraggingScrubberRef.current = false;
       const commitTarget = scrubberDragTimeRef.current;
       if (commitTarget !== null && commitTarget !== undefined) {
+        seekLockRef.current.arm(commitTarget);
         sessionControllerRef.current?.seek(commitTarget);
       }
       setTimeout(() => setHoverScrubberTime(null), 800);

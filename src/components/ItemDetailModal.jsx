@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { useExternalPlayer } from '../hooks/useExternalPlayer';
 import { cleanMediaTitle } from '../utils/titleCleaner';
+import { isRomanizedJunkRole } from '../utils/actorAggregator';
 import DeleteConfirmModal from './DeleteConfirmModal';
 import QuickTagSelector from './QuickTagSelector';
 
@@ -681,7 +682,8 @@ export default function ItemDetailModal({
                         )}
                       </div>
                       <span className="text-[10px] text-gray-300 truncate w-full text-center group-hover:text-cyan-300">{person.Name}</span>
-                      {person.Role && (
+                      {/* 中文名演员的纯 ASCII 角色名是刮削源的拼音垃圾（如 "Ma Qi"），展示只会误导 */}
+                      {person.Role && !isRomanizedJunkRole(person.Name, person.Role) && (
                         <span className="text-[9px] text-gray-500 truncate w-full text-center" title={person.Role}>{person.Role}</span>
                       )}
                     </button>

@@ -502,6 +502,10 @@ export class JellyfinClient {
       const query = new URLSearchParams({
         userId: this.auth.userId,
         Recursive: 'true',
+        // 只取演员，过滤导演/编剧等幕后人员；固定按名排序，避免服务器返回随机切片
+        PersonTypes: 'Actor',
+        SortBy: 'SortName',
+        SortOrder: 'Ascending',
         Limit: limit.toString()
       });
       if (parentId && parentId !== 'all') {
@@ -515,6 +519,40 @@ export class JellyfinClient {
       return data.Items || [];
     } catch (err) {
       console.warn('Failed to fetch persons:', err);
+      return [];
+    }
+  }
+
+  /**
+   * 拉取媒体库条目（含 People 字段），供演职员页签做全量演员聚合。
+   * 列表查询刻意不带 People（该服务器 577 部 5.2s → 2.2s），此接口仅
+   * 在演职员页签激活时单独调用一次并缓存。
+   */
+  async getItemsWithPeople(parentId = '', limit = 2000) {
+    if (!this.auth.isConfigured) return [];
+    try {
+      const query = new URLSearchParams({
+        userId: this.auth.userId,
+        Recursive: 'true',
+        Fields: 'People',
+        // 只查有演职员的电影/剧集：根级 Recursive 会先返回音频等无 People
+        // 的条目，聚合结果会整体落空
+        IncludeItemTypes: 'Movie,Series',
+        SortBy: 'SortName',
+        SortOrder: 'Ascending',
+        Limit: limit.toString()
+      });
+      if (parentId && parentId !== 'all') {
+        query.set('parentId', parentId);
+      }
+      const res = await fetch(`${this.auth.serverUrl}/Users/${this.auth.userId}/Items?${query.toString()}`, {
+        headers: this.getAuthHeaders()
+      });
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data.Items || [];
+    } catch (err) {
+      console.warn('Failed to fetch items with people:', err);
       return [];
     }
   }

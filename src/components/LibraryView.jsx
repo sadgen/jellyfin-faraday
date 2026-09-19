@@ -4,6 +4,7 @@ import { jellyfin } from '../api/jellyfinClient';
 import { getTrickplayStyle } from '../utils/trickplay';
 import { detectDuplicateMedia } from '../utils/duplicateChecker';
 import { scanLibraryHealth } from '../utils/healthInspector';
+import { aggregateActors } from '../utils/actorAggregator';
 import { stackMediaItems } from '../utils/mediaStacking';
 import { sortMediaItems } from '../utils/mediaSorter';
 import { useViewport } from '../hooks/useViewport';
@@ -1101,34 +1102,27 @@ export default function LibraryView({
     return () => { cancelled = true; };
   }, [activeSubTab, currentFolderId, userViews]);
 
-  // 演职员：从本地缓存聚合"只统计演员"（/Persons 接口会混入导演/编剧等幕后人员）。
-  // 依据条目 People 中的 Type 过滤（Actor / GuestStar / 无 Type 视为演员），按出演数量排序。
+  // 演职员：优先展示"按出演数量聚合的演员"（aggregateActors，只统计演员，
+  // 排除 /Persons 混入的导演/编剧且后者无法按出演次数排序）。
+  // 数据源优先级：
+  //   1. 服务端全量聚合（getItemsWithPeople，按视图缓存）——保证名单完整
+  //   2. 本地缓存条目自带的 People（条目齐全时立即可用，免等待）
+  //   3. 服务器 /Persons（兜底，已加 PersonTypes=Actor 过滤）
+  const [aggregatedActors, setAggregatedActors] = useState([]);
+  const actorsCacheRef = useRef({});
+  const [actorsLoading, setActorsLoading] = useState(false);
+
   const localActorList = useMemo(() => {
     if (!items || items.length === 0) return [];
     const hasPeopleData = items.some(it => Array.isArray(it.People));
     if (!hasPeopleData) return [];
-    const map = new Map();
-    items.forEach(it => {
-      (it.People || []).forEach(p => {
-        if (!p?.Id || !p?.Name) return;
-        if (p.Type && !['Actor', 'GuestStar'].includes(p.Type)) return;
-        const entry = map.get(p.Id) || {
-          Id: p.Id,
-          Name: p.Name,
-          ImageTags: { Primary: p.PrimaryImageTag || undefined },
-          count: 0
-        };
-        entry.count += 1;
-        map.set(p.Id, entry);
-      });
-    });
-    return Array.from(map.values())
-      .sort((a, b) => b.count - a.count || a.Name.localeCompare(b.Name, 'zh-CN'))
-      .slice(0, 300);
+    return aggregateActors(items);
   }, [items]);
 
-  // 优先使用本地演员聚合；缓存尚无 People 数据时回退服务器 /Persons
-  const personsDisplayList = localActorList.length > 0 ? localActorList : personsList;
+  // 聚合在途时不出兜底名单（避免先闪现 /Persons 随机切片再跳变成正确名单）
+  const personsDisplayList = aggregatedActors.length > 0
+    ? aggregatedActors
+    : (actorsLoading ? [] : (localActorList.length > 0 ? localActorList : personsList));
 
   // Progressive Lazy Loading (80 initial + 60 on scroll)
   const [visibleCount, setVisibleCount] = useState(80);
@@ -1163,6 +1157,10 @@ export default function LibraryView({
       jellyfin.getPersons(selectedViewId).then(list => {
         if (reqId === subTabReqIdRef.current) setPersonsList(list || []);
       });
+      // 已有该视图的全量聚合结果则直接复用
+      if (actorsCacheRef.current[selectedViewId]) {
+        setAggregatedActors(actorsCacheRef.current[selectedViewId]);
+      }
     } else if (activeSubTab === 'collections') {
       jellyfin.getCollections(selectedViewId).then(list => {
         if (reqId === subTabReqIdRef.current) setCollectionsList(list || []);
@@ -1192,6 +1190,42 @@ export default function LibraryView({
       });
     }
   }, [activeSubTab, selectedViewId]);
+
+  // 演职员全量聚合：本地条目缺 People 字段时（列表查询刻意不带该字段），
+  // 单独拉一次带 People 的条目并按出演次数聚合，结果按视图缓存。
+  // 该请求在这台服务器上需要约 10s：空结果不缓存（下次进入重试），
+  // 成功结果写入 sessionStorage，同一会话内不重复支付这个耗时。
+  useEffect(() => {
+    if (activeSubTab !== 'persons' || !selectedViewId) return;
+    if (actorsCacheRef.current[selectedViewId]) return;
+    const cacheKey = `jf_persons_agg_${jellyfin.auth.serverUrl}_${selectedViewId}`;
+    try {
+      const saved = sessionStorage.getItem(cacheKey);
+      if (saved) {
+        const arr = JSON.parse(saved);
+        if (Array.isArray(arr) && arr.length > 0) {
+          actorsCacheRef.current[selectedViewId] = arr;
+          setAggregatedActors(arr);
+          return;
+        }
+      }
+    } catch { /* sessionStorage 不可用时直接走网络 */ }
+    // 本地条目已全员携带 People（如历史页签这类小视图）时无需再拉
+    if (items.length > 0 && items.every(it => Array.isArray(it.People))) return;
+    let cancelled = false;
+    setActorsLoading(true);
+    jellyfin.getItemsWithPeople(selectedViewId).then(list => {
+      if (cancelled) return;
+      const actors = aggregateActors(list || []);
+      if (actors.length === 0) return;
+      actorsCacheRef.current[selectedViewId] = actors;
+      try { sessionStorage.setItem(cacheKey, JSON.stringify(actors)); } catch { /* 忽略配额错误 */ }
+      setAggregatedActors(actors);
+    }).finally(() => {
+      if (!cancelled) setActorsLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [activeSubTab, selectedViewId, items]);
 
   // Display items with Play Count and Status filter support
   const displayItems = useMemo(() => {
@@ -2628,6 +2662,12 @@ export default function LibraryView({
         {/* SUB-VIEW 2: Persons（仅演员，按出演数量排序，大图卡片） */}
         {activeSubTab === 'persons' && (
           <div className="grid gap-3 sm:gap-4" style={{ gridTemplateColumns: `repeat(${effectiveGridColumns}, minmax(0, 1fr))` }}>
+            {actorsLoading && (
+              <div className="col-span-full flex items-center gap-2 text-[11px] text-gray-500 py-1">
+                <span className="w-3 h-3 border-2 border-cyan-500/30 border-t-cyan-400 rounded-full animate-spin inline-block" />
+                正在聚合全库演员名单...
+              </div>
+            )}
             {personsDisplayList.map(person => {
               const imgUrl = jellyfin.getImageUrl(person.Id, person.ImageTags?.Primary, 'Primary', 400, 85);
               return (

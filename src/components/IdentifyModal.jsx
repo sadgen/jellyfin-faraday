@@ -7,7 +7,8 @@ export default function IdentifyModal({
   isOpen,
   onClose,
   item,
-  onIdentified
+  onIdentified,
+  onApplyBackground
 }) {
   // 打开识别通常意味着当前刮削结果不可信，默认值取文件名而不是现有元数据
   const fileDefaults = deriveFilenameSearchTerm(item?.Path);
@@ -65,6 +66,15 @@ export default function IdentifyModal({
   };
 
   const handleApply = async (selectedResult) => {
+    // 后台模式：服务器应用元数据要下载图片+重建条目，耗时可达数十秒。
+    // 立即关窗交给上层后台执行（左下角任务指示器反馈），用户可继续
+    // 刮削其他海报或看视频
+    if (onApplyBackground) {
+      onApplyBackground(item, selectedResult);
+      onClose();
+      return;
+    }
+
     setIsApplying(true);
     setErrorMsg('');
 

@@ -22,7 +22,7 @@ import ItemDetailModal from './components/ItemDetailModal';
 import StatsModal from './components/StatsModal';
 import MobileNavBar from './components/MobileNavBar';
 import ErrorBoundary from './components/ErrorBoundary';
-import { AlertCircle } from 'lucide-react';
+import { AlertCircle, Loader2, CheckCircle2, XCircle } from 'lucide-react';
 
 const STORAGE_KEY_VIEW = 'jf_last_selected_view';
 const STORAGE_KEY_SORT = 'jf_faraday_sort_method';
@@ -632,6 +632,41 @@ export default function App() {
     updateItemInCache(updatedItem);
   }, []);
 
+  // 刮削应用后台任务：点「应用」立即关窗，服务器慢慢下载图片/重建元数据，
+  // 完成后拉全量详情把新海报标题同步到媒体库与浮窗。完成/失败条目停留数秒后消失。
+  const [metadataJobs, setMetadataJobs] = useState([]); // { id, name, status: running|done|failed }
+  const metadataJobSeqRef = useRef(0);
+  const metadataJobTimersRef = useRef({});
+  const handleApplyMetadataBackground = useCallback((item, selectedResult) => {
+    if (!item?.Id || !selectedResult) return;
+    const jobId = ++metadataJobSeqRef.current;
+    const displayName = selectedResult.Name || item.Name || '未知条目';
+    setMetadataJobs(prev => [...prev, { id: jobId, name: displayName, status: 'running' }]);
+    const settle = (status) => {
+      setMetadataJobs(prev => prev.map(j => j.id === jobId ? { ...j, status } : j));
+      // 完成提示停留 6s 后移除，避免指示器无限堆积
+      metadataJobTimersRef.current[jobId] = setTimeout(() => {
+        setMetadataJobs(prev => prev.filter(j => j.id !== jobId));
+        delete metadataJobTimersRef.current[jobId];
+      }, 6000);
+    };
+    (async () => {
+      try {
+        await jellyfin.applyRemoteMetadata(item.Id, selectedResult, true);
+        const fresh = await jellyfin.getItemDetails(item.Id).catch(() => null);
+        handleUpdateItem(fresh || {
+          ...item,
+          Name: displayName,
+          ProductionYear: selectedResult.ProductionYear || item.ProductionYear
+        });
+        settle('done');
+      } catch (err) {
+        console.error('后台应用刮削数据失败:', err);
+        settle('failed');
+      }
+    })();
+  }, [handleUpdateItem]);
+
   const handleDeleteItem = useCallback((deletedId) => {
     setMediaItems(prev => prev.filter(item => item.Id !== deletedId));
     setFloatingWindows(prev => prev.filter(w => w.item.Id !== deletedId));
@@ -890,6 +925,7 @@ export default function App() {
             item={identifyingItem}
             onClose={() => setIdentifyingItem(null)}
             onIdentified={handleUpdateItem}
+            onApplyBackground={handleApplyMetadataBackground}
           />
         )}
 
@@ -917,6 +953,31 @@ export default function App() {
             onOpenDetail={(item) => setDetailItem(item)}
             onSearchPerson={(name) => { setDetailItem(null); setSearchKeyword(name); }}
           />
+        )}
+
+        {/* Background metadata apply task indicator: progress and results shown one by one after confirming and closing the identify modal, does not intercept clicks */}
+        {metadataJobs.length > 0 && (
+          <div className="fixed bottom-3 left-3 z-40 flex flex-col gap-1.5 pointer-events-none max-w-[280px]">
+            {metadataJobs.map(job => (
+              <div
+                key={job.id}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border backdrop-blur-md shadow-lg text-[11px] transition ${
+                  job.status === 'running' ? 'bg-slate-950/85 border-cyan-500/25 text-gray-300'
+                    : job.status === 'done' ? 'bg-emerald-950/80 border-emerald-500/30 text-emerald-200'
+                      : 'bg-red-950/80 border-red-500/30 text-red-200'
+                }`}
+              >
+                {job.status === 'running' && <Loader2 size={12} className="animate-spin text-cyan-400 flex-shrink-0" />}
+                {job.status === 'done' && <CheckCircle2 size={12} className="text-emerald-400 flex-shrink-0" />}
+                {job.status === 'failed' && <XCircle size={12} className="text-red-400 flex-shrink-0" />}
+                <span className="truncate">
+                  {job.status === 'running' && `正在应用元数据「${job.name}」...`}
+                  {job.status === 'done' && `元数据已应用「${job.name}」`}
+                  {job.status === 'failed' && `应用元数据失败「${job.name}」`}
+                </span>
+              </div>
+            ))}
+          </div>
         )}
 
         {/* Watch Stats Modal (P11) */}

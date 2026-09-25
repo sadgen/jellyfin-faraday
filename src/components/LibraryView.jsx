@@ -223,6 +223,21 @@ const MediaCard = memo(function MediaCard({
     onPlay(item, trickplayTime);
   }, [isSelecting, isSeries, item, onOpenDetail, onPlay, onToggleSelect, trickplayTime]);
 
+  // 中键点击海报：从头开始播放（startSecond=0 为显式起播点，忽略续播/智能跳过；
+  // 剧集由上层解析为 NextUp/第一集后同样从 0 起播）
+  const handleCardAuxClick = useCallback((e) => {
+    if (e.button !== 1) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (isLongPressActiveRef.current || isSelecting) return;
+    if (e.target.closest('button')) return;
+    onPlay(item, 0);
+  }, [isSelecting, item, onPlay]);
+
+  const handleCardMouseDown = useCallback((e) => {
+    if (e.button === 1) e.preventDefault(); // 阻止中键自动滚动
+  }, []);
+
   const handleCoverMouseMove = useCallback((e) => {
     const target = e.currentTarget;
     if (!target) return;
@@ -348,6 +363,8 @@ const MediaCard = memo(function MediaCard({
           isBackdrop ? 'aspect-video' : 'aspect-[2/3]'
         }`}
         onClick={handleCardClick}
+        onAuxClick={handleCardAuxClick}
+        onMouseDown={handleCardMouseDown}
         onMouseMove={handleCoverMouseMove}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
@@ -692,9 +709,25 @@ const MediaListRow = memo(function MediaListRow({
     onPlay(item);
   }, [isSelecting, isSeries, item, onOpenDetail, onPlay, onToggleSelect]);
 
+  // 中键点击：从头开始播放（同海报卡片）
+  const handleRowAuxClick = useCallback((e) => {
+    if (e.button !== 1) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (isLongPressActiveRef.current || isSelecting) return;
+    if (e.target.closest('button')) return;
+    onPlay(item, 0);
+  }, [isSelecting, item, onPlay]);
+
+  const handleRowMouseDown = useCallback((e) => {
+    if (e.button === 1) e.preventDefault(); // 阻止中键自动滚动
+  }, []);
+
   return (
-    <div 
+    <div
       onClick={handleRowClick}
+      onAuxClick={handleRowAuxClick}
+      onMouseDown={handleRowMouseDown}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}

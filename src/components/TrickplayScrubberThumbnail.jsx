@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { getTrickplayStyle } from '../utils/trickplay';
+import { getTrickplayStyle, getTrickplayInfo } from '../utils/trickplay';
 
 export default function TrickplayScrubberThumbnail({
   item,
@@ -10,6 +10,10 @@ export default function TrickplayScrubberThumbnail({
   centerMode = false, // When true, centers thumbnail horizontally relative to container
   mode = 'scrubber'   // 'scrubber' (relative to scrubber bar) | 'window' (relative to whole floating window)
 }) {
+  const tpInfo = useMemo(() => {
+    return getTrickplayInfo(item);
+  }, [item]);
+
   const style = useMemo(() => {
     return getTrickplayStyle(item, hoverTime);
   }, [item, hoverTime]);
@@ -31,8 +35,19 @@ export default function TrickplayScrubberThumbnail({
   // On Desktop: 2X standard size (320px - 380px)
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 640;
   const cWidth = containerWidth || 360;
-  const thumbWidth = isMobile ? Math.min(270, Math.max(200, cWidth * 0.85)) : 320;
-  const thumbHeight = Math.round(thumbWidth * 9 / 16);
+  const isVertical = tpInfo.isVertical;
+  const ar = tpInfo.aspectRatio || (16 / 9);
+
+  let thumbWidth, thumbHeight;
+  if (isVertical) {
+    // 竖屏（9:16等）：限制高度，按宽高比自适应宽度，避免拉伸成 16:9
+    thumbHeight = isMobile ? Math.min(260, Math.max(180, cWidth * 0.75)) : 260;
+    thumbWidth = Math.max(80, Math.round(thumbHeight * ar));
+  } else {
+    // 横屏（16:9等）：限制宽度，按宽高比自适应高度
+    thumbWidth = isMobile ? Math.min(270, Math.max(200, cWidth * 0.85)) : 320;
+    thumbHeight = Math.max(80, Math.round(thumbWidth / ar));
+  }
 
   // Exact cursor/finger position along scrubber (0px to cWidth)
   const cursorX = Math.max(0, Math.min(cWidth, (hoverPercent || 0) * cWidth));

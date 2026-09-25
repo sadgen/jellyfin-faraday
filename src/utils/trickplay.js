@@ -9,8 +9,16 @@ import { jellyfin } from '../api/jellyfinClient';
  * Parse Trickplay info from item details or MediaSources
  */
 export function getTrickplayInfo(item) {
+  const defaultAr = (item?.Width && item?.Height && item.Height > 0)
+    ? (item.Width / item.Height)
+    : (item?.PrimaryImageAspectRatio && item.PrimaryImageAspectRatio > 0 ? item.PrimaryImageAspectRatio : (16 / 9));
+  const defaultIsVertical = defaultAr < 0.9;
+
   const defaultRet = { 
     width: 320, 
+    height: Math.round(320 / defaultAr),
+    aspectRatio: defaultAr,
+    isVertical: defaultIsVertical,
     interval: 10, 
     id: item?.Id || null, 
     cols: 10, 
@@ -38,12 +46,14 @@ export function getTrickplayInfo(item) {
   }
 
   let width = 320;
+  let height = 180;
   let interval = 10;
   let cols = 10;
   let rows = 10;
 
   if (config.Width && !config[config.Width]) {
     width = config.Width;
+    if (config.Height) height = config.Height;
     let rawInterval = config.Interval || 10000;
     if (rawInterval > 1000000) interval = rawInterval / 10000000;
     else if (rawInterval > 100) interval = rawInterval / 1000;
@@ -62,6 +72,7 @@ export function getTrickplayInfo(item) {
       width = widths.includes(640) ? 640 : (widths.includes(320) ? 320 : Math.max(...widths));
       const m = config[width.toString()] || config[width];
       if (m) {
+        if (m.Height) height = m.Height;
         let rawInterval = m.Interval || 10000;
         if (rawInterval > 1000000) interval = rawInterval / 10000000;
         else if (rawInterval > 100) interval = rawInterval / 1000;
@@ -78,8 +89,27 @@ export function getTrickplayInfo(item) {
     }
   }
 
+  let aspectRatio = null;
+  if (width && height && height > 0) {
+    aspectRatio = width / height;
+  }
+  if ((!aspectRatio || isNaN(aspectRatio)) && item.Width && item.Height && item.Height > 0) {
+    aspectRatio = item.Width / item.Height;
+  }
+  if ((!aspectRatio || isNaN(aspectRatio)) && item.PrimaryImageAspectRatio && item.PrimaryImageAspectRatio > 0) {
+    aspectRatio = item.PrimaryImageAspectRatio;
+  }
+  if (!aspectRatio || isNaN(aspectRatio)) {
+    aspectRatio = 16 / 9;
+  }
+
+  const isVertical = aspectRatio < 0.9;
+
   return {
     width,
+    height,
+    aspectRatio,
+    isVertical,
     interval: Math.max(1, interval),
     id,
     cols: Math.max(1, cols),
@@ -132,7 +162,8 @@ export function getTrickplayStyle(item, timeInSeconds) {
       backgroundImage: `url("${imageUrl}")`,
       backgroundSize: `${tp.cols * 100}% ${tp.rows * 100}%`,
       backgroundPosition: `${posX}% ${posY}%`,
-      backgroundRepeat: 'no-repeat'
+      backgroundRepeat: 'no-repeat',
+      aspectRatio: `${tp.aspectRatio}`
     };
   }
 
@@ -140,6 +171,7 @@ export function getTrickplayStyle(item, timeInSeconds) {
     backgroundImage: `url("${imageUrl}")`,
     backgroundSize: 'contain',
     backgroundPosition: 'center',
-    backgroundRepeat: 'no-repeat'
+    backgroundRepeat: 'no-repeat',
+    aspectRatio: `${tp.aspectRatio}`
   };
 }

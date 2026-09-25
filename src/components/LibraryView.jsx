@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useRef, useCallback, memo } from 'react';
 import { createPortal } from 'react-dom';
 import { jellyfin } from '../api/jellyfinClient';
-import { getTrickplayStyle } from '../utils/trickplay';
+import { getTrickplayStyle, getTrickplayInfo } from '../utils/trickplay';
 import { detectDuplicateMedia } from '../utils/duplicateChecker';
 import { scanLibraryHealth } from '../utils/healthInspector';
 import { aggregateActors } from '../utils/actorAggregator';
@@ -282,6 +282,8 @@ const MediaCard = memo(function MediaCard({
     // 菜单的关闭由 CardContextMenu 的外部点击 / Esc / 滚动 / 选中项处理。
   }, []);
 
+  const tpInfo = useMemo(() => getTrickplayInfo(item), [item]);
+
   const tpStyle = useMemo(() => {
     if (trickplayTime === null) return null;
     return getTrickplayStyle(item, trickplayTime);
@@ -342,8 +344,15 @@ const MediaCard = memo(function MediaCard({
             <div className="w-0 h-0 border-x-8 border-x-transparent border-b-8 border-b-cyan-400 mb-0.5" />
           )}
 
-          {/* 2X-Enlarged HD Frame */}
-          <div className="w-[320px] xs:w-[380px] sm:w-[480px] lg:w-[540px] max-w-[92vw] aspect-video rounded-xl sm:rounded-2xl overflow-hidden bg-black/95 border-2 border-cyan-400 shadow-2xl shadow-cyan-500/40 flex items-center justify-center relative">
+          {/* 2X-Enlarged HD Frame（自适应横屏 16:9 / 竖屏 9:16，避免被硬拉伸） */}
+          <div 
+            className={`max-w-[92vw] max-h-[72vh] rounded-xl sm:rounded-2xl overflow-hidden bg-black/95 border-2 border-cyan-400 shadow-2xl shadow-cyan-500/40 flex items-center justify-center relative ${
+              tpInfo.isVertical 
+                ? 'h-[320px] xs:h-[380px] sm:h-[460px]' 
+                : 'w-[320px] xs:w-[380px] sm:w-[480px] lg:w-[540px] aspect-video'
+            }`}
+            style={tpInfo.isVertical ? { aspectRatio: `${tpInfo.aspectRatio}` } : undefined}
+          >
             <div className="w-full h-full" style={tpStyle} />
             <div className="absolute bottom-2 sm:bottom-2.5 bg-black/85 backdrop-blur-md px-3 sm:px-3.5 py-0.5 sm:py-1 rounded-full text-xs font-mono font-bold text-cyan-300 border border-white/20 shadow-lg">
               {formatTime(trickplayTime)}
@@ -385,7 +394,9 @@ const MediaCard = memo(function MediaCard({
             alt={item.Name}
             loading="lazy"
             onError={(e) => { e.currentTarget.style.display = 'none'; }}
-            className={`relative w-full h-full object-cover transition-opacity duration-200 ${
+            className={`relative w-full h-full transition-opacity duration-200 ${
+              isBackdrop && tpInfo.isVertical ? 'object-contain bg-black/80' : 'object-cover'
+            } ${
               isBackdrop && tpStyle ? 'opacity-0' : 'opacity-100'
             }`}
           />
@@ -395,8 +406,10 @@ const MediaCard = memo(function MediaCard({
         {isBackdrop && tpStyle && (
           <div className="absolute inset-0 bg-black flex items-center justify-center overflow-hidden pointer-events-none">
             <div 
-              className="w-full aspect-video relative shadow-2xl bg-center bg-no-repeat"
-              style={tpStyle}
+              className={`relative shadow-2xl bg-center bg-no-repeat ${
+                tpInfo.isVertical ? 'h-full' : 'w-full aspect-video'
+              }`}
+              style={tpInfo.isVertical ? { ...tpStyle, aspectRatio: `${tpInfo.aspectRatio}` } : tpStyle}
             />
 
             <div className="absolute bottom-2 left-2 z-30 pointer-events-none">

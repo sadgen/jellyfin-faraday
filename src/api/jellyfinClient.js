@@ -15,11 +15,12 @@ export class JellyfinClient {
   }
 
   getOrCreateDeviceId() {
-    let id = localStorage.getItem('jf_faraday_device_id');
+    let id = typeof localStorage !== 'undefined' ? localStorage.getItem('jf_faraday_device_id') : null;
     if (!id) {
       id = 'jf-faraday-' + Math.random().toString(36).substring(2, 15);
-      localStorage.setItem('jf_faraday_device_id', id);
-      if (typeof localStorage !== 'undefined') localStorage.setItem('jf_faraday_device_id', id);
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('jf_faraday_device_id', id);
+      }
     }
     return id;
   }

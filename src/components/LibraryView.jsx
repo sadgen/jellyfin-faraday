@@ -284,6 +284,12 @@ const MediaCard = memo(function MediaCard({
 
   const tpInfo = useMemo(() => getTrickplayInfo(item), [item]);
 
+  // Trickplay 兜底封面：当条目未生成 Primary 图片时，用 Trickplay 第 0 帧作为高质量视频封面回退
+  const coverTrickplayStyle = useMemo(() => {
+    if (!tpInfo.hasTrickplay) return null;
+    return getTrickplayStyle(item, 0);
+  }, [item, tpInfo.hasTrickplay]);
+
   const tpStyle = useMemo(() => {
     if (trickplayTime === null) return null;
     return getTrickplayStyle(item, trickplayTime);
@@ -384,9 +390,18 @@ const MediaCard = memo(function MediaCard({
         onTouchEnd={handleCoverTouchEnd}
         onTouchCancel={handleCoverTouchEnd}
       >
-        {/* Static Poster Artwork（垫底占位图标：无封面 / 截图封面 404 时优雅回退） */}
-        <div className="absolute inset-0 flex items-center justify-center text-gray-600">
-          <Film size={isBackdrop ? 40 : 32} />
+        {/* Static Poster Artwork（垫底占位层：Primary 缺失或 404 时优先显示 Trickplay 第 0 帧，均无时显示胶卷图标） */}
+        <div className="absolute inset-0 flex items-center justify-center text-gray-600 overflow-hidden bg-black">
+          {coverTrickplayStyle ? (
+            <div 
+              className={`w-full h-full bg-center bg-no-repeat ${
+                isBackdrop && tpInfo.isVertical ? 'object-contain h-full' : 'w-full'
+              }`}
+              style={coverTrickplayStyle}
+            />
+          ) : (
+            <Film size={isBackdrop ? 40 : 32} />
+          )}
         </div>
         {posterUrl && (
           <img

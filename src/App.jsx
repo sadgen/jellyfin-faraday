@@ -625,12 +625,13 @@ export default function App() {
     setFrontFloatingId(prev => (prev === winId ? prev : winId));
   }, []);
 
-  // 铺满模式：目标窗放大到页面可用区域最大，其余浮窗全部关闭
-  const handleMaximizeFloatingWindow = useCallback((winId) => {
+  // 铺满模式：目标窗放大到页面可用区域最大，其余浮窗全部关闭。
+  // chromeH 为点击瞬间测得的窗内头部+控制条高度，几何一次算到位
+  const handleMaximizeFloatingWindow = useCallback((winId, chromeH) => {
     setFloatingWindows(prev => {
       const target = prev.find(w => w.id === winId);
       if (!target) return prev;
-      return [{ ...target, isMaximized: true }];
+      return [{ ...target, isMaximized: true, chromeH }];
     });
   }, []);
 

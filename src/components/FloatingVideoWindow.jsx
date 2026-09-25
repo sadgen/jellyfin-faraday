@@ -63,10 +63,13 @@ export default function FloatingVideoWindow({
   const videoRef = useRef(null);
   const containerRef = useRef(null);
   const scrubberRef = useRef(null);
-  const videoAreaRef = useRef(null);
+  // 窗内头部/控制条实测高度：点击铺满那一刻测量（此时窗口还是普通态，两者高度
+  // 与铺满态一致），使铺满几何一次性同步算出，无需等高度渲染后再二次测量
+  const headerRef = useRef(null);
+  const footerRef = useRef(null);
 
   // Initialize position and size using exact Tampermonkey slot formula
-  const [layout, setLayout] = useState(() => isMaximized ? calculateMaximizedStyle(16 / 9) : calculateSlotStyle(slotIndex));
+  const [layout, setLayout] = useState(() => isMaximized ? calculateMaximizedStyle(16 / 9, windowData.chromeH) : calculateSlotStyle(slotIndex));
   const [isDragging, setIsDragging] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
   const isCustomPositionRef = useRef(false);
@@ -101,7 +104,7 @@ export default function FloatingVideoWindow({
   }, [currentPartId]);
 
   // 铺满期间兜底轮询：HLS 切档的 resize 事件偶发丢失（观察到卡在中间分辨率），
-  // 每秒校对一次实际比例，并按视频区实测净高校准铺满宽度，仅在铺满时运行
+  // 每秒校对一次实际比例，仅在铺满时运行
   useEffect(() => {
     if (!isMaximized) return;
     const t = setInterval(() => {
@@ -109,13 +112,6 @@ export default function FloatingVideoWindow({
       if (v && v.videoWidth && v.videoHeight) {
         const a = v.videoWidth / v.videoHeight;
         if (Math.abs(a - videoAspectRef.current) > 0.01) setVideoAspect(a);
-      }
-      const area = videoAreaRef.current;
-      if (area && area.clientHeight) {
-        setLayout(prev => {
-          const target = calculateMaximizedStyle(videoAspectRef.current, area.clientHeight);
-          return (Math.abs(prev.width - target.width) > 2 || Math.abs(prev.left - target.left) > 2) ? target : prev;
-        });
       }
     }, 1000);
     return () => clearInterval(t);
@@ -144,10 +140,9 @@ export default function FloatingVideoWindow({
   // Update layout when slotIndex changes (window promotion / shifting)
   useEffect(() => {
     if (isMaximized) {
+      // chromeH 在点击铺满时已实测传入，几何一次性同步算出
       isCustomPositionRef.current = false;
-      // 用视频画面区实测净高计算宽度（头部/控制条真实高度因视口而异）
-      const measuredH = videoAreaRef.current?.clientHeight || 0;
-      setLayout(calculateMaximizedStyle(videoAspect, measuredH));
+      setLayout(calculateMaximizedStyle(videoAspect, windowData.chromeH));
       return;
     }
     if (prevSlotRef.current !== slotIndex) {
@@ -155,28 +150,19 @@ export default function FloatingVideoWindow({
       isCustomPositionRef.current = false;
       setLayout(calculateSlotStyle(slotIndex));
     }
-  }, [slotIndex, isMaximized, videoAspect]);
+  }, [slotIndex, isMaximized, videoAspect, windowData.chromeH]);
 
   useEffect(() => {
     const handleResize = () => {
       if (isMaximized) {
-        setLayout(calculateMaximizedStyle(videoAspectRef.current, videoAreaRef.current?.clientHeight || 0));
+        setLayout(calculateMaximizedStyle(videoAspectRef.current, windowData.chromeH));
       } else if (!isCustomPositionRef.current) {
         setLayout(calculateSlotStyle(slotIndex));
       }
     };
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
-  }, [slotIndex, isMaximized, videoAspect]);
-
-  // 铺满布局二级校准：首帧先以估算宽度渲染，挂载后按视频区实测净高修正一次
-  useEffect(() => {
-    if (!isMaximized) return;
-    const area = videoAreaRef.current;
-    if (!area || !area.clientHeight) return;
-    const target = calculateMaximizedStyle(videoAspectRef.current, area.clientHeight);
-    setLayout(prev => (Math.abs(prev.width - target.width) > 2 || Math.abs(prev.left - target.left) > 2 ? target : prev));
-  }, [isMaximized, videoAspect]);
+  }, [slotIndex, isMaximized, videoAspect, windowData.chromeH]);
 
   // Default Playback Settings initialization & Dynamic Listener
   const [playbackDefaults, setPlaybackDefaultsState] = useState(() => getPlaybackDefaults());
@@ -1093,6 +1079,7 @@ export default function FloatingVideoWindow({
 
       {/* Draggable Header */}
       <div
+        ref={headerRef}
         onMouseDown={startWindowDrag}
         onTouchStart={handleTouchStartHeader}
         className={`px-3 py-2 border-b border-white/10 rounded-t-2xl flex items-center justify-between cursor-move text-xs ${
@@ -1689,7 +1676,6 @@ export default function FloatingVideoWindow({
       {/* Video Viewport (16:9) — 按住左键即可拖动窗口 (PotPlayer 式)，触摸手势由 useTouchGestures 接管 */}
       <div
         className={`relative w-full bg-black flex items-center justify-center overflow-hidden touch-none select-none cursor-move ${isMaximized ? 'flex-1 min-h-0' : 'aspect-video'}`}
-        ref={videoAreaRef}
         style={{ filter: `brightness(${brightness})`, WebkitTouchCallout: 'none', userSelect: 'none' }}
         onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
         onMouseDown={handleMouseDownVideoArea}
@@ -1858,7 +1844,7 @@ export default function FloatingVideoWindow({
       </div>
 
       {/* Scrubber & Controls Footer */}
-      <div className="p-2.5 bg-slate-950/95 border-t border-white/5 rounded-b-2xl flex flex-col gap-1.5 text-xs">
+      <div ref={footerRef} className="p-2.5 bg-slate-950/95 border-t border-white/5 rounded-b-2xl flex flex-col gap-1.5 text-xs">
         {/* Scrubber with Real-time Drag & Centered Trickplay */}
         <div className="relative w-full">
           {/* Desktop Scrubber-level Trickplay Thumbnail */}
@@ -1957,7 +1943,11 @@ export default function FloatingVideoWindow({
 
             {!isMaximized && (
               <button
-                onClick={() => onMaximize && onMaximize(id)}
+                onClick={() => {
+                  // 点击瞬间测量头部/控制条真实高度，铺满几何一次算到位
+                  const chromeH = (headerRef.current?.offsetHeight || 0) + (footerRef.current?.offsetHeight || 0);
+                  onMaximize && onMaximize(id, chromeH > 0 ? chromeH : undefined);
+                }}
                 className="px-1.5 py-0.5 rounded-lg bg-cyan-950 hover:bg-cyan-900 border border-cyan-500/40 text-cyan-300 text-[11px] font-medium transition flex items-center"
                 title="铺满页面 (关闭其他浮窗)"
               >

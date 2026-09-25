@@ -95,19 +95,19 @@ export function calculateSlotStyle(slotIndex) {
  * 单窗铺满模式：高度占满页面可用区，宽度按视频宽高比自适应（无黑边），
  * 右缘贴住网页右侧，左侧留出海报墙可见空间。
  * @param {number} videoAspect 视频宽高比（videoWidth/videoHeight），未知时按 16:9
- * @param {number} videoAreaHeight 视频画面区实测净高（窗高 - 头部/控制条），缺省按 72px 估算
+ * @param {number} chromeHeight 窗内头部+控制条实测高度（点击铺满时测量），缺省按 72px 估算
  */
-export function calculateMaximizedStyle(videoAspect, videoAreaHeight) {
+export function calculateMaximizedStyle(videoAspect, chromeHeight) {
   if (typeof window === 'undefined') {
     return { left: 12, top: 64, width: 1024, height: 576 };
   }
   const padding = 12;
   const headerOffset = 64;
-  const bottomOffset = 60;
+  const bottomOffset = 12; // 铺满模式与两侧一致的小边距（槽位布局的 60px 底部预留不适用）
   // 保证左侧海报墙至少 160px 可见，超宽视频在此处收窄（会有少量黑边，不可避免）
   const posterWallMin = 160;
   const availH = Math.max(240, window.innerHeight - headerOffset - bottomOffset);
-  const videoH = Math.max(200, videoAreaHeight || (availH - 72));
+  const videoH = Math.max(200, availH - (chromeHeight || 72));
   const maxW = Math.max(320, window.innerWidth - padding * 2 - posterWallMin);
   const aspect = videoAspect && videoAspect > 0 ? videoAspect : 16 / 9;
   const width = Math.min(maxW, Math.round(videoH * aspect));

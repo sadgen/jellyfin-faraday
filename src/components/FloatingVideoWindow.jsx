@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { isNativePlayerAvailable } from '../utils/nativePlayerBridge';
 import { jellyfin } from '../api/jellyfinClient';
-import { calculateSlotStyle } from '../utils/windowLayout';
+import { calculateSlotStyle, calculateExpandedStyle } from '../utils/windowLayout';
 import { useExternalPlayer } from '../hooks/useExternalPlayer';
 import { useTouchGestures } from '../hooks/useTouchGestures';
 import { useVolumeControl } from '../hooks/useVolumeControl';
@@ -26,7 +26,7 @@ import {
   Play, Pause, SkipForward, Volume2, VolumeX,
   X, ExternalLink, Star, Eye, EyeOff, Image as ImageIcon,
   Glasses, Trash2, FastForward, Sun, Zap, Gauge, RefreshCw, Subtitles, Film,
-  Tag, Scaling, FlipHorizontal, MoreVertical, SlidersHorizontal
+  Tag, Scaling, FlipHorizontal, MoreVertical, SlidersHorizontal, Maximize2
 } from 'lucide-react';
 
 function formatTime(seconds) {
@@ -44,19 +44,22 @@ export default function FloatingVideoWindow({
   onClose,
   onSkip,
   onExpand: _onExpand,
+  onMaximize,
   onBringToFront,
   onUpdateItem,
   onDeleteItem,
   onSwitchItem
 }) {
   const { id, slotIndex, item } = windowData;
+  // 铺满模式：本窗放大到页面可用区域最大（点击窗内铺满按钮触发，同时关闭其他浮窗）
+  const isMaximized = !!windowData.isMaximized;
 
   const videoRef = useRef(null);
   const containerRef = useRef(null);
   const scrubberRef = useRef(null);
 
   // Initialize position and size using exact Tampermonkey slot formula
-  const [layout, setLayout] = useState(() => calculateSlotStyle(slotIndex));
+  const [layout, setLayout] = useState(() => isMaximized ? calculateExpandedStyle() : calculateSlotStyle(slotIndex));
   const [isDragging, setIsDragging] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
   const isCustomPositionRef = useRef(false);
@@ -96,22 +99,29 @@ export default function FloatingVideoWindow({
 
   // Update layout when slotIndex changes (window promotion / shifting)
   useEffect(() => {
+    if (isMaximized) {
+      isCustomPositionRef.current = false;
+      setLayout(calculateExpandedStyle());
+      return;
+    }
     if (prevSlotRef.current !== slotIndex) {
       prevSlotRef.current = slotIndex;
       isCustomPositionRef.current = false;
       setLayout(calculateSlotStyle(slotIndex));
     }
-  }, [slotIndex]);
+  }, [slotIndex, isMaximized]);
 
   useEffect(() => {
     const handleResize = () => {
-      if (!isCustomPositionRef.current) {
+      if (isMaximized) {
+        setLayout(calculateExpandedStyle());
+      } else if (!isCustomPositionRef.current) {
         setLayout(calculateSlotStyle(slotIndex));
       }
     };
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
-  }, [slotIndex]);
+  }, [slotIndex, isMaximized]);
 
   // Default Playback Settings initialization & Dynamic Listener
   const [playbackDefaults, setPlaybackDefaultsState] = useState(() => getPlaybackDefaults());
@@ -666,14 +676,15 @@ export default function FloatingVideoWindow({
     window.addEventListener('mouseup', handleMouseUp);
   };
 
-  // VR 全景开启时，画面上的鼠标用于环视视角，不拖动窗口
+  // VR 全景开启时，画面上的鼠标用于环视视角，不拖动窗口；铺满模式下禁止拖动
   const handleMouseDownVideoArea = (e) => {
-    if (isVrActive) return;
+    if (isVrActive || isMaximized) return;
     startWindowDrag(e);
   };
 
   const handleTouchStartHeader = (e) => {
     if (e.target.closest('button') || e.target.closest('select')) return;
+    if (isMaximized) return;
     if (e.touches.length !== 1) return;
     if (onBringToFront) onBringToFront(id);
 
@@ -995,6 +1006,8 @@ export default function FloatingVideoWindow({
         left: `${layout.left}px`,
         top: `${layout.top}px`,
         width: `${layout.width}px`,
+        // 铺满模式显式锁定高度（普通窗口高度由内容 16:9 + 控制条撑出）
+        ...(isMaximized ? { height: `${layout.height}px` } : {}),
         zIndex: hoverScrubberTime !== null ? 9999 : (isDragging || isResizing || isFront ? 500 : 50 + (slotIndex === 1 ? 5 : (slotIndex === 0 ? 1 : 0))),
         transition: (isDragging || isResizing)
           ? 'none'
@@ -1620,7 +1633,7 @@ export default function FloatingVideoWindow({
 
       {/* Video Viewport (16:9) — 按住左键即可拖动窗口 (PotPlayer 式)，触摸手势由 useTouchGestures 接管 */}
       <div
-        className="relative w-full aspect-video bg-black flex items-center justify-center overflow-hidden touch-none select-none cursor-move"
+        className={`relative w-full bg-black flex items-center justify-center overflow-hidden touch-none select-none cursor-move ${isMaximized ? 'flex-1 min-h-0' : 'aspect-video'}`}
         style={{ filter: `brightness(${brightness})`, WebkitTouchCallout: 'none', userSelect: 'none' }}
         onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
         onMouseDown={handleMouseDownVideoArea}
@@ -1800,7 +1813,7 @@ export default function FloatingVideoWindow({
               hoverPercent={hoverScrubberPercent}
               containerWidth={scrubberWidth}
               mode="scrubber"
-              position={slotIndex === 2 ? 'above' : 'below'}
+              position={isMaximized ? 'above' : (slotIndex === 2 ? 'above' : 'below')}
             />
           )}
 
@@ -1885,18 +1898,30 @@ export default function FloatingVideoWindow({
               <SkipForward size={11} />
               <span>{partsList.length > 1 ? `切片 P${currentPartIndex + 1}/${partsList.length}` : '切片'}</span>
             </button>
+
+            {!isMaximized && (
+              <button
+                onClick={() => onMaximize && onMaximize(id)}
+                className="px-1.5 py-0.5 rounded-lg bg-cyan-950 hover:bg-cyan-900 border border-cyan-500/40 text-cyan-300 text-[11px] font-medium transition flex items-center"
+                title="铺满页面 (关闭其他浮窗)"
+              >
+                <Maximize2 size={11} />
+              </button>
+            )}
           </div>
         </div>
       </div>
 
       {/* SE Corner Resizer Handle (Bottom-Right) */}
-      <div
-        onMouseDown={handleMouseDownResize}
-        className="absolute right-0 bottom-0 w-4 h-4 cursor-se-resize z-40 flex items-end justify-end p-0.5 group/resizer"
-        title="拖拽缩放窗口大小"
-      >
-        <div className="w-2.5 h-2.5 border-r-2 border-b-2 border-white/30 group-hover/resizer:border-cyan-400 transition-colors" />
-      </div>
+      {!isMaximized && (
+        <div
+          onMouseDown={handleMouseDownResize}
+          className="absolute right-0 bottom-0 w-4 h-4 cursor-se-resize z-40 flex items-end justify-end p-0.5 group/resizer"
+          title="拖拽缩放窗口大小"
+        >
+          <div className="w-2.5 h-2.5 border-r-2 border-b-2 border-white/30 group-hover/resizer:border-cyan-400 transition-colors" />
+        </div>
+      )}
 
       {/* Full Poster Lightbox */}
       {showPosterModal && coverUrl && (

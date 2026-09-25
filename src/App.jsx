@@ -625,6 +625,15 @@ export default function App() {
     setFrontFloatingId(prev => (prev === winId ? prev : winId));
   }, []);
 
+  // 铺满模式：目标窗放大到页面可用区域最大，其余浮窗全部关闭
+  const handleMaximizeFloatingWindow = useCallback((winId) => {
+    setFloatingWindows(prev => {
+      const target = prev.find(w => w.id === winId);
+      if (!target) return prev;
+      return [{ ...target, isMaximized: true }];
+    });
+  }, []);
+
   const handleUpdateItem = useCallback((updatedItem) => {
     if (!updatedItem?.Id) return;
     setMediaItems(prev => prev.map(item => item.Id === updatedItem.Id ? { ...item, ...updatedItem } : item));
@@ -837,6 +846,7 @@ export default function App() {
           onCloseWindow={handleCloseFloatingWindow}
           onSkipWindow={handleSkipFloatingWindow}
           onExpandWindow={(item) => setModalPlayingItem(item)}
+          onMaximizeWindow={handleMaximizeFloatingWindow}
           onBringToFront={handleBringFloatingToFront}
           onUpdateItem={handleUpdateItem}
           onDeleteItem={handleDeleteItem}

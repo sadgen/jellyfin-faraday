@@ -90,3 +90,21 @@ export function calculateSlotStyle(slotIndex) {
     height: Math.round(p.height)
   };
 }
+
+/**
+ * 单窗铺满模式：占满页面可用区域（沿用槽位布局的边距/顶部导航偏移/底部空间）
+ */
+export function calculateExpandedStyle() {
+  if (typeof window === 'undefined') {
+    return { left: 12, top: 64, width: 1024, height: 576 };
+  }
+  const padding = 12;
+  const headerOffset = 64;
+  const bottomOffset = 60;
+  return {
+    left: padding,
+    top: headerOffset,
+    width: Math.max(320, window.innerWidth - padding * 2),
+    height: Math.max(240, window.innerHeight - headerOffset - bottomOffset)
+  };
+}

@@ -6,6 +6,7 @@ export default function FloatingWindowsContainer({
   onCloseWindow,
   onSkipWindow,
   onExpandWindow,
+  onMaximizeWindow,
   onBringToFront,
   onUpdateItem,
   onDeleteItem,
@@ -23,6 +24,7 @@ export default function FloatingWindowsContainer({
             onClose={onCloseWindow}
             onSkip={onSkipWindow}
             onExpand={onExpandWindow}
+            onMaximize={onMaximizeWindow}
             onBringToFront={onBringToFront}
             onUpdateItem={onUpdateItem}
             onDeleteItem={onDeleteItem}

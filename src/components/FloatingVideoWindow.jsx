@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { isNativePlayerAvailable } from '../utils/nativePlayerBridge';
 import { jellyfin } from '../api/jellyfinClient';
-import { calculateSlotStyle, calculateExpandedStyle } from '../utils/windowLayout';
+import { calculateSlotStyle, calculateMaximizedStyle } from '../utils/windowLayout';
 import { useExternalPlayer } from '../hooks/useExternalPlayer';
 import { useTouchGestures } from '../hooks/useTouchGestures';
 import { useVolumeControl } from '../hooks/useVolumeControl';
@@ -54,12 +54,19 @@ export default function FloatingVideoWindow({
   // 铺满模式：本窗放大到页面可用区域最大（点击窗内铺满按钮触发，同时关闭其他浮窗）
   const isMaximized = !!windowData.isMaximized;
 
+  // 视频宽高比（loadedmetadata/resize 时取自视频元素），铺满模式按它自适应宽度避免黑边。
+  // HLS 渐进式加载中分辨率可能多次变化，必须同时监听媒体元素的 resize 事件
+  const [videoAspect, setVideoAspect] = useState(16 / 9);
+  const videoAspectRef = useRef(16 / 9);
+  videoAspectRef.current = videoAspect;
+
   const videoRef = useRef(null);
   const containerRef = useRef(null);
   const scrubberRef = useRef(null);
+  const videoAreaRef = useRef(null);
 
   // Initialize position and size using exact Tampermonkey slot formula
-  const [layout, setLayout] = useState(() => isMaximized ? calculateExpandedStyle() : calculateSlotStyle(slotIndex));
+  const [layout, setLayout] = useState(() => isMaximized ? calculateMaximizedStyle(16 / 9) : calculateSlotStyle(slotIndex));
   const [isDragging, setIsDragging] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
   const isCustomPositionRef = useRef(false);
@@ -76,6 +83,43 @@ export default function FloatingVideoWindow({
   const [partsList, setPartsList] = useState(() => [{ Id: item?.Id, Name: item?.Name || 'Part 1' }]);
   const [currentPartIndex, setCurrentPartIndex] = useState(0);
   const currentPartId = partsList[currentPartIndex]?.Id || item?.Id;
+
+  // 视频宽高比监听：HLS 渐进式加载中分辨率可能多次变化，需同时监听媒体元素 resize
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    const updateAspect = () => {
+      if (v.videoWidth && v.videoHeight) setVideoAspect(v.videoWidth / v.videoHeight);
+    };
+    updateAspect();
+    v.addEventListener('loadedmetadata', updateAspect);
+    v.addEventListener('resize', updateAspect);
+    return () => {
+      v.removeEventListener('loadedmetadata', updateAspect);
+      v.removeEventListener('resize', updateAspect);
+    };
+  }, [currentPartId]);
+
+  // 铺满期间兜底轮询：HLS 切档的 resize 事件偶发丢失（观察到卡在中间分辨率），
+  // 每秒校对一次实际比例，并按视频区实测净高校准铺满宽度，仅在铺满时运行
+  useEffect(() => {
+    if (!isMaximized) return;
+    const t = setInterval(() => {
+      const v = videoRef.current;
+      if (v && v.videoWidth && v.videoHeight) {
+        const a = v.videoWidth / v.videoHeight;
+        if (Math.abs(a - videoAspectRef.current) > 0.01) setVideoAspect(a);
+      }
+      const area = videoAreaRef.current;
+      if (area && area.clientHeight) {
+        setLayout(prev => {
+          const target = calculateMaximizedStyle(videoAspectRef.current, area.clientHeight);
+          return (Math.abs(prev.width - target.width) > 2 || Math.abs(prev.left - target.left) > 2) ? target : prev;
+        });
+      }
+    }, 1000);
+    return () => clearInterval(t);
+  }, [isMaximized]);
 
   // Media playback info（音轨/字幕流来源）——跟随当前播放分段，
   // 否则 Part 2+ 会沿用第一个切片的字幕/音轨信息
@@ -101,7 +145,9 @@ export default function FloatingVideoWindow({
   useEffect(() => {
     if (isMaximized) {
       isCustomPositionRef.current = false;
-      setLayout(calculateExpandedStyle());
+      // 用视频画面区实测净高计算宽度（头部/控制条真实高度因视口而异）
+      const measuredH = videoAreaRef.current?.clientHeight || 0;
+      setLayout(calculateMaximizedStyle(videoAspect, measuredH));
       return;
     }
     if (prevSlotRef.current !== slotIndex) {
@@ -109,19 +155,28 @@ export default function FloatingVideoWindow({
       isCustomPositionRef.current = false;
       setLayout(calculateSlotStyle(slotIndex));
     }
-  }, [slotIndex, isMaximized]);
+  }, [slotIndex, isMaximized, videoAspect]);
 
   useEffect(() => {
     const handleResize = () => {
       if (isMaximized) {
-        setLayout(calculateExpandedStyle());
+        setLayout(calculateMaximizedStyle(videoAspectRef.current, videoAreaRef.current?.clientHeight || 0));
       } else if (!isCustomPositionRef.current) {
         setLayout(calculateSlotStyle(slotIndex));
       }
     };
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
-  }, [slotIndex, isMaximized]);
+  }, [slotIndex, isMaximized, videoAspect]);
+
+  // 铺满布局二级校准：首帧先以估算宽度渲染，挂载后按视频区实测净高修正一次
+  useEffect(() => {
+    if (!isMaximized) return;
+    const area = videoAreaRef.current;
+    if (!area || !area.clientHeight) return;
+    const target = calculateMaximizedStyle(videoAspectRef.current, area.clientHeight);
+    setLayout(prev => (Math.abs(prev.width - target.width) > 2 || Math.abs(prev.left - target.left) > 2 ? target : prev));
+  }, [isMaximized, videoAspect]);
 
   // Default Playback Settings initialization & Dynamic Listener
   const [playbackDefaults, setPlaybackDefaultsState] = useState(() => getPlaybackDefaults());
@@ -1634,6 +1689,7 @@ export default function FloatingVideoWindow({
       {/* Video Viewport (16:9) — 按住左键即可拖动窗口 (PotPlayer 式)，触摸手势由 useTouchGestures 接管 */}
       <div
         className={`relative w-full bg-black flex items-center justify-center overflow-hidden touch-none select-none cursor-move ${isMaximized ? 'flex-1 min-h-0' : 'aspect-video'}`}
+        ref={videoAreaRef}
         style={{ filter: `brightness(${brightness})`, WebkitTouchCallout: 'none', userSelect: 'none' }}
         onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
         onMouseDown={handleMouseDownVideoArea}

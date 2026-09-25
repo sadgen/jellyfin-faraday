@@ -8,15 +8,15 @@ import { jellyfin } from '../api/jellyfinClient';
 /**
  * Parse Trickplay info from item details or MediaSources
  */
-export function getTrickplayInfo(item) {
+export function getTrickplayInfo(item, { preferredWidth = 320 } = {}) {
   const defaultAr = (item?.Width && item?.Height && item.Height > 0)
     ? (item.Width / item.Height)
     : (item?.PrimaryImageAspectRatio && item.PrimaryImageAspectRatio > 0 ? item.PrimaryImageAspectRatio : (16 / 9));
   const defaultIsVertical = defaultAr < 0.9;
 
   const defaultRet = { 
-    width: 320, 
-    height: Math.round(320 / defaultAr),
+    width: preferredWidth, 
+    height: Math.round(preferredWidth / defaultAr),
     aspectRatio: defaultAr,
     isVertical: defaultIsVertical,
     interval: 10, 
@@ -45,7 +45,7 @@ export function getTrickplayInfo(item) {
     config = manifests[keys[0]];
   }
 
-  let width = 320;
+  let width = preferredWidth;
   let height = 180;
   let interval = 10;
   let cols = 10;
@@ -69,7 +69,16 @@ export function getTrickplayInfo(item) {
   } else {
     const widths = Object.keys(config).map(Number).filter(n => !isNaN(n));
     if (widths.length > 0) {
-      width = widths.includes(640) ? 640 : (widths.includes(320) ? 320 : Math.max(...widths));
+      // 性能关键：优先选用 320 档位。
+      // 640 档位单张雪碧图高达 8MB~25MB（7280万像素），下载耗时 1~4s 且解压显存近 300MB，
+      // 会造成严重掉帧卡顿；320 档位仅 0.8MB~2.8MB，加载与 GPU 渲染极快且在缩略图尺寸下清晰度无损。
+      if (widths.includes(preferredWidth)) {
+        width = preferredWidth;
+      } else if (preferredWidth === 320 && widths.includes(640)) {
+        width = 640;
+      } else {
+        width = widths.reduce((prev, curr) => Math.abs(curr - preferredWidth) < Math.abs(prev - preferredWidth) ? curr : prev);
+      }
       const m = config[width.toString()] || config[width];
       if (m) {
         if (m.Height) height = m.Height;
@@ -130,10 +139,10 @@ export function preloadTrickplaySprite(imageUrl) {
 /**
  * Calculate sprite URL and CSS background coordinates for a given playback time in seconds
  */
-export function getTrickplayStyle(item, timeInSeconds) {
+export function getTrickplayStyle(item, timeInSeconds, options = {}) {
   if (!item || !jellyfin.auth.serverUrl) return null;
 
-  const tp = getTrickplayInfo(item);
+  const tp = getTrickplayInfo(item, options);
   // 无 Trickplay 清单时不返回样式（组件回退显示"无 Trickplay 帧"提示），
   // 避免拼出指向 404 的 URL 显示坏图
   if (!tp.hasTrickplay) return null;

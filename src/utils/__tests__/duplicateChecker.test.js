@@ -62,4 +62,22 @@ describe('duplicateChecker 自制视频 vs 已识别视频查重逻辑', () => {
     const res = detectDuplicateMedia([item1, item2]);
     expect(res.duplicateCount).toBe(2);
   });
+
+  it('排除纯年份被误判为商业番号（如 KBJ-2020-05-25 与 KBJ-2020-06-04）', () => {
+    const item1 = { Id: '41', Name: 'Kbj-2020-05-25_yh1012 - Pornhub.com.mp4' };
+    const item2 = { Id: '42', Name: 'kbj-2020-06-04_785F7B0F - Pornhub.com.mp4' };
+
+    expect(getItemDuplicateKey(item1)).not.toBe(getItemDuplicateKey(item2));
+    const res = detectDuplicateMedia([item1, item2]);
+    expect(res.duplicateCount).toBe(0);
+  });
+
+  it('不同路径下的同名文件依然被准确识别为重复', () => {
+    const item1 = { Id: '51', Name: 'VAM 20220103 Lupin', Path: '/data/xxx/kbjneat/KBJ/Part 2/VAM 20220103 Lupin.mp4' };
+    const item2 = { Id: '52', Name: 'VAM 20220103 Lupin', Path: '/data/xxx/kbjneat/KBJ/VAM/MMD/VAM 20220103 Lupin.mp4' };
+
+    expect(getItemDuplicateKey(item1)).toBe(getItemDuplicateKey(item2));
+    const res = detectDuplicateMedia([item1, item2]);
+    expect(res.duplicateCount).toBe(2);
+  });
 });

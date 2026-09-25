@@ -331,9 +331,8 @@ export class JellyfinClient {
     const query = new URLSearchParams({
       IncludeItemTypes: includeItemTypes || 'Movie,Video,Episode',
       Recursive: 'true',
-      // 列表查询只保留卡片渲染所需字段：People/Overview/Genres/ProviderIds 组装开销极大
-      // （实测该服务器 5.2s → 2.2s），详情页由 getItemDetails 单独全量拉取
-      Fields: 'PrimaryImageAspectRatio,UserData,CommunityRating,DateCreated,RunTimeTicks,ProductionYear,OfficialRating,ParentId,ImageTags,Trickplay,ChildCount,RecursiveItemCount,SeriesName,SeasonName,IndexNumber,ParentIndexNumber',
+      // 列表查询只保留卡片渲染与查重所需字段：Path 为轻量直存字段（开销 <0.1s），用于精准去重防误判
+      Fields: 'Path,PrimaryImageAspectRatio,UserData,CommunityRating,DateCreated,RunTimeTicks,ProductionYear,OfficialRating,ParentId,ImageTags,Trickplay,ChildCount,RecursiveItemCount,SeriesName,SeasonName,IndexNumber,ParentIndexNumber',
       EnableImages: 'true',
       StartIndex: startIndex.toString()
     });

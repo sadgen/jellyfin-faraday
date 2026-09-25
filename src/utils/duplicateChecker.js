@@ -52,6 +52,10 @@ export function matchStrictCommercialCode(text = '') {
   if (m) {
     const prefix = m[1].toUpperCase().replace(/[-_]/g, '');
     const num = m[2];
+    // 排除年份（如 19xx, 20xx 且长度为 4 的四位年份，避免将 KBJ-2020-05-25 等日期误判为番号）
+    if ((num.startsWith('19') || num.startsWith('20')) && num.length === 4) {
+      return null;
+    }
     return `${prefix}-${num}`;
   }
   return null;

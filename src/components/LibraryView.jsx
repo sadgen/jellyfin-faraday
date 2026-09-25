@@ -936,7 +936,45 @@ export default function LibraryView({
     }
   }, []);
 
-  const [viewLayout, setViewLayout] = useState('poster');
+  // 视图布局（海报 2:3 / 剧照 16:9 / 列表）按媒体库持久化记忆；
+  // 无记录时：自制视频/照片/无刮削库（如 KBJ）智能默认剧照 (backdrop 16:9)，电影/电视剧默认海报 (poster)
+  const getInitialViewLayout = useCallback((viewId) => {
+    try {
+      if (viewId) {
+        const saved = localStorage.getItem(`jf_library_view_layout_${viewId}`);
+        if (saved && ['poster', 'backdrop', 'list'].includes(saved)) {
+          return saved;
+        }
+      }
+      const currentView = (userViews || []).find(v => v.Id === viewId);
+      if (currentView) {
+        const cType = currentView.CollectionType;
+        if (cType === 'homevideos' || cType === 'photos' || !cType || cType === 'None') {
+          return 'backdrop';
+        }
+      }
+    } catch {
+      // ignore
+    }
+    return 'poster';
+  }, [userViews]);
+
+  const [viewLayout, setViewLayoutState] = useState(() => getInitialViewLayout(selectedViewId));
+
+  useEffect(() => {
+    setViewLayoutState(getInitialViewLayout(selectedViewId));
+  }, [selectedViewId, getInitialViewLayout]);
+
+  const setViewLayout = useCallback((newLayout) => {
+    setViewLayoutState(newLayout);
+    try {
+      if (selectedViewId) {
+        localStorage.setItem(`jf_library_view_layout_${selectedViewId}`, newLayout);
+      }
+    } catch {
+      // ignore
+    }
+  }, [selectedViewId]);
   const [favoriteFilter, setFavoriteFilter] = useState('all');
   const [playCountFilter, setPlayCountFilter] = useState('all');
   const [showDuplicatesOnly, setShowDuplicatesOnly] = useState(false);

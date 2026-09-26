@@ -819,6 +819,21 @@ export class JellyfinClient {
   }
 
   /**
+   * Get Remux HLS URL（原画直连的 DirectStream 形态：只转容器不重编码，源画质源码率）。
+   * 高 maxStreamingBitrate 且不设 VideoBitrate 时，服务器对可封装进 TS 的流自动 copy
+   * （8098 JF 10.11.11 实测：H.264/AAC 源返回 AudioCodec=copy，分片码率与源一致）；
+   * 编码不兼容的源（如 HEVC 声明了仅 h264 目标）服务器自动降级为重编码，播放不中断。
+   * 客户端改走 hls.js 以获得统一的 60s 前向缓冲策略，弱网下不再频繁停顿。
+   */
+  getRemuxHlsUrl(itemId, opts = {}) {
+    return this.getHlsUrl(itemId, {
+      maxStreamingBitrate: 100000000,
+      segmentLength: 3,
+      ...opts
+    });
+  }
+
+  /**
    * Get Poster/Backdrop Image URL (Optimized for instant decoding)
    */
   getImageUrl(itemId, tag = null, type = 'Primary', maxWidth = 360, quality = 80) {

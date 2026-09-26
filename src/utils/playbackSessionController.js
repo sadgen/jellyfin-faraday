@@ -200,44 +200,29 @@ export class PlaybackSessionController {
     // 否则服务器会为一次开窗记录两次播放
     this.armStartedReport(initialSeekTime);
 
+    // 原画直连 = HLS DirectStream（remux 只转容器不重编码，源画质源码率）。
+    // 渐进式流的缓冲完全由浏览器托管：前向缓冲小且不可配，弱网下码率一贴地板就停顿；
+    // 切到 hls.js 沿用 60s 前向缓冲策略，跨缓冲区 seek 由 hls.js 按全量 VOD 播放列表原生完成。
+    let hlsUrl;
     if (streamQuality === 'direct' && audioStreamIndex === null) {
-      this.playMethod = 'DirectPlay';
-      const directUrl = this.jellyfin.getStreamUrl(this.itemId);
-
-      videoEl.removeAttribute('src');
-      videoEl.src = directUrl;
-      if (initialSeekTime > 0) {
-        try {
-          videoEl.currentTime = initialSeekTime;
-        } catch {}
-      }
-
-      this.startHeartbeat();
-
-      videoEl.play().catch(() => {
-        if (this.generationId !== currentGeneration) return;
-        videoEl.muted = true;
-        videoEl.play().catch(() => {
-          if (this.generationId !== currentGeneration) return;
-          // 直连完全失败，通知上层回退到 HLS
-          if (this.onAutoDirectFallback) {
-            this.onAutoDirectFallback();
-          }
-        });
+      this.playMethod = 'DirectStream';
+      hlsUrl = this.jellyfin.getRemuxHlsUrl(this.itemId, {
+        playSessionId: this.playSessionId,
+        mediaSourceId: this.mediaSourceId,
+        subtitleStreamIndex: this.subtitleStreamIndex
       });
     } else {
       this.playMethod = 'Transcode';
       const bitrate = parseInt(streamQuality, 10) || 4000000;
-
-      const hlsUrl = this.jellyfin.getSmoothHlsUrl(this.itemId, bitrate, {
+      hlsUrl = this.jellyfin.getSmoothHlsUrl(this.itemId, bitrate, {
         playSessionId: this.playSessionId,
         mediaSourceId: this.mediaSourceId,
         audioStreamIndex: this.audioStreamIndex,
         subtitleStreamIndex: this.subtitleStreamIndex
       });
-
-      this.initHls(hlsUrl, initialSeekTime, currentGeneration);
     }
+
+    this.initHls(hlsUrl, initialSeekTime, currentGeneration);
 
     this.notifyState();
   }
@@ -285,7 +270,11 @@ export class PlaybackSessionController {
           hls.startLoad();
         } else {
           this.destroyHls();
-          if (this.onError) {
+          // 原画 remux 流不可播（源封装异常等）→ 自动回退到 4M 转码，保持"开窗即看"；
+          // 转码模式的致命错误仍走 onError 展示诊断
+          if (this.playMethod === 'DirectStream' && this.onAutoDirectFallback) {
+            this.onAutoDirectFallback();
+          } else if (this.onError) {
             this.onError(data);
           }
         }

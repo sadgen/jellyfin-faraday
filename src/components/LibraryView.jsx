@@ -284,9 +284,13 @@ const MediaCard = memo(function MediaCard({
 
   const tpInfo = useMemo(() => getTrickplayInfo(item), [item]);
 
-  // Trickplay 兜底封面：当条目未生成 Primary 图片时，用 Trickplay 第 0 帧作为高质量视频封面回退
+  // Trickplay 兜底封面：仅当条目元数据完全没有封面图 tag（Primary/Thumb/Backdrop 均无，
+  // 典型如 ScreenGrabber 失败的自制视频）时才用 Trickplay 第 0 帧垫底。
+  // 有封面的条目即使短暂未加载/404 也不拉雪碧图——单张 1MB+，网格批量并发会拖慢整页。
   const coverTrickplayStyle = useMemo(() => {
     if (!tpInfo.hasTrickplay) return null;
+    const tags = item.ImageTags || {};
+    if (tags.Primary || tags.Thumb || tags.Backdrop) return null;
     return getTrickplayStyle(item, 0);
   }, [item, tpInfo.hasTrickplay]);
 
@@ -390,7 +394,8 @@ const MediaCard = memo(function MediaCard({
         onTouchEnd={handleCoverTouchEnd}
         onTouchCancel={handleCoverTouchEnd}
       >
-        {/* Static Poster Artwork（垫底占位层：Primary 缺失或 404 时优先显示 Trickplay 第 0 帧，均无时显示胶卷图标） */}
+        {/* Static Poster Artwork（垫底占位层：完全无封面图 tag 时显示 Trickplay 第 0 帧，
+            其余情况显示胶卷图标等待 img 加载覆盖；有封面时不用雪碧图垫底以省流量） */}
         <div className="absolute inset-0 flex items-center justify-center text-gray-600 overflow-hidden bg-black">
           {coverTrickplayStyle ? (
             <div 

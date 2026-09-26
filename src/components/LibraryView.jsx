@@ -1142,6 +1142,12 @@ export default function LibraryView({
   const [folderPathStack, setFolderPathStack] = useState([]); // [{ id, name }]
   const [isFolderLoading, setIsFolderLoading] = useState(false);
 
+  // 文件夹视图的随机候选池：当前文件夹（含全部子文件夹）内的视频。
+  // 文件夹视图在随机出片语境下视作筛选器 —— displayItems 恒为库级列表，
+  // 若不上报文件夹范围，随机 3 窗/跳过换片会从整个媒体库出片。
+  const [folderPoolItems, setFolderPoolItems] = useState([]);
+  const folderPoolReqIdRef = useRef(0);
+
   // 文件夹视图同样响应顶部排序选择（子文件夹与视频文件分区各自按当前排序展示）
   const sortedFolderItems = useMemo(() => sortMediaItems(folderItems, sortMethod), [folderItems, sortMethod]);
 
@@ -1189,6 +1195,23 @@ export default function LibraryView({
 
     return () => { cancelled = true; };
   }, [activeSubTab, currentFolderId, userViews]);
+
+  // 递归拉取当前文件夹（含子文件夹）内全部视频作为随机池；快速进出文件夹时按请求序号丢弃旧响应
+  useEffect(() => {
+    if (activeSubTab !== 'folder' || !currentFolderId || !jellyfin.auth.isConfigured) {
+      setFolderPoolItems([]);
+      return;
+    }
+    const reqId = ++folderPoolReqIdRef.current;
+    let cancelled = false;
+    jellyfin.queryMediaPage({ parentId: currentFolderId, sortMethod: 'date_desc' }).then(data => {
+      if (!cancelled && reqId === folderPoolReqIdRef.current) {
+        setFolderPoolItems(data.Items || []);
+      }
+    }).catch(() => { /* 拉取失败时保持空池，随机出片回退到库级列表 */ });
+
+    return () => { cancelled = true; };
+  }, [activeSubTab, currentFolderId]);
 
   // 演职员：优先展示"按出演数量聚合的演员"（aggregateActors，只统计演员，
   // 排除 /Persons 混入的导演/编剧且后者无法按出演次数排序）。
@@ -1315,17 +1338,9 @@ export default function LibraryView({
     return () => { cancelled = true; };
   }, [activeSubTab, selectedViewId, items]);
 
-  // Display items with Play Count and Status filter support
-  const displayItems = useMemo(() => {
-    let result = items;
-    if (activeSubTab === 'duplicates') {
-      result = items.filter(it => duplicateItemIds.has(it.Id));
-    }
-
-    // 0. 仅显示重复影片（U4：与查重清理标签页同源的判定，可叠加其它筛选）
-    if (showDuplicatesOnly && activeSubTab !== 'duplicates') {
-      result = result.filter(it => duplicateItemIds.has(it.Id));
-    }
+  // 状态/收藏/播放次数筛选：网格视图与文件夹视图共用（文件夹视图作为筛选器时叠加同一套规则）
+  const applyCommonFilters = useCallback((list) => {
+    let result = list;
 
     // 1. Playback status filter (unplayed vs played)
     if (statusFilter === 'unplayed') {
@@ -1362,6 +1377,24 @@ export default function LibraryView({
       result = result.filter(it => (it.UserData?.PlayCount || 0) >= 10);
     }
 
+    return result;
+  }, [statusFilter, favoriteFilter, playCountFilter]);
+
+  // Display items with Play Count and Status filter support
+  const displayItems = useMemo(() => {
+    let result = items;
+    if (activeSubTab === 'duplicates') {
+      result = items.filter(it => duplicateItemIds.has(it.Id));
+    }
+
+    // 0. 仅显示重复影片（U4：与查重清理标签页同源的判定，可叠加其它筛选）
+    if (showDuplicatesOnly && activeSubTab !== 'duplicates') {
+      result = result.filter(it => duplicateItemIds.has(it.Id));
+    }
+
+    // 1-3. Playback status / favorites / play count filters
+    result = applyCommonFilters(result);
+
     // 4. 健康排查子标签页
     if (activeSubTab === 'health') {
       return sortMediaItems(brokenItems, sortMethod);
@@ -1374,14 +1407,20 @@ export default function LibraryView({
 
     // 6. 保证最终展示列表严格按当前 sortMethod 排序（解决按演员/关键词搜索时服务端按匹配度打乱排序的问题）
     return sortMediaItems(result, sortMethod);
-  }, [items, activeSubTab, duplicateItemIds, brokenItems, showDuplicatesOnly, statusFilter, favoriteFilter, playCountFilter, enableStacking, sortMethod]);
+  }, [items, activeSubTab, duplicateItemIds, brokenItems, showDuplicatesOnly, applyCommonFilters, enableStacking, sortMethod]);
 
-  // Sync filtered items to parent container (for auto-refilling floating windows)
+  // 文件夹视图下的随机池 = 当前文件夹（含子文件夹）视频 ∩ 同一套状态/收藏/次数筛选
+  const folderFilteredPool = useMemo(
+    () => applyCommonFilters(folderPoolItems),
+    [folderPoolItems, applyCommonFilters]
+  );
+
+  // Sync filtered items to parent container (for auto-refilling floating windows).
+  // 文件夹视图下上报文件夹范围内的候选池（列表请求在途时为空，App 端暂回退库级列表）
   useEffect(() => {
-    if (onFilteredItemsChange) {
-      onFilteredItemsChange(displayItems);
-    }
-  }, [displayItems, onFilteredItemsChange]);
+    if (!onFilteredItemsChange) return;
+    onFilteredItemsChange(activeSubTab === 'folder' && currentFolderId ? folderFilteredPool : displayItems);
+  }, [displayItems, folderFilteredPool, activeSubTab, currentFolderId, onFilteredItemsChange]);
 
   const displayedSlice = useMemo(() => {
     return displayItems.slice(0, visibleCount);

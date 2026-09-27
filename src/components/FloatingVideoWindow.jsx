@@ -1384,8 +1384,10 @@ export default function FloatingVideoWindow({
         (isDragging || isResizing) ? 'ring-2 ring-cyan-400 shadow-cyan-500/50 opacity-95 scale-[1.01]' : 'hover:border-cyan-400'
       }`}
     >
-      {/* Mobile Window-level Centered Trickplay Thumbnail (Adaptive Above / Below entire window) */}
-      {isMobileViewport && (
+      {/* Mobile Window-level Centered Trickplay Thumbnail (Adaptive Above / Below entire window)。
+          铺满/取中铺满时窗口贴底，改走 footer 的 scrubber 模式（锚定进度条上方），
+          window 模式会挂到窗口上沿外被顶部工具栏挡住 */}
+      {isMobileViewport && !(cropFill || isMaximized) && (
         <TrickplayScrubberThumbnail
           item={trickplayItem}
           hoverTime={hoverScrubberTime}
@@ -2175,15 +2177,15 @@ export default function FloatingVideoWindow({
       <div ref={footerRef} className="p-2.5 bg-slate-950/95 border-t border-white/5 rounded-b-2xl flex flex-col gap-1.5 text-xs">
         {/* Scrubber with Real-time Drag & Centered Trickplay */}
         <div className="relative w-full">
-          {/* Desktop Scrubber-level Trickplay Thumbnail */}
-          {!isMobileViewport && (
+          {/* Scrubber-level Trickplay Thumbnail：桌面常规；铺满/取中铺满（窗口贴底，含手机）恒挂进度条上方 */}
+          {(!isMobileViewport || cropFill || isMaximized) && (
             <TrickplayScrubberThumbnail
               item={trickplayItem}
               hoverTime={hoverScrubberTime}
               hoverPercent={hoverScrubberPercent}
               containerWidth={scrubberWidth}
               mode="scrubber"
-              position={(layout.top + (layout.height || layout.width * 9 / 16 + 72)) > vpHeight * 0.7 ? 'above' : 'below'}
+              position={(cropFill || isMaximized) ? 'above' : ((layout.top + (layout.height || layout.width * 9 / 16 + 72)) > vpHeight * 0.7 ? 'above' : 'below')}
             />
           )}
 

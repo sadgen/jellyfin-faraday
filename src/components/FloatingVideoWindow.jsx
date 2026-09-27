@@ -26,7 +26,7 @@ import {
   Play, Pause, SkipForward, Volume2, VolumeX,
   X, ExternalLink, Star, Eye, EyeOff, Image as ImageIcon,
   Glasses, Trash2, FastForward, Sun, Zap, Gauge, RefreshCw, Subtitles, Film,
-  Tag, Scaling, FlipHorizontal, MoreVertical, SlidersHorizontal, Maximize2
+  Tag, Scaling, FlipHorizontal, MoreVertical, SlidersHorizontal, Maximize2, Crop
 } from 'lucide-react';
 
 function formatTime(seconds) {
@@ -74,6 +74,62 @@ export default function FloatingVideoWindow({
   const [isResizing, setIsResizing] = useState(false);
   const isCustomPositionRef = useRef(false);
   const prevSlotRef = useRef(slotIndex);
+
+  // 三屏取中：三竖屏拼接的横屏视频只显示中间 1/3，窗口自适应为竖屏比例
+  const [cropThird, setCropThird] = useState(false);
+  const cropThirdRef = useRef(false);
+  cropThirdRef.current = cropThird;
+  const preCropLayoutRef = useRef(null);
+
+  /**
+   * 三屏取中几何：
+   * - 桌面：保持视频区高度不变，宽度收窄为"高 × 面板宽高比"（竖屏塔窗）
+   * - 手机：保持宽度不变、视频区增高为竖屏（超屏高则连同宽度一起收缩）
+   * 全部直读 window 尺寸（不依赖渲染期 viewport hook），保证 effect / 事件回调里调用时无陈旧闭包
+   */
+  function computeCropLayout(base) {
+    const chromeH = (headerRef.current?.offsetHeight || 34) + (footerRef.current?.offsetHeight || 38);
+    const aspect = videoAspectRef.current > 0 ? videoAspectRef.current / 3 : 16 / 27;
+    const mobile = window.innerWidth < 768;
+    let areaW;
+    let areaH;
+    if (mobile) {
+      areaW = base.width;
+      areaH = areaW / aspect;
+      // 顶部 header 64 + 底部导航 60 + 余量 12 之外不得溢出屏幕
+      const maxAreaH = Math.max(240, window.innerHeight - 64 - 60 - 12 - chromeH);
+      if (areaH > maxAreaH) {
+        areaH = maxAreaH;
+        areaW = areaH * aspect;
+      }
+    } else {
+      areaH = base.width * 9 / 16;
+      areaW = Math.max(areaH * aspect, 260);
+    }
+    const width = Math.round(areaW);
+    let left = Math.round(base.left + (base.width - width) / 2);
+    left = Math.max(8, Math.min(left, window.innerWidth - width - 8));
+    const totalH = Math.round(areaH + chromeH);
+    const bottomMargin = mobile ? 68 : 8;
+    let top = base.top;
+    if (top + totalH > window.innerHeight - bottomMargin) {
+      top = Math.round(window.innerHeight - bottomMargin - totalH);
+    }
+    top = Math.max(64, top);
+    return { ...base, left, top, width };
+  }
+
+  const handleToggleCropThird = () => {
+    if (isMaximized) return;
+    const next = !cropThird;
+    setCropThird(next);
+    if (next) {
+      preCropLayoutRef.current = layout;
+      setLayout(computeCropLayout(layout));
+    } else {
+      setLayout(preCropLayoutRef.current || calculateSlotStyle(slotIndex));
+    }
+  };
 
   // Long-press Drag state & tactile feedback for mobile
   const [isLongPressDragging, setIsLongPressDragging] = useState(false);
@@ -148,7 +204,13 @@ export default function FloatingVideoWindow({
     if (prevSlotRef.current !== slotIndex) {
       prevSlotRef.current = slotIndex;
       isCustomPositionRef.current = false;
-      setLayout(calculateSlotStyle(slotIndex));
+      const base = calculateSlotStyle(slotIndex);
+      if (cropThirdRef.current) {
+        preCropLayoutRef.current = base;
+        setLayout(computeCropLayout(base));
+      } else {
+        setLayout(base);
+      }
     }
   }, [slotIndex, isMaximized, videoAspect, windowData.chromeH]);
 
@@ -157,12 +219,25 @@ export default function FloatingVideoWindow({
       if (isMaximized) {
         setLayout(calculateMaximizedStyle(videoAspectRef.current, windowData.chromeH));
       } else if (!isCustomPositionRef.current) {
-        setLayout(calculateSlotStyle(slotIndex));
+        const base = calculateSlotStyle(slotIndex);
+        if (cropThirdRef.current) {
+          preCropLayoutRef.current = base;
+          setLayout(computeCropLayout(base));
+        } else {
+          setLayout(base);
+        }
       }
     };
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, [slotIndex, isMaximized, videoAspect, windowData.chromeH]);
+
+  // 三屏取中开启期间视频比例变化（HLS 渐进加载/切档/换片）：按最新比例重算竖屏几何
+  useEffect(() => {
+    if (!cropThirdRef.current || isMaximized || isCustomPositionRef.current) return;
+    const base = preCropLayoutRef.current || calculateSlotStyle(slotIndex);
+    setLayout(computeCropLayout(base));
+  }, [videoAspect, slotIndex, isMaximized, windowData.chromeH]);
 
   // Default Playback Settings initialization & Dynamic Listener
   const [playbackDefaults, setPlaybackDefaultsState] = useState(() => getPlaybackDefaults());
@@ -208,6 +283,24 @@ export default function FloatingVideoWindow({
   // 字幕流管理（共享 hook：提取文本字幕流 + 硬字幕识别默认选择 + textTracks 同步）
   const { subtitleStreams, mediaSourceId, selectedSubtitleIndex, selectSubtitle, syncSubtitleModes } =
     useSubtitleTracks({ item, playbackData, videoRef });
+
+  // 字幕快捷开关：记录最近一次选中的字幕轨，关闭后再点一键恢复
+  const lastSubtitleIndexRef = useRef(-1);
+  useEffect(() => {
+    if (selectedSubtitleIndex >= 0) lastSubtitleIndexRef.current = selectedSubtitleIndex;
+  }, [selectedSubtitleIndex]);
+
+  const handleToggleSubtitle = () => {
+    if (selectedSubtitleIndex !== -1) {
+      selectSubtitle(-1);
+    } else {
+      selectSubtitle(
+        lastSubtitleIndexRef.current !== -1
+          ? lastSubtitleIndexRef.current
+          : (subtitleStreams[0]?.Index ?? -1)
+      );
+    }
+  };
 
   // Fast Forward / Rewind / Seek Step Tier: 'slow' (5s) | 'medium' (15s, default) | 'fast' (30s)
   const [seekSpeed, setSeekSpeed] = useState(() => getStoredSeekSpeed());
@@ -1673,10 +1766,15 @@ export default function FloatingVideoWindow({
         </div>
       )}
 
-      {/* Video Viewport (16:9) — 按住左键即可拖动窗口 (PotPlayer 式)，触摸手势由 useTouchGestures 接管 */}
+      {/* Video Viewport — 三屏取中时切换为竖屏面板比例；按住左键即可拖动窗口 (PotPlayer 式)，触摸手势由 useTouchGestures 接管 */}
       <div
-        className={`relative w-full bg-black flex items-center justify-center overflow-hidden touch-none select-none cursor-move ${isMaximized ? 'flex-1 min-h-0' : 'aspect-video'}`}
-        style={{ filter: `brightness(${brightness})`, WebkitTouchCallout: 'none', userSelect: 'none' }}
+        className={`relative w-full bg-black flex items-center justify-center overflow-hidden touch-none select-none cursor-move ${isMaximized ? 'flex-1 min-h-0' : ''}`}
+        style={{
+          aspectRatio: isMaximized ? undefined : (cropThird ? (videoAspect > 0 ? videoAspect / 3 : 16 / 27) : 16 / 9),
+          filter: `brightness(${brightness})`,
+          WebkitTouchCallout: 'none',
+          userSelect: 'none'
+        }}
         onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
         onMouseDown={handleMouseDownVideoArea}
         {...touchHandlers}
@@ -1716,11 +1814,13 @@ export default function FloatingVideoWindow({
           disablePictureInPicture={true}
           onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
           className={`w-full h-full z-10 select-none pointer-events-auto transition-transform duration-200 ${
-            aspectMode === 'cover'
+            (cropThird && !isMaximized)
               ? 'object-cover'
-              : aspectMode === 'fill'
-                ? 'w-full h-full [object-fit:fill]'
-                : 'object-contain'
+              : aspectMode === 'cover'
+                ? 'object-cover'
+                : aspectMode === 'fill'
+                  ? 'w-full h-full [object-fit:fill]'
+                  : 'object-contain'
           } ${flipH ? '-scale-x-100' : ''}`}
           style={{ WebkitTouchCallout: 'none', userSelect: 'none', WebkitUserSelect: 'none' }}
           onWaiting={() => setIsLoading(true)}
@@ -1877,8 +1977,8 @@ export default function FloatingVideoWindow({
           </div>
         </div>
 
-        {/* Controls Row */}
-        <div className="flex items-center justify-between text-gray-300 pt-0.5">
+        {/* Controls Row（窄窗时右侧按钮组自动换行，音量滑块/时间/切片文字按窗宽收起） */}
+        <div className="flex flex-wrap items-center justify-between gap-y-1 text-gray-300 pt-0.5">
           <div className="flex items-center gap-2">
             <button
               onClick={togglePlay}
@@ -1894,22 +1994,26 @@ export default function FloatingVideoWindow({
               {isMuted ? <VolumeX size={14} className="text-gray-400" /> : <Volume2 size={14} className="text-cyan-400" />}
             </button>
 
-            {/* 音量滑块（记忆并随播放上报真实音量） */}
-            <input
-              type="range"
-              min={0}
-              max={1}
-              step={0.05}
-              value={isMuted ? 0 : volume}
-              onChange={(e) => setVolume(parseFloat(e.target.value))}
-              className="w-12 accent-cyan-400 h-1 bg-white/20 rounded-lg cursor-pointer appearance-none"
-              title={`音量 ${Math.round((isMuted ? 0 : volume) * 100)}%`}
-              onClick={(e) => e.stopPropagation()}
-            />
+            {/* 音量滑块（记忆并随播放上报真实音量；窄窗收起，手机有手势调节） */}
+            {layout.width >= 400 && (
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                value={isMuted ? 0 : volume}
+                onChange={(e) => setVolume(parseFloat(e.target.value))}
+                className="w-12 accent-cyan-400 h-1 bg-white/20 rounded-lg cursor-pointer appearance-none"
+                title={`音量 ${Math.round((isMuted ? 0 : volume) * 100)}%`}
+                onClick={(e) => e.stopPropagation()}
+              />
+            )}
 
-            <span className="font-mono text-[11px] text-gray-400">
-              {currentTimeText} / {durationText}
-            </span>
+            {layout.width >= 300 && (
+              <span className="font-mono text-[11px] text-gray-400">
+                {currentTimeText} / {durationText}
+              </span>
+            )}
           </div>
 
           <div className="flex items-center gap-2">
@@ -1938,7 +2042,9 @@ export default function FloatingVideoWindow({
               }
             >
               <SkipForward size={11} />
-              <span>{partsList.length > 1 ? `切片 P${currentPartIndex + 1}/${partsList.length}` : '切片'}</span>
+              {layout.width >= 400 && (
+                <span>{partsList.length > 1 ? `切片 P${currentPartIndex + 1}/${partsList.length}` : '切片'}</span>
+              )}
             </button>
 
             {!isMaximized && (
@@ -1952,6 +2058,40 @@ export default function FloatingVideoWindow({
                 title="铺满页面 (关闭其他浮窗)"
               >
                 <Maximize2 size={11} />
+              </button>
+            )}
+
+            {/* 字幕快捷开关（右下角一键静默/恢复，管理与下载仍在字幕弹窗） */}
+            <button
+              onClick={handleToggleSubtitle}
+              className={`p-1 rounded transition ${
+                selectedSubtitleIndex !== -1
+                  ? 'text-cyan-300 bg-cyan-500/20'
+                  : 'text-gray-500 hover:text-cyan-300'
+              }`}
+              title={
+                subtitleStreams.length === 0
+                  ? '字幕开关 (当前视频无可用文本字幕)'
+                  : selectedSubtitleIndex !== -1
+                    ? '字幕：开 → 点击关闭'
+                    : '字幕：关 → 点击开启'
+              }
+            >
+              <Subtitles size={13} />
+            </button>
+
+            {/* 三屏取中（三竖屏拼接横屏视频：窗口转竖屏只看中间一屏） */}
+            {!isMaximized && (
+              <button
+                onClick={handleToggleCropThird}
+                className={`p-1 rounded transition ${
+                  cropThird
+                    ? 'text-amber-300 bg-amber-500/25'
+                    : 'text-gray-400 hover:text-amber-300'
+                }`}
+                title="三屏取中 (三竖屏拼接横屏视频：只看中间一屏)"
+              >
+                <Crop size={13} />
               </button>
             )}
           </div>

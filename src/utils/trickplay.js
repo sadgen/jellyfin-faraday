@@ -137,6 +137,28 @@ export function preloadTrickplaySprite(imageUrl) {
 }
 
 /**
+ * 整片雪碧图预热（jellow「缩略图全部预切到内存」的 web 等价）：
+ * 开窗时把当前条目的全部 Trickplay 分块图用 Image 预载进浏览器缓存，
+ * 滑动 seek 时缩略图零网络等待。上限 40 张防超长片刷爆缓存。
+ */
+export function preloadAllTrickplaySprites(item) {
+  if (!item || typeof Image === 'undefined' || !jellyfin.auth.serverUrl) return;
+  const tp = getTrickplayInfo(item);
+  if (!tp.hasTrickplay) return;
+  const durationSec = item.RunTimeTicks ? item.RunTimeTicks / 10000000 : 0;
+  if (!durationSec) return;
+  const targetId = tp.id || item.Id;
+  const totalTiles = Math.floor(durationSec / tp.interval);
+  const isSprite = tp.cols > 1 && tp.rows > 1;
+  const tilesPerSheet = Math.max(1, tp.cols * tp.rows);
+  const sheetCount = isSprite ? Math.ceil(totalTiles / tilesPerSheet) : totalTiles + 1;
+  const count = Math.min(sheetCount, 40);
+  for (let i = 0; i < count; i++) {
+    preloadTrickplaySprite(`${jellyfin.auth.serverUrl}/Videos/${targetId}/Trickplay/${tp.width}/${i}.jpg?ApiKey=${jellyfin.auth.token}&MediaSourceId=${targetId}`);
+  }
+}
+
+/**
  * Calculate sprite URL and CSS background coordinates for a given playback time in seconds
  */
 export function getTrickplayStyle(item, timeInSeconds, options = {}) {

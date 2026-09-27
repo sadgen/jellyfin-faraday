@@ -21,6 +21,7 @@ import SubtitleModal from './SubtitleModal';
 import DeleteConfirmModal from './DeleteConfirmModal';
 import QuickTagSelector from './QuickTagSelector';
 import { detectVrVideo } from '../utils/vrDetector';
+import { preloadAllTrickplaySprites } from '../utils/trickplay';
 import { probeStreamStatus, describeVideoMediaError } from '../utils/playbackDiagnostics';
 import { PlaybackSessionController } from '../utils/playbackSessionController';
 import {
@@ -680,6 +681,11 @@ export default function FloatingVideoWindow({
     if (currentPartId === item?.Id) return item;
     return partDetail || currentPlayingPart;
   }, [currentPartId, item, partDetail, currentPlayingPart]);
+
+  // Trickplay 全量预热：开窗/换分段即预载全部雪碧图，滑动 seek 缩略图零等待
+  useEffect(() => {
+    if (trickplayItem) preloadAllTrickplaySprites(trickplayItem);
+  }, [trickplayItem]);
 
   // Load and play video when item/part changes + Report Playback to Jellyfin
   useEffect(() => {
@@ -1907,7 +1913,7 @@ export default function FloatingVideoWindow({
       {/* Video Viewport — 三屏取中时切换为竖屏面板比例；按住左键即可拖动窗口 (PotPlayer 式)，触摸手势由 useTouchGestures 接管 */}
       <div
         ref={videoViewportRef}
-        className={`relative w-full bg-black flex items-center justify-center overflow-hidden touch-none select-none cursor-move ${isMaximized ? 'flex-1 min-h-0' : ''}`}
+        className={`relative w-full bg-black flex items-center justify-center overflow-hidden touch-none select-none cursor-move ${(isMaximized || cropFill) ? 'flex-1 min-h-0' : ''}`}
         style={{
           aspectRatio: (isMaximized || cropFill) ? undefined : (cropThird ? (videoAspect > 0 ? videoAspect / 3 : 16 / 27) : 16 / 9),
           filter: `brightness(${brightness})`,

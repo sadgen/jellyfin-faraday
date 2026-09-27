@@ -7,17 +7,6 @@ import { TOUCH_SPEED_STEPS } from '../utils/qualityPresets';
  */
 export const SPEED_OPTIONS = TOUCH_SPEED_STEPS;
 
-function formatSec(seconds) {
-  if (!seconds || isNaN(seconds)) return '00:00';
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
-  return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-}
-
-// jellow 手感：滑动 seek 速度 90ms/px，50px 死区（阈值内不产生 seek 量，微滑不误触）
-const SEEK_MS_PER_PX = 0.09;
-const SEEK_DEADZONE_PX = 50;
-
 /** 指示器增量段：+MM:SS / -MM:SS */
 function formatDelta(deltaSec) {
   const s = Math.abs(Math.round(deltaSec));
@@ -238,11 +227,9 @@ export function useTouchGestures({
     e.preventDefault();
 
     if (touchActionRef.current === 'seek') {
-      // jellow 手感：位移 × 90ms/px，50px 死区从 0 起算；滑动过程只刷文字+缩略图，松手才 seek 一次
+      // jellow 真参数：整窗宽一划 = 全片时长；滑动过程只刷文字+缩略图，松手才 seek 一次
       const videoDuration = duration || (videoRef.current ? videoRef.current.duration : 100);
-      const dir = dx >= 0 ? 1 : -1;
-      const effDx = dir * Math.max(0, Math.abs(dx) - SEEK_DEADZONE_PX);
-      const seekDelta = effDx * SEEK_MS_PER_PX;
+      const seekDelta = (dx / start.rectWidth) * videoDuration;
       const targetTime = Math.max(0, Math.min(videoDuration, initialValueRef.current + seekDelta));
       const percent = videoDuration > 0 ? targetTime / videoDuration : 0;
 

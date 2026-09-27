@@ -25,7 +25,7 @@ import { preloadAllTrickplaySprites } from '../utils/trickplay';
 import { probeStreamStatus, describeVideoMediaError } from '../utils/playbackDiagnostics';
 import { PlaybackSessionController } from '../utils/playbackSessionController';
 import {
-  Play, Pause, SkipForward, Volume2, VolumeX,
+  Play, Pause, SkipForward, Volume1, Volume2, VolumeX,
   X, ExternalLink, Star, Eye, EyeOff, Image as ImageIcon,
   Glasses, Trash2, FastForward, Sun, Zap, Gauge, RefreshCw, Subtitles, Film,
   Tag, Scaling, FlipHorizontal, MoreVertical, SlidersHorizontal, Crop, RectangleHorizontal
@@ -107,6 +107,9 @@ export default function FloatingVideoWindow({
   const cropFillRef = useRef(false);
   cropFillRef.current = cropFill;
 
+  // 音量竖向滑杆弹层
+  const [showVolumePop, setShowVolumePop] = useState(false);
+
 
   // 横屏：元素全屏 + 锁定横向（Android Chrome 支持 orientation.lock；桌面仅全屏）
   const [isLandscape, setIsLandscape] = useState(false);
@@ -185,7 +188,7 @@ export default function FloatingVideoWindow({
     const mobile = window.innerWidth < 768;
     const margin = mobile ? 0 : 16;
     const top = mobile ? 64 : 72;
-    const bottomGap = mobile ? 68 : 8;
+    const bottomGap = mobile ? 0 : 8;
     const width = window.innerWidth - margin;
     // 可用区先扣除窗内 chrome（头部+控制条）高度，根节点 = 可用区 + chrome，
     // 保证 footer 底边恰好贴在导航栏上方（此前多算一层 chromeH 导致控制条被导航栏挡住）
@@ -743,6 +746,8 @@ export default function FloatingVideoWindow({
     setCropFill(true);
     isCustomPositionRef.current = false;
     setLayout(computeCropFillLayout());
+    // 取中铺满是独占形态：点下一部影片新开的取中窗会把旧窗关掉
+    if (onExclusiveCrop) onExclusiveCrop(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1356,6 +1361,101 @@ export default function FloatingVideoWindow({
 
   const isFavorite = !!item?.UserData?.IsFavorite;
 
+  // 头部紧凑控制组（footer 控制行已移除）：横屏(左一) → 音量 → 播放/暂停 → 字幕 → 取中
+  const headerControls = (
+    <>
+      {isMobileViewport && (
+        <button
+          onClick={handleLandscapeToggle}
+          className={`p-1 rounded transition ${
+            isLandscape
+              ? 'text-cyan-300 bg-cyan-500/25'
+              : 'text-gray-400 hover:text-cyan-300'
+          }`}
+          title="横屏（全屏并锁定横向）"
+        >
+          <RectangleHorizontal size={13} />
+        </button>
+      )}
+
+      <div className="relative">
+        <button
+          onClick={() => setShowVolumePop(prev => !prev)}
+          className="p-1 rounded text-gray-400 hover:text-cyan-300 transition"
+          title={`音量 ${Math.round((isMuted ? 0 : volume) * 100)}%`}
+        >
+          {isMuted || volume === 0
+            ? <VolumeX size={13} className="text-red-400" />
+            : volume < 0.5
+              ? <Volume1 size={13} />
+              : <Volume2 size={13} />}
+        </button>
+        {showVolumePop && (
+          <>
+            <div className="fixed inset-0 z-40" onClick={() => setShowVolumePop(false)} />
+            <div className="absolute bottom-full right-0 mb-2 z-50 bg-[#0d131f] border border-white/15 rounded-xl px-3 py-2 shadow-2xl flex items-center justify-center h-28">
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                value={isMuted ? 0 : volume}
+                onChange={(e) => {
+                  const v = parseFloat(e.target.value);
+                  setVolume(v);
+                  if (isMuted && v > 0) toggleMute();
+                }}
+                className="w-24 rotate-[270deg] accent-cyan-400 cursor-pointer appearance-none bg-white/20 rounded-lg h-1"
+              />
+            </div>
+          </>
+        )}
+      </div>
+
+      <button
+        onClick={togglePlay}
+        className="p-1 hover:bg-white/10 rounded text-white transition"
+        title={isPlaying ? '暂停' : '播放'}
+      >
+        {isPlaying ? <Pause size={13} /> : <Play size={13} />}
+      </button>
+
+      <button
+        onClick={handleToggleSubtitle}
+        className={`p-1 rounded transition ${
+          subtitleStreams.length === 0
+            ? 'text-gray-700'
+            : selectedSubtitleIndex !== -1
+              ? 'text-cyan-300 bg-cyan-500/20'
+              : 'text-gray-400 hover:text-cyan-300'
+        }`}
+        title={
+          subtitleStreams.length === 0
+            ? '字幕开关 (当前视频无可用文本字幕)'
+            : selectedSubtitleIndex !== -1
+              ? '字幕：开 → 点击关闭'
+              : '字幕：关 → 点击开启'
+        }
+      >
+        <Subtitles size={13} />
+      </button>
+
+      {!isMaximized && (
+        <button
+          onClick={handleToggleCropThird}
+          className={`p-1 rounded transition ${
+            cropThird
+              ? 'text-amber-300 bg-amber-500/25'
+              : 'text-gray-400 hover:text-amber-300'
+          }`}
+          title="三屏取中 (独占页面竖屏铺满；手机陀螺仪左右转动可环视三屏全景)"
+        >
+          <Crop size={13} />
+        </button>
+      )}
+    </>
+  );
+
   return (
     <div
       ref={containerRef}
@@ -1449,9 +1549,10 @@ export default function FloatingVideoWindow({
         </div>
 
         <div className="flex items-center gap-1">
-          {/* 手机端或窄窗模式：收拢为「更多功能」下拉菜单，仅保留 更多 / 下一个 / 关闭 3 枚核心按钮 */}
+          {/* 手机端或窄窗模式：控制全部上收头部，图标化无文字 */}
           {(isMobileViewport || layout.width < 460) ? (
             <>
+          {headerControls}
               {/* 更多功能下拉菜单 */}
               <div className="relative">
                 <button
@@ -1696,6 +1797,8 @@ export default function FloatingVideoWindow({
             </>
           ) : (
             <>
+              {headerControls}
+
               {/* Fast-Forward / Rewind Speed Tier Selector (3 档: 慢 5s, 中 15s, 快 30s) */}
               <div className="relative">
                 <button
@@ -2191,7 +2294,7 @@ export default function FloatingVideoWindow({
 
           <div
             ref={scrubberRef}
-            className={`w-full bg-white/20 rounded-full cursor-pointer transition-all relative overflow-hidden group/bar touch-none ${hoverScrubberTime !== null || isWheelSeeking ? 'h-2.5' : 'h-1'}`}
+            className={`w-full bg-white/20 rounded-full cursor-pointer transition-all relative overflow-hidden group/bar touch-none ${hoverScrubberTime !== null || isWheelSeeking ? 'h-2' : 'h-0.5'}`}
             onMouseDown={handleScrubberMouseDown}
             onMouseMove={handleScrubberMouseMove}
             onMouseLeave={handleScrubberMouseLeave}
@@ -2207,125 +2310,7 @@ export default function FloatingVideoWindow({
           </div>
         </div>
 
-        {/* Controls Row（窄窗时右侧按钮组自动换行，音量滑块/时间/切片文字按窗宽收起） */}
-        <div className="flex flex-wrap items-center justify-between gap-y-0.5 text-gray-300">
-          <div className="flex items-center gap-1">
-            <button
-              onClick={togglePlay}
-              className="p-1 hover:bg-white/10 rounded text-white transition"
-            >
-              {isPlaying ? <Pause size={14} /> : <Play size={14} />}
-            </button>
 
-            <button
-              onClick={toggleMute}
-              className="p-1 hover:bg-white/10 rounded text-white transition"
-            >
-              {isMuted ? <VolumeX size={14} className="text-gray-400" /> : <Volume2 size={14} className="text-cyan-400" />}
-            </button>
-
-            {/* 音量滑块（记忆并随播放上报真实音量；窄窗收起，手机有手势调节） */}
-            {layout.width >= 400 && (
-              <input
-                type="range"
-                min={0}
-                max={1}
-                step={0.05}
-                value={isMuted ? 0 : volume}
-                onChange={(e) => setVolume(parseFloat(e.target.value))}
-                className="w-12 accent-cyan-400 h-1 bg-white/20 rounded-lg cursor-pointer appearance-none"
-                title={`音量 ${Math.round((isMuted ? 0 : volume) * 100)}%`}
-                onClick={(e) => e.stopPropagation()}
-              />
-            )}
-
-            {layout.width >= 300 && (
-              <span className="font-mono text-[11px] text-gray-400">
-                {currentTimeText} / {durationText}
-              </span>
-            )}
-          </div>
-
-          <div className="flex items-center gap-1">
-            {/* Playback Speed */}
-            <select
-              value={playbackSpeed}
-              onChange={(e) => {
-                const sp = parseFloat(e.target.value);
-                setPlaybackSpeed(sp);
-                if (videoRef.current) videoRef.current.playbackRate = sp;
-              }}
-              className="bg-black/60 px-1.5 py-0.5 rounded border border-white/10 text-cyan-300 text-[10px] font-mono focus:outline-none cursor-pointer"
-            >
-              {PLAYBACK_SPEED_OPTIONS.map(sp => (
-                <option key={sp} value={sp} className="bg-slate-900">{sp}x</option>
-              ))}
-            </select>
-
-            <button
-              onClick={handleSkipNext}
-              className="px-2.5 py-0.5 rounded-lg bg-cyan-950 hover:bg-cyan-900 border border-cyan-500/40 text-cyan-300 text-[11px] font-medium transition flex items-center gap-1"
-              title={
-                partsList.length > 1 && currentPartIndex < partsList.length - 1
-                  ? `播放下一段切片 (Part ${currentPartIndex + 2}/${partsList.length})`
-                  : '换一个 (下一个顶上来)'
-              }
-            >
-              <SkipForward size={12} />
-              {partsList.length > 1 && (
-                <span>P{currentPartIndex + 1}/{partsList.length}</span>
-              )}
-            </button>
-
-            {isMobileViewport && (
-              <button
-                onClick={handleLandscapeToggle}
-                className={`p-1 rounded transition ${
-                  isLandscape
-                    ? 'text-cyan-300 bg-cyan-500/25'
-                    : 'text-gray-400 hover:text-cyan-300'
-                }`}
-                title="横屏（全屏并锁定横向）"
-              >
-                <RectangleHorizontal size={13} />
-              </button>
-            )}
-
-            {/* 字幕快捷开关（右下角一键静默/恢复，管理与下载仍在字幕弹窗） */}
-            <button
-              onClick={handleToggleSubtitle}
-              className={`p-1 rounded transition ${
-                selectedSubtitleIndex !== -1
-                  ? 'text-cyan-300 bg-cyan-500/20'
-                  : 'text-gray-500 hover:text-cyan-300'
-              }`}
-              title={
-                subtitleStreams.length === 0
-                  ? '字幕开关 (当前视频无可用文本字幕)'
-                  : selectedSubtitleIndex !== -1
-                    ? '字幕：开 → 点击关闭'
-                    : '字幕：关 → 点击开启'
-              }
-            >
-              <Subtitles size={13} />
-            </button>
-
-            {/* 三屏取中（三竖屏拼接横屏视频：窗口转竖屏只看中间一屏） */}
-            {!isMaximized && (
-              <button
-                onClick={handleToggleCropThird}
-                className={`p-1 rounded transition ${
-                  cropThird
-                    ? 'text-amber-300 bg-amber-500/25'
-                    : 'text-gray-400 hover:text-amber-300'
-                }`}
-                title="三屏取中 (独占页面竖屏铺满；手机陀螺仪左右转动可环视三屏全景)"
-              >
-                <Crop size={13} />
-              </button>
-            )}
-          </div>
-        </div>
       </div>
 
       {/* SE Corner Resizer Handle (Bottom-Right) */}

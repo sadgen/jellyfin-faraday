@@ -21,8 +21,7 @@ import {
   ArrowUpDown, X, RefreshCw, Layers, LayoutGrid,
   Grid, List, MoreVertical, Calendar,
   Users, Tag, Check, ChevronRight, ChevronDown,
-  SlidersHorizontal, Info, RotateCcw, History, Zap, ShieldAlert, Sparkles, Wand2
-} from 'lucide-react';
+  SlidersHorizontal, Info, RotateCcw, History, Zap, ShieldAlert, Sparkles, Wand2, Shuffle, Settings } from 'lucide-react';
 
 const SUB_TABS = [
   { id: 'items', label: '影片', icon: Film },
@@ -935,6 +934,7 @@ export default function LibraryView({
   onToggleAutoRefill,
   onOpenRandom2Windows,
   onOpenRandom3Windows,
+  onOpenSettings,
   onPlayRandomItem,
   onPlaySingleItem,
   onOpenFloatingWindow,
@@ -1649,9 +1649,19 @@ export default function LibraryView({
               className="flex items-center gap-1 px-2 sm:px-3.5 py-1 sm:py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 text-xs font-bold shadow-lg transition transform hover:scale-[1.02]"
               title={isMobileViewport ? "随机补充悬浮窗至 2 窗 (保留当前窗口，缺几补几)" : "随机补充悬浮窗至 1大+2小 3 窗 (保留当前窗口，缺几补几)"}
             >
-              <Play size={12} className="fill-amber-400 text-amber-400" />
-              <span>{isMobileViewport ? '随机2窗' : '随机 3 窗'}</span>
+              <Shuffle size={13} className="fill-amber-400 text-amber-400" />
+              <span className="text-[10px] font-black leading-none">{isMobileViewport ? '2' : '3'}</span>
             </button>
+
+            {onOpenSettings && (
+              <button
+                onClick={onOpenSettings}
+                className="p-1.5 sm:p-2 rounded-xl bg-black/40 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-cyan-300 transition"
+                title="设置（含观影统计）"
+              >
+                <Settings size={13} />
+              </button>
+            )}
 
             {/* Default Playback Settings Popover (Portal: 浮窗之下会遮罩,见 togglePlaybackDefaultsMenu 注释) */}
             <div className="relative" ref={playbackDefaultsBtnRef}>

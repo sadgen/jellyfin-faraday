@@ -15,7 +15,7 @@ export function calculateSlotStyle(slotIndex) {
 
   const padding = 12;
   const headerOffset = 64; // Top header navigation bar offset
-  const bottomOffset = 60; // Bottom space
+  const bottomOffset = 8; // Bottom space（底部导航栏已移除）
   const gap = 12;
   const uiH = 34 + 38; // Header (~34px) + Footer (~38px)
 

@@ -20,7 +20,6 @@ import VideoPlayerModal from './components/VideoPlayerModal';
 import VrPlayerModal from './components/VrPlayerModal';
 import ItemDetailModal from './components/ItemDetailModal';
 import StatsModal from './components/StatsModal';
-import MobileNavBar from './components/MobileNavBar';
 import ErrorBoundary from './components/ErrorBoundary';
 import { AlertCircle, Loader2, CheckCircle2, XCircle } from 'lucide-react';
 
@@ -367,7 +366,8 @@ export default function App() {
           slotIndex: 2,
           item,
           startSecond,
-          timestamp: Date.now()
+          timestamp: Date.now(),
+          autoCrop: typeof window !== 'undefined' && window.innerWidth < 768
         }
       ];
     });
@@ -835,6 +835,7 @@ export default function App() {
             onFilteredItemsChange={handleFilteredItemsChange}
             onOpenRandom2Windows={handleOpenRandom2Windows}
             onOpenRandom3Windows={handleOpenRandom3Windows}
+          onOpenSettings={() => setIsSettingsModalOpen(true)}
             onPlayRandomItem={handlePlayRandomItem}
             onPlaySingleItem={handlePlaySingleItem}
             onOpenFloatingWindow={handleOpenFloatingWindow}
@@ -867,18 +868,6 @@ export default function App() {
           onSwitchItem={handleSwitchWindowItem}
         />
 
-        {/* Mobile Bottom Navigation Bar */}
-        <MobileNavBar
-          onOpenRandomPlay={handlePlayRandomItem}
-          onOpenRandom2Windows={handleOpenRandom2Windows}
-          onOpenRandom3Windows={handleOpenRandom3Windows}
-          onOpenSearch={() => {
-            const searchInput = document.querySelector('input[type="text"]');
-            if (searchInput) searchInput.focus();
-          }}
-          onOpenSettings={() => setIsSettingsModalOpen(true)}
-          onOpenStats={() => setShowStatsModal(true)}
-        />
 
         {/* Full-Screen Theater Video Player Modal */}
         {modalPlayingItem && (

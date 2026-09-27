@@ -1,5 +1,4 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { getSeekSwipeSpan } from '../utils/seekSettings';
 import { TOUCH_SPEED_STEPS } from '../utils/qualityPresets';
 
 /**
@@ -13,6 +12,24 @@ function formatSec(seconds) {
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);
   return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+}
+
+// jellow 手感：滑动 seek 速度 90ms/px，50px 死区（阈值内不产生 seek 量，微滑不误触）
+const SEEK_MS_PER_PX = 0.09;
+const SEEK_DEADZONE_PX = 50;
+
+/** 指示器增量段：+MM:SS / -MM:SS */
+function formatDelta(deltaSec) {
+  const s = Math.abs(Math.round(deltaSec));
+  const sign = deltaSec < 0 ? '-' : '+';
+  return `${sign}${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+}
+
+/** 指示器绝对段：[HH:MM:SS] */
+function formatClock(seconds) {
+  if (!seconds || isNaN(seconds)) return '00:00:00';
+  const s = Math.max(0, Math.floor(seconds));
+  return `${String(Math.floor(s / 3600)).padStart(2, '0')}:${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
 }
 
 /**
@@ -198,8 +215,9 @@ export function useTouchGestures({
     if (isBoostedRef.current) return;
 
     // Determine gesture direction on first significant movement (> 12px)
+    // 轴判定宽松（jellow 同款）：|dy| < 2|dx| 即算横向 seek，斜着划也生效
     if (!touchActionRef.current && Math.hypot(dx, dy) > 12) {
-      if (Math.abs(dx) > Math.abs(dy)) {
+      if (Math.abs(dx) * 2 > Math.abs(dy)) {
         // Horizontal -> Seek
         touchActionRef.current = 'seek';
         initialValueRef.current = videoRef.current ? videoRef.current.currentTime : currentTime;
@@ -220,18 +238,18 @@ export function useTouchGestures({
     e.preventDefault();
 
     if (touchActionRef.current === 'seek') {
-      // Horizontal swipe: delta of full width = swipeSpan seconds seek (based on slow/medium/fast tier)
+      // jellow 手感：位移 × 90ms/px，50px 死区从 0 起算；滑动过程只刷文字+缩略图，松手才 seek 一次
       const videoDuration = duration || (videoRef.current ? videoRef.current.duration : 100);
-      const swipeSpan = customSwipeSpan || getSeekSwipeSpan();
-      const seekDelta = (dx / start.rectWidth) * swipeSpan;
+      const dir = dx >= 0 ? 1 : -1;
+      const effDx = dir * Math.max(0, Math.abs(dx) - SEEK_DEADZONE_PX);
+      const seekDelta = effDx * SEEK_MS_PER_PX;
       const targetTime = Math.max(0, Math.min(videoDuration, initialValueRef.current + seekDelta));
-      const deltaSec = Math.round(targetTime - initialValueRef.current);
       const percent = videoDuration > 0 ? targetTime / videoDuration : 0;
 
       setGestureState({
         type: 'seek',
         value: targetTime,
-        text: `${deltaSec >= 0 ? '+' : ''}${deltaSec}s (${formatSec(targetTime)} / ${formatSec(videoDuration)})`,
+        text: `${formatDelta(targetTime - initialValueRef.current)} [${formatClock(targetTime)}]`,
         fading: false
       });
 
@@ -266,7 +284,7 @@ export function useTouchGestures({
         fading: false
       });
     }
-  }, [currentTime, duration, brightness, normalSpeed, videoRef, onSeekPreview, applySpeedStep, onLongPressDragMove, customSwipeSpan]);
+  }, [currentTime, duration, brightness, normalSpeed, videoRef, onSeekPreview, applySpeedStep, onLongPressDragMove]);
 
   const handleTouchEnd = useCallback(() => {
     if (longPressTimerRef.current) {

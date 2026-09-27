@@ -8,7 +8,7 @@ import { useVolumeControl } from '../hooks/useVolumeControl';
 import { useMediaPlaybackInfo } from '../hooks/useMediaPlaybackInfo';
 import { useSubtitleTracks } from '../hooks/useSubtitleTracks';
 import { useViewport } from '../hooks/useViewport';
-import { SEEK_SPEED_OPTIONS, getStoredSeekSpeed, setStoredSeekSpeed, getSeekStepSeconds, getSeekSwipeSpan } from '../utils/seekSettings';
+import { SEEK_SPEED_OPTIONS, getStoredSeekSpeed, setStoredSeekSpeed, getSeekStepSeconds } from '../utils/seekSettings';
 import { createSeekLock } from '../utils/seekLock';
 import { getPlaybackDefaults } from '../utils/playbackDefaults';
 import { calculateSmartStartTime } from '../utils/smartStartHelper';
@@ -564,7 +564,6 @@ export default function FloatingVideoWindow({
       setIsLongPressDragging(false);
       setIsDragging(false);
     },
-    customSwipeSpan: getSeekSwipeSpan(seekSpeed),
     onSeek: (target) => {
       seekLockRef.current.arm(target);
       sessionControllerRef.current?.seek(target);

@@ -17,7 +17,7 @@ import QuickTagSelector from './QuickTagSelector';
 import { detectVrVideo } from '../utils/vrDetector';
 import { probeStreamStatus, describeVideoMediaError } from '../utils/playbackDiagnostics';
 import { QUALITY_OPTIONS, PLAYBACK_SPEED_OPTIONS } from '../utils/qualityPresets';
-import { SEEK_SPEED_OPTIONS, getStoredSeekSpeed, setStoredSeekSpeed, getSeekStepSeconds, getSeekSwipeSpan } from '../utils/seekSettings';
+import { SEEK_SPEED_OPTIONS, getStoredSeekSpeed, setStoredSeekSpeed, getSeekStepSeconds } from '../utils/seekSettings';
 import { createSeekLock } from '../utils/seekLock';
 import { getPlaybackDefaults } from '../utils/playbackDefaults';
 import { calculateSmartStartTime } from '../utils/smartStartHelper';
@@ -316,7 +316,6 @@ export default function VideoPlayerModal({
     containerRef,
     duration: rawDuration,
     currentTime: videoRef.current?.currentTime || 0,
-    customSwipeSpan: getSeekSwipeSpan(seekSpeed),
     onSeek: (target) => {
       seekLockRef.current.arm(target);
       sessionControllerRef.current?.seek(target);

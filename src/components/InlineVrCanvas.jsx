@@ -11,6 +11,31 @@ export const VR_MODES = [
   { id: 'plane_cinema', label: '📺 虚拟曲面巨幕' }
 ];
 
+// three.js DeviceOrientationControls 同款换算：设备欧拉角 → 相机四元数，
+// 并按屏幕旋转角（横屏 90°/270°）补偿轴向。朴素的 alpha→yaw 映射在横握手机时
+// 左右/俯仰轴完全错乱，这是"陀螺仪用起来不对"的主因。
+const Z_AXIS = new THREE.Vector3(0, 0, 1);
+const Y_AXIS = new THREE.Vector3(0, 1, 0);
+const FLIP_X = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5));
+const _euler = new THREE.Euler();
+const _qScreen = new THREE.Quaternion();
+function deviceOrientationToQuat(alphaDeg, betaDeg, gammaDeg, screenAngleDeg, out) {
+  _euler.set(
+    THREE.MathUtils.degToRad(betaDeg),
+    THREE.MathUtils.degToRad(alphaDeg),
+    -THREE.MathUtils.degToRad(gammaDeg),
+    'YXZ'
+  );
+  out.setFromEuler(_euler);
+  out.multiply(FLIP_X);
+  out.multiply(_qScreen.setFromAxisAngle(Z_AXIS, -THREE.MathUtils.degToRad(screenAngleDeg)));
+  return out;
+}
+function getScreenAngleDeg() {
+  const angle = window.screen?.orientation?.angle ?? window.orientation ?? 0;
+  return angle || 0;
+}
+
 export default function InlineVrCanvas({
   videoRef,
   isActive,
@@ -41,6 +66,13 @@ export default function InlineVrCanvas({
   const [_fov, setFov] = useState(100);
   const [isGyroActive, setIsGyroActive] = useState(false);
   const [swapEyes, setSwapEyes] = useState(false);
+
+  // 陀螺仪（四元数模式）：gyroQuat = 当前设备朝向，recenterQuat = 零点校准偏置。
+  // 渲染循环取 camera.quaternion = recenter × gyro；拖拽拖动 recenter 实现手动转向。
+  const isGyroActiveRef = useRef(false);
+  isGyroActiveRef.current = isGyroActive;
+  const gyroQuatRef = useRef(null);
+  const recenterQuatRef = useRef(null);
 
   useEffect(() => {
     if (initialMode) {
@@ -176,14 +208,19 @@ export default function InlineVrCanvas({
       if (!isRunning) return;
       animFrameRef.current = requestAnimationFrame(animate);
 
-      latRef.current = Math.max(-85, Math.min(85, latRef.current));
-      phiRef.current = THREE.MathUtils.degToRad(90 - latRef.current);
-      thetaRef.current = THREE.MathUtils.degToRad(lonRef.current);
+      if (isGyroActiveRef.current && recenterQuatRef.current && gyroQuatRef.current) {
+        // 陀螺仪模式：视图朝向 = 零点校准偏置 × 设备朝向
+        camera.quaternion.copy(recenterQuatRef.current).multiply(gyroQuatRef.current);
+      } else {
+        latRef.current = Math.max(-85, Math.min(85, latRef.current));
+        phiRef.current = THREE.MathUtils.degToRad(90 - latRef.current);
+        thetaRef.current = THREE.MathUtils.degToRad(lonRef.current);
 
-      camera.target.x = 500 * Math.sin(phiRef.current) * Math.cos(thetaRef.current);
-      camera.target.y = 500 * Math.cos(phiRef.current);
-      camera.target.z = 500 * Math.sin(phiRef.current) * Math.sin(thetaRef.current);
-      camera.lookAt(camera.target);
+        camera.target.x = 500 * Math.sin(phiRef.current) * Math.cos(thetaRef.current);
+        camera.target.y = 500 * Math.cos(phiRef.current);
+        camera.target.z = 500 * Math.sin(phiRef.current) * Math.sin(thetaRef.current);
+        camera.lookAt(camera.target);
+      }
 
       renderer.render(scene, camera);
     };
@@ -216,17 +253,29 @@ export default function InlineVrCanvas({
     };
   }, [isActive, setupGeometry, vrMode, videoRef]);
 
+  // 零点校准：把「当前持机朝向」定义为画面正中（即 2D 视角 lon=0/lat=0 的朝向）。
+  // recenter = 画面正中朝向 × 当前设备朝⁻¹，此后转手机即 1:1 转视角。
+  const calibrateGyro = useCallback(() => {
+    const deviceQ = gyroQuatRef.current;
+    if (!deviceQ) return;
+    const centerQ = new THREE.Quaternion().setFromRotationMatrix(
+      new THREE.Matrix4().lookAt(new THREE.Vector3(0, 0, 0), new THREE.Vector3(500, 0, 0), Y_AXIS)
+    );
+    recenterQuatRef.current = centerQ.multiply(deviceQ.clone().invert());
+  }, []);
+  const calibrateGyroRef = useRef(calibrateGyro);
+  calibrateGyroRef.current = calibrateGyro;
+
   // Gyroscope / DeviceOrientation Listener on Mobile
   useEffect(() => {
     if (!isGyroActive) return;
 
     const handleDeviceOrientation = (e) => {
-      if (isUserInteractingRef.current) return;
-      if (e.alpha !== null && e.beta !== null && e.gamma !== null) {
-        // Orientation mapping: alpha is yaw (0-360), beta is pitch (-180 to 180)
-        lonRef.current = -e.alpha;
-        latRef.current = Math.max(-85, Math.min(85, e.beta - 90));
-      }
+      if (e.alpha === null || e.beta === null || e.gamma === null) return;
+      const q = gyroQuatRef.current || (gyroQuatRef.current = new THREE.Quaternion());
+      deviceOrientationToQuat(e.alpha, e.beta, e.gamma, getScreenAngleDeg(), q);
+      // 首个事件自动校准一次：开启陀螺仪的瞬间，正对画面中心
+      if (!recenterQuatRef.current) calibrateGyroRef.current();
     };
 
     window.addEventListener('deviceorientation', handleDeviceOrientation, true);
@@ -250,13 +299,20 @@ export default function InlineVrCanvas({
     } else {
       setIsGyroActive(!isGyroActive);
     }
+    if (isGyroActive) {
+      // 关闭时清掉校准偏置，回落到普通拖拽视角
+      recenterQuatRef.current = null;
+      gyroQuatRef.current = null;
+    }
   };
 
   // Pointer Drag to Look Around (Pitch & Yaw)
+  const lastDragXRef = useRef(0);
   const handlePointerDown = (e) => {
     isUserInteractingRef.current = true;
     onPointerDownPointerXRef.current = e.clientX || e.touches?.[0]?.clientX || 0;
     onPointerDownPointerYRef.current = e.clientY || e.touches?.[0]?.clientY || 0;
+    lastDragXRef.current = onPointerDownPointerXRef.current;
     onPointerDownLonRef.current = lonRef.current;
     onPointerDownLatRef.current = latRef.current;
   };
@@ -265,6 +321,17 @@ export default function InlineVrCanvas({
     if (!isUserInteractingRef.current) return;
     const clientX = e.clientX || e.touches?.[0]?.clientX || 0;
     const clientY = e.clientY || e.touches?.[0]?.clientY || 0;
+
+    if (isGyroActiveRef.current && recenterQuatRef.current) {
+      // 陀螺仪模式下拖拽 = 手动微调零点朝向（水平），与体感追踪叠加
+      const dYaw = THREE.MathUtils.degToRad((lastDragXRef.current - clientX) * 0.18);
+      lastDragXRef.current = clientX;
+      recenterQuatRef.current.premultiply(
+        new THREE.Quaternion().setFromAxisAngle(Y_AXIS, dYaw)
+      );
+      return;
+    }
+
     lonRef.current = (onPointerDownPointerXRef.current - clientX) * 0.18 + onPointerDownLonRef.current;
     latRef.current = (clientY - onPointerDownPointerYRef.current) * 0.18 + onPointerDownLatRef.current;
   };
@@ -291,6 +358,11 @@ export default function InlineVrCanvas({
 
   const resetOrientation = (e) => {
     if (e) e.stopPropagation();
+    if (isGyroActiveRef.current && gyroQuatRef.current) {
+      // 陀螺仪模式下 = 零点校准：当前持机朝向重设为画面正中
+      calibrateGyroRef.current();
+      return;
+    }
     lonRef.current = 0;
     latRef.current = 0;
     fovRef.current = 100;
@@ -365,11 +437,11 @@ export default function InlineVrCanvas({
             <Smartphone size={12} />
           </button>
 
-          {/* Reset Orientation */}
+          {/* Reset Orientation / Gyro Recenter */}
           <button
             onClick={resetOrientation}
             className="p-1 rounded-lg bg-black/80 hover:bg-black border border-white/20 text-gray-300 hover:text-cyan-300 transition"
-            title="视角复位 (居中)"
+            title={isGyroActive ? '零点校准（当前持机朝向 = 画面正中）' : '视角复位 (居中)'}
           >
             <RotateCcw size={12} />
           </button>

@@ -99,10 +99,6 @@ describe('PlaybackSessionController', () => {
       createPlaySessionId: vi.fn(() => `test_session_${sessionCounter++}`),
       getStreamUrl: vi.fn((itemId) => `https://jf.example/stream/${itemId}`),
       getSmoothHlsUrl: vi.fn((itemId, bitrate, opts) => `https://jf.example/hls/${itemId}?bitrate=${bitrate}&ticks=${opts.startTimeTicks || 0}&sess=${opts.playSessionId}`),
-      getRemuxHlsUrl: vi.fn((itemId, opts) => `https://jf.example/remux/${itemId}?sess=${opts.playSessionId}`),
-      getItemPlaybackInfo: vi.fn(async (itemId) => ({
-        MediaSources: [{ MediaStreams: [{ Type: 'Video', Codec: 'h264' }] }]
-      })),
       reportPlayback: vi.fn().mockResolvedValue(true),
       stopTranscoding: vi.fn().mockResolvedValue(true)
     };
@@ -144,7 +140,7 @@ describe('PlaybackSessionController', () => {
     vi.restoreAllMocks();
   });
 
-  it('initializes DirectStream (remux HLS) for h264 sources when streamQuality is direct', async () => {
+  it('initializes DirectPlay correctly when streamQuality is direct', async () => {
     await controller.loadStream({
       itemId: 'item_100',
       streamQuality: 'direct',
@@ -154,19 +150,13 @@ describe('PlaybackSessionController', () => {
       volume: 0.8
     });
 
-    // h264 源走 HLS remux（hls.js 统一缓冲管理），起播定位交给 startPosition 而非 videoEl.src
-    expect(controller.playMethod).toBe('DirectStream');
-    expect(mockJellyfin.getRemuxHlsUrl).toHaveBeenCalledWith(
-      'item_100',
-      expect.objectContaining({ playSessionId: 'test_session_1' })
-    );
-    expect(controller.hlsInstance?.config?.startPosition).toBe(12);
+    expect(controller.playMethod).toBe('DirectPlay');
+    expect(mockVideo.src).toBe('https://jf.example/stream/item_100');
+    expect(mockVideo.currentTime).toBe(12);
     expect(mockVideo.playbackRate).toBe(1.5);
 
     // Started must wait for real playback, not fire on load
     expect(mockJellyfin.reportPlayback).not.toHaveBeenCalled();
-    // hls.js 按 startPosition 定位完成后才触发 playing
-    mockVideo.currentTime = 12;
     mockVideo.fireEvent('playing');
     expect(mockJellyfin.reportPlayback).toHaveBeenCalledWith(
       'item_100',
@@ -174,35 +164,8 @@ describe('PlaybackSessionController', () => {
       false,
       'Started',
       expect.objectContaining({
-        playMethod: 'DirectStream'
+        playMethod: 'DirectPlay'
       })
-    );
-  });
-
-  it('falls back to progressive static stream for non-h264 sources (HEVC/VR) in direct mode', async () => {
-    mockJellyfin.getItemPlaybackInfo.mockResolvedValueOnce({
-      MediaSources: [{ MediaStreams: [{ Type: 'Video', Codec: 'hevc' }] }]
-    });
-
-    await controller.loadStream({
-      itemId: 'item_110',
-      streamQuality: 'direct',
-      initialSeekTime: 7
-    });
-
-    // 非 h264 源（VR 库 HEVC 源）不进 remux：恢复渐进式直连由设备硬解，避免服务器重编码
-    expect(controller.playMethod).toBe('DirectPlay');
-    expect(mockVideo.src).toBe('https://jf.example/stream/item_110');
-    expect(mockVideo.currentTime).toBe(7);
-    expect(mockJellyfin.getRemuxHlsUrl).not.toHaveBeenCalled();
-
-    mockVideo.fireEvent('playing');
-    expect(mockJellyfin.reportPlayback).toHaveBeenCalledWith(
-      'item_110',
-      7,
-      false,
-      'Started',
-      expect.objectContaining({ playMethod: 'DirectPlay' })
     );
   });
 

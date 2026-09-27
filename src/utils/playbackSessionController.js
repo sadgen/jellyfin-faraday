@@ -200,53 +200,35 @@ export class PlaybackSessionController {
     // 否则服务器会为一次开窗记录两次播放
     this.armStartedReport(initialSeekTime);
 
-    // 原画直连按源视频编码分流：
-    // - h264 源 → HLS DirectStream remux（只转容器不重编码，源画质源码率）。渐进式流的缓冲
-    //   完全由浏览器托管且不可配，弱网下码率一贴地板就停顿；hls.js 沿用 60s 前向缓冲策略。
-    // - 其他编码（HEVC/AV1 等，VR 库源几乎全是 HEVC）→ 渐进式静态流，设备硬解原文件。
-    //   hls.js 对 TS 封装的非 h264 编码支持不可靠，且 remux 声明 h264 目标会迫使服务器
-    //   重编码（VR 视频被"自动转码"的根因），非 h264 一律不进 remux。
+    // 原画直连 = 渐进式静态流：起播零服务端开销、seek 走 HTTP Range 即时响应，
+    // 由浏览器/设备硬解原文件（HEVC VR 源同样直接播）。
+    // 曾试验过 HLS DirectStream remux 以换取 hls.js 60s 缓冲垫，但这台服务器
+    // ffmpeg 起任务慢（冷启动可达 30s+），起播与跨缓冲 seek 延迟反而明显劣化，已回退。
     if (streamQuality === 'direct' && audioStreamIndex === null) {
-      let videoCodec = null;
-      try {
-        const info = await this.jellyfin.getItemPlaybackInfo(this.itemId);
-        videoCodec = info?.MediaSources?.[0]?.MediaStreams?.find(s => s.Type === 'Video')?.Codec || null;
-      } catch { /* 查询失败按未知编码处理，走静态直连 */ }
+      this.playMethod = 'DirectPlay';
+      const directUrl = this.jellyfin.getStreamUrl(this.itemId);
 
-      if (videoCodec === 'h264' || videoCodec === 'avc') {
-        this.playMethod = 'DirectStream';
-        const hlsUrl = this.jellyfin.getRemuxHlsUrl(this.itemId, {
-          playSessionId: this.playSessionId,
-          mediaSourceId: this.mediaSourceId,
-          subtitleStreamIndex: this.subtitleStreamIndex
-        });
-        this.initHls(hlsUrl, initialSeekTime, currentGeneration);
-      } else {
-        this.playMethod = 'DirectPlay';
-        const directUrl = this.jellyfin.getStreamUrl(this.itemId);
+      videoEl.removeAttribute('src');
+      videoEl.src = directUrl;
+      if (initialSeekTime > 0) {
+        try {
+          videoEl.currentTime = initialSeekTime;
+        } catch {}
+      }
 
-        videoEl.removeAttribute('src');
-        videoEl.src = directUrl;
-        if (initialSeekTime > 0) {
-          try {
-            videoEl.currentTime = initialSeekTime;
-          } catch {}
-        }
+      this.startHeartbeat();
 
-        this.startHeartbeat();
-
+      videoEl.play().catch(() => {
+        if (this.generationId !== currentGeneration) return;
+        videoEl.muted = true;
         videoEl.play().catch(() => {
           if (this.generationId !== currentGeneration) return;
-          videoEl.muted = true;
-          videoEl.play().catch(() => {
-            if (this.generationId !== currentGeneration) return;
-            // 直连完全失败（如浏览器无该编码硬解），通知上层回退到转码
-            if (this.onAutoDirectFallback) {
-              this.onAutoDirectFallback();
-            }
-          });
+          // 直连完全失败（如浏览器无该编码硬解），通知上层回退到转码
+          if (this.onAutoDirectFallback) {
+            this.onAutoDirectFallback();
+          }
         });
-      }
+      });
     } else {
       this.playMethod = 'Transcode';
       const bitrate = parseInt(streamQuality, 10) || 4000000;
@@ -306,11 +288,7 @@ export class PlaybackSessionController {
           hls.startLoad();
         } else {
           this.destroyHls();
-          // 原画 remux 流不可播（源封装异常等）→ 自动回退到 4M 转码，保持"开窗即看"；
-          // 转码模式的致命错误仍走 onError 展示诊断
-          if (this.playMethod === 'DirectStream' && this.onAutoDirectFallback) {
-            this.onAutoDirectFallback();
-          } else if (this.onError) {
+          if (this.onError) {
             this.onError(data);
           }
         }

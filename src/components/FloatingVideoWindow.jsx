@@ -28,7 +28,7 @@ import {
   Play, Pause, SkipForward, Volume2, VolumeX,
   X, ExternalLink, Star, Eye, EyeOff, Image as ImageIcon,
   Glasses, Trash2, FastForward, Sun, Zap, Gauge, RefreshCw, Subtitles, Film,
-  Tag, Scaling, FlipHorizontal, MoreVertical, SlidersHorizontal, Crop, RectangleHorizontal, Smartphone
+  Tag, Scaling, FlipHorizontal, MoreVertical, SlidersHorizontal, Crop, RectangleHorizontal
 } from 'lucide-react';
 
 function formatTime(seconds) {
@@ -107,26 +107,6 @@ export default function FloatingVideoWindow({
   const cropFillRef = useRef(false);
   cropFillRef.current = cropFill;
 
-  // 陀螺仪统一开关（窗口底部按钮）：VR 全景环视 与 三屏取中全景平移 共用
-  const [gyroOn, setGyroOn] = useState(false);
-  const gyroOnRef = useRef(false);
-  gyroOnRef.current = gyroOn;
-  const handleToggleGyro = async () => {
-    if (!gyroOn && typeof DeviceOrientationEvent !== 'undefined' &&
-        typeof DeviceOrientationEvent.requestPermission === 'function') {
-      try {
-        const permission = await DeviceOrientationEvent.requestPermission();
-        if (permission !== 'granted') {
-          alert('需要陀螺仪权限以支持体感全景转动');
-          return;
-        }
-      } catch (err) {
-        console.warn('Gyro permission error:', err);
-        return;
-      }
-    }
-    setGyroOn(!gyroOn);
-  };
 
   // 横屏：元素全屏 + 锁定横向（Android Chrome 支持 orientation.lock；桌面仅全屏）
   const [isLandscape, setIsLandscape] = useState(false);
@@ -207,12 +187,14 @@ export default function FloatingVideoWindow({
     const top = mobile ? 64 : 72;
     const bottomGap = mobile ? 68 : 8;
     const width = window.innerWidth - margin;
-    const height = Math.max(240, window.innerHeight - top - bottomGap);
+    // 可用区先扣除窗内 chrome（头部+控制条）高度，根节点 = 可用区 + chrome，
+    // 保证 footer 底边恰好贴在导航栏上方（此前多算一层 chromeH 导致控制条被导航栏挡住）
+    const areaH = Math.max(240, window.innerHeight - top - bottomGap - chromeH);
     return {
       left: Math.round(margin / 2),
       top,
       width: Math.round(width),
-      height: Math.round(height + chromeH)
+      height: Math.round(areaH + chromeH)
     };
   }
 
@@ -249,7 +231,7 @@ export default function FloatingVideoWindow({
   // 零点 = 开启瞬间的朝向（显示中屏）；转动 180° ≈ 扫完整幅画面；传感器不可用时静止在中屏
   const gyroHeadingRef = useRef(null);
   useEffect(() => {
-    if (!cropThird || !cropFill || !gyroOn || window.innerWidth >= 768) {
+    if (!cropThird || !cropFill || window.innerWidth >= 768) {
       gyroHeadingRef.current = null;
       return;
     }
@@ -264,12 +246,12 @@ export default function FloatingVideoWindow({
       gyroHeadingRef.current = heading;
       if (d > Math.PI) d -= 2 * Math.PI;
       if (d < -Math.PI) d += 2 * Math.PI;
-      cropPanRef.current = Math.max(0, Math.min(100, cropPanRef.current - d * (100 / Math.PI)));
+      cropPanRef.current = Math.max(0, Math.min(100, cropPanRef.current - d * (200 / Math.PI)));
       if (videoRef.current) videoRef.current.style.objectPosition = `${cropPanRef.current}% 50%`;
     };
     window.addEventListener('deviceorientation', handleDeviceOrientation, true);
     return () => window.removeEventListener('deviceorientation', handleDeviceOrientation, true);
-  }, [cropThird, cropFill, gyroOn]);
+  }, [cropThird, cropFill]);
 
   // 取中铺满状态下双指张开放大 → 手机全屏（Android Chrome 的元素级全屏可用；
   // iPhone Safari 不支持元素级 requestFullscreen，表达式静默跳过）；双指收拢退出
@@ -279,9 +261,7 @@ export default function FloatingVideoWindow({
     if (!el || !cropFill) return;
     let startDist = 0;
     let tracking = false;
-    let panDrag = false;
     const pinchDist = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
-    let panStartX = 0;
     const onStart = (e) => {
       if (e.touches.length === 2) {
         startDist = pinchDist(e.touches);
@@ -289,22 +269,8 @@ export default function FloatingVideoWindow({
       } else {
         tracking = false;
       }
-      // 取中铺满：单指拖动 = 全景平移（接管，屏蔽 seek/亮度手势）
-      if (e.touches.length === 1) {
-        panStartX = e.touches[0].clientX;
-        panDrag = true;
-        e.stopPropagation();
-      } else {
-        panDrag = false;
-      }
     };
     const onMove = (e) => {
-      if (panDrag && e.touches.length === 1) {
-        e.stopPropagation();
-        applyCropPanByDrag(e.touches[0].clientX - panStartX);
-        panStartX = e.touches[0].clientX;
-        return;
-      }
       if (!tracking || e.touches.length !== 2 || startDist <= 0) return;
       const d = pinchDist(e.touches);
       if (d > startDist * 1.3 && !document.fullscreenElement) {
@@ -316,16 +282,11 @@ export default function FloatingVideoWindow({
         document.exitFullscreen().catch(() => {});
       }
     };
-    const onEnd = () => { panDrag = false; tracking = false; };
     el.addEventListener('touchstart', onStart, { passive: true });
     el.addEventListener('touchmove', onMove, { passive: true });
-    el.addEventListener('touchend', onEnd, { passive: true });
-    el.addEventListener('touchcancel', onEnd, { passive: true });
     return () => {
       el.removeEventListener('touchstart', onStart);
       el.removeEventListener('touchmove', onMove);
-      el.removeEventListener('touchend', onEnd);
-      el.removeEventListener('touchcancel', onEnd);
     };
   }, [cropFill]);
 
@@ -608,6 +569,7 @@ export default function FloatingVideoWindow({
   const { launchPlayer } = useExternalPlayer();
 
   const dragStartPosRef = useRef({ left: 0, top: 0 });
+  const panLastXRef = useRef(null);
 
   // Mobile Touch Gestures with real-time Trickplay preview & Long-press window drag
   const { gestureState, brightness, touchHandlers } = useTouchGestures({
@@ -619,12 +581,23 @@ export default function FloatingVideoWindow({
     enableLongPressDrag: true,
     onLongPressDragStart: () => {
       setIsLongPressDragging(true);
-      setIsDragging(true);
-      isCustomPositionRef.current = true;
-      if (onBringToFront) onBringToFront(id);
-      dragStartPosRef.current = { left: layout.left, top: layout.top };
+      if (!cropFillRef.current) {
+        setIsDragging(true);
+        isCustomPositionRef.current = true;
+        if (onBringToFront) onBringToFront(id);
+        dragStartPosRef.current = { left: layout.left, top: layout.top };
+      } else {
+        panLastXRef.current = null;
+      }
     },
-    onLongPressDragMove: ({ dx, dy }) => {
+    onLongPressDragMove: ({ dx, dy, clientX }) => {
+      if (cropFillRef.current) {
+        // 取中铺满：长按拖动 = 全景平移（窗口位置固定）
+        if (panLastXRef.current === null) panLastXRef.current = clientX - dx;
+        applyCropPanByDrag(clientX - panLastXRef.current);
+        panLastXRef.current = clientX;
+        return;
+      }
       const newX = Math.max(0, Math.min(window.innerWidth - 60, dragStartPosRef.current.left + dx));
       const newY = Math.max(50, Math.min(window.innerHeight - 60, dragStartPosRef.current.top + dy));
       setLayout(prev => ({ ...prev, left: newX, top: newY }));
@@ -641,6 +614,9 @@ export default function FloatingVideoWindow({
       setHoverScrubberTime(targetTime);
       setHoverScrubberPercent(percent);
       setIsWheelSeeking(true);
+      // 预览时进度条与时间同步跟随，让用户知道滑到哪里了
+      setProgress(percent * 100);
+      setCurrentTimeText(formatTime(targetTime));
       if (scrubberRef.current) {
         setScrubberWidth(scrubberRef.current.getBoundingClientRect().width);
       }
@@ -2017,7 +1993,7 @@ export default function FloatingVideoWindow({
         {isLongPressDragging && (
           <div className="absolute inset-0 z-40 bg-cyan-950/40 backdrop-blur-[1px] flex items-center justify-center pointer-events-none rounded-2xl border-2 border-cyan-400">
             <div className="px-3.5 py-1.5 rounded-full bg-black/85 border border-cyan-400 text-cyan-300 text-xs font-bold flex items-center gap-1.5 shadow-2xl animate-pulse">
-              <span>🖐️ 正在拖动窗口...</span>
+              <span>🖐️ {cropFill ? '全景平移...' : '正在拖动窗口...'}</span>
             </div>
           </div>
         )}
@@ -2093,7 +2069,7 @@ export default function FloatingVideoWindow({
           isActive={isVrActive}
           onClose={() => setIsVrActive(false)}
           initialMode={detectedVrMode}
-          gyroActive={gyroOn}
+          gyroActive={isVrActive || cropThird}
         />
 
         {/* Mobile Touch Gesture HUD Overlay */}
@@ -2293,21 +2269,6 @@ export default function FloatingVideoWindow({
                 title="横屏（全屏并锁定横向）"
               >
                 <RectangleHorizontal size={13} />
-              </button>
-            )}
-
-            {/* 陀螺仪统一开关：VR 全景环视 / 三屏取中全景平移 共用 */}
-            {isMobileViewport && (
-              <button
-                onClick={handleToggleGyro}
-                className={`p-1 rounded transition ${
-                  gyroOn
-                    ? 'text-emerald-300 bg-emerald-500/25 animate-pulse'
-                    : 'text-gray-400 hover:text-emerald-300'
-                }`}
-                title="陀螺仪体感（VR 全景环视 / 三屏取中左右平移）"
-              >
-                <Smartphone size={13} />
               </button>
             )}
 

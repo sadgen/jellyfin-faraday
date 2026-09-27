@@ -324,6 +324,7 @@ export default function VideoPlayerModal({
       setHoverScrubberTime(targetTime);
       setHoverScrubberPercent(percent);
       setIsWheelSeeking(true);
+      setProgress(percent * 100);
       if (scrubberRef.current) {
         setScrubberWidth(scrubberRef.current.getBoundingClientRect().width);
       }

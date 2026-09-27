@@ -635,6 +635,15 @@ export default function App() {
     });
   }, []);
 
+  // 三屏取中铺满：仅保留目标窗口（其余窗口关闭，语义同铺满），窗口自身重算竖屏铺满几何
+  const handleExclusiveFloatingWindow = useCallback((winId) => {
+    setFloatingWindows(prev => {
+      const target = prev.find(w => w.id === winId);
+      if (!target) return prev;
+      return [target];
+    });
+  }, []);
+
   const handleUpdateItem = useCallback((updatedItem) => {
     if (!updatedItem?.Id) return;
     setMediaItems(prev => prev.map(item => item.Id === updatedItem.Id ? { ...item, ...updatedItem } : item));
@@ -848,6 +857,7 @@ export default function App() {
           onSkipWindow={handleSkipFloatingWindow}
           onExpandWindow={(item) => setModalPlayingItem(item)}
           onMaximizeWindow={handleMaximizeFloatingWindow}
+          onExclusiveWindow={handleExclusiveFloatingWindow}
           onBringToFront={handleBringFloatingToFront}
           onUpdateItem={handleUpdateItem}
           onDeleteItem={handleDeleteItem}

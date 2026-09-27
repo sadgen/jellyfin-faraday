@@ -14,6 +14,7 @@ import { getPlaybackDefaults } from '../utils/playbackDefaults';
 import { calculateSmartStartTime } from '../utils/smartStartHelper';
 import { QUALITY_OPTIONS, PLAYBACK_SPEED_OPTIONS } from '../utils/qualityPresets';
 import TrickplayScrubberThumbnail from './TrickplayScrubberThumbnail';
+import * as THREE from 'three';
 import InlineVrCanvas from './InlineVrCanvas';
 import SubtitleOverlay from './SubtitleOverlay';
 import SubtitleModal from './SubtitleModal';
@@ -38,6 +39,26 @@ function formatTime(seconds) {
   return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
 }
 
+// 设备朝向四元数（含横屏轴向补偿）→ 观察方向的水平朝向角，用于三屏取中的体感平移
+const _euler = new THREE.Euler();
+const _quat = new THREE.Quaternion();
+const _qScreen = new THREE.Quaternion();
+const _fwd = new THREE.Vector3();
+const FLIP_X = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5));
+const Z_AXIS = new THREE.Vector3(0, 0, 1);
+function deviceHeadingRad(e) {
+  _euler.set(
+    THREE.MathUtils.degToRad(e.beta),
+    THREE.MathUtils.degToRad(e.alpha),
+    -THREE.MathUtils.degToRad(e.gamma),
+    'YXZ'
+  );
+  _quat.setFromEuler(_euler).multiply(FLIP_X)
+    .multiply(_qScreen.setFromAxisAngle(Z_AXIS, -THREE.MathUtils.degToRad(window.screen?.orientation?.angle ?? window.orientation ?? 0)));
+  _fwd.set(0, 0, -1).applyQuaternion(_quat);
+  return Math.atan2(_fwd.x, _fwd.z);
+}
+
 export default function FloatingVideoWindow({
   windowData,
   isFront = false,
@@ -45,6 +66,7 @@ export default function FloatingVideoWindow({
   onSkip,
   onExpand: _onExpand,
   onMaximize,
+  onExclusiveCrop,
   onBringToFront,
   onUpdateItem,
   onDeleteItem,
@@ -80,6 +102,10 @@ export default function FloatingVideoWindow({
   const cropThirdRef = useRef(false);
   cropThirdRef.current = cropThird;
   const preCropLayoutRef = useRef(null);
+  // 三屏取中铺满：开启取中的同时独占页面（其他浮窗关闭），窗口上下顶满页面可用区
+  const [cropFill, setCropFill] = useState(false);
+  const cropFillRef = useRef(false);
+  cropFillRef.current = cropFill;
 
   /**
    * 三屏取中几何：
@@ -119,17 +145,120 @@ export default function FloatingVideoWindow({
     return { ...base, left, top, width };
   }
 
+  /**
+   * 三屏取中铺满几何：窗口高度吃满页面可用区（上让开 64px 顶栏、下让开导航/边距），
+   * 宽度 = 高 × 竖屏面板比例；宽超屏则反向收缩（竖屏手机上方形/横内容会留上下空间）。
+   */
+  function computeCropFillLayout() {
+    const chromeH = (headerRef.current?.offsetHeight || 34) + (footerRef.current?.offsetHeight || 38);
+    const aspect = videoAspectRef.current > 0 ? videoAspectRef.current / 3 : 16 / 27;
+    const mobile = window.innerWidth < 768;
+    const maxAreaH = Math.max(240, window.innerHeight - 64 - (mobile ? 68 : 8) - chromeH);
+    const maxAreaW = window.innerWidth - (mobile ? 0 : 24);
+    let areaH = maxAreaH;
+    let areaW = areaH * aspect;
+    if (areaW > maxAreaW) {
+      areaW = maxAreaW;
+      areaH = areaW / aspect;
+    }
+    const width = Math.round(areaW);
+    const height = Math.round(areaH);
+    const left = Math.round((window.innerWidth - width) / 2);
+    const top = Math.round(64 + Math.max(0, (maxAreaH - chromeH - height) / 2));
+    return { left, top, width, height };
+  }
+
   const handleToggleCropThird = () => {
     if (isMaximized) return;
     const next = !cropThird;
     setCropThird(next);
     if (next) {
       preCropLayoutRef.current = layout;
-      setLayout(computeCropLayout(layout));
+      setCropFill(true);
+      isCustomPositionRef.current = false;
+      // iOS 13+ 陀螺仪权限必须挂在用户手势里：点取中按钮即为手势时机
+      if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+        DeviceOrientationEvent.requestPermission().catch(() => {});
+      }
+      if (onExclusiveCrop) onExclusiveCrop(id);
+      setLayout(computeCropFillLayout());
     } else {
+      setCropFill(false);
+      resetCropPan();
       setLayout(preCropLayoutRef.current || calculateSlotStyle(slotIndex));
     }
   };
+
+  // 三屏取中全景平移：object-position 0%(最左屏)~100%(最右屏)，50% = 中屏。
+  // 直接写 video.style（JSX 不管理该属性，React 重渲染不会覆盖），避免陀螺仪 60fps 触发整窗重渲染
+  const cropPanRef = useRef(50);
+  const resetCropPan = () => {
+    cropPanRef.current = 50;
+    if (videoRef.current) videoRef.current.style.objectPosition = '';
+  };
+
+  // 手机 + 取中铺满：陀螺仪水平转动在整幅三屏拼接画面上左右平移（全景效果）。
+  // 零点 = 开启瞬间的朝向（显示中屏）；转动 180° ≈ 扫完整幅画面；传感器不可用时静止在中屏
+  const gyroHeadingRef = useRef(null);
+  useEffect(() => {
+    if (!cropThird || !cropFill || window.innerWidth >= 768) {
+      gyroHeadingRef.current = null;
+      return;
+    }
+    const handleDeviceOrientation = (e) => {
+      if (e.alpha === null || e.beta === null || e.gamma === null) return;
+      const heading = deviceHeadingRad(e);
+      if (gyroHeadingRef.current === null) {
+        gyroHeadingRef.current = heading;
+        return;
+      }
+      let d = heading - gyroHeadingRef.current;
+      gyroHeadingRef.current = heading;
+      if (d > Math.PI) d -= 2 * Math.PI;
+      if (d < -Math.PI) d += 2 * Math.PI;
+      cropPanRef.current = Math.max(0, Math.min(100, cropPanRef.current - d * (100 / Math.PI)));
+      if (videoRef.current) videoRef.current.style.objectPosition = `${cropPanRef.current}% 50%`;
+    };
+    window.addEventListener('deviceorientation', handleDeviceOrientation, true);
+    return () => window.removeEventListener('deviceorientation', handleDeviceOrientation, true);
+  }, [cropThird, cropFill]);
+
+  // 取中铺满状态下双指张开放大 → 手机全屏（Android Chrome 的元素级全屏可用；
+  // iPhone Safari 不支持元素级 requestFullscreen，表达式静默跳过）；双指收拢退出
+  const videoViewportRef = useRef(null);
+  useEffect(() => {
+    const el = videoViewportRef.current;
+    if (!el || !cropFill) return;
+    let startDist = 0;
+    let tracking = false;
+    const pinchDist = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+    const onStart = (e) => {
+      if (e.touches.length === 2) {
+        startDist = pinchDist(e.touches);
+        tracking = true;
+      } else {
+        tracking = false;
+      }
+    };
+    const onMove = (e) => {
+      if (!tracking || e.touches.length !== 2 || startDist <= 0) return;
+      const d = pinchDist(e.touches);
+      if (d > startDist * 1.3 && !document.fullscreenElement) {
+        tracking = false;
+        const target = containerRef.current || el;
+        if (target.requestFullscreen) target.requestFullscreen().catch(() => {});
+      } else if (document.fullscreenElement && d < startDist * 0.7) {
+        tracking = false;
+        document.exitFullscreen().catch(() => {});
+      }
+    };
+    el.addEventListener('touchstart', onStart, { passive: true });
+    el.addEventListener('touchmove', onMove, { passive: true });
+    return () => {
+      el.removeEventListener('touchstart', onStart);
+      el.removeEventListener('touchmove', onMove);
+    };
+  }, [cropFill]);
 
   // Long-press Drag state & tactile feedback for mobile
   const [isLongPressDragging, setIsLongPressDragging] = useState(false);
@@ -205,7 +334,9 @@ export default function FloatingVideoWindow({
       prevSlotRef.current = slotIndex;
       isCustomPositionRef.current = false;
       const base = calculateSlotStyle(slotIndex);
-      if (cropThirdRef.current) {
+      if (cropFillRef.current) {
+        setLayout(computeCropFillLayout());
+      } else if (cropThirdRef.current) {
         preCropLayoutRef.current = base;
         setLayout(computeCropLayout(base));
       } else {
@@ -218,6 +349,9 @@ export default function FloatingVideoWindow({
     const handleResize = () => {
       if (isMaximized) {
         setLayout(calculateMaximizedStyle(videoAspectRef.current, windowData.chromeH));
+      } else if (cropFillRef.current) {
+        isCustomPositionRef.current = false;
+        setLayout(computeCropFillLayout());
       } else if (!isCustomPositionRef.current) {
         const base = calculateSlotStyle(slotIndex);
         if (cropThirdRef.current) {
@@ -235,6 +369,10 @@ export default function FloatingVideoWindow({
   // 三屏取中开启期间视频比例变化（HLS 渐进加载/切档/换片）：按最新比例重算竖屏几何
   useEffect(() => {
     if (!cropThirdRef.current || isMaximized || isCustomPositionRef.current) return;
+    if (cropFillRef.current) {
+      setLayout(computeCropFillLayout());
+      return;
+    }
     const base = preCropLayoutRef.current || calculateSlotStyle(slotIndex);
     setLayout(computeCropLayout(base));
   }, [videoAspect, slotIndex, isMaximized, windowData.chromeH]);
@@ -810,15 +948,15 @@ export default function FloatingVideoWindow({
     window.addEventListener('mouseup', handleMouseUp);
   };
 
-  // VR 全景开启时，画面上的鼠标用于环视视角，不拖动窗口；铺满模式下禁止拖动
+  // VR 全景开启时，画面上的鼠标用于环视视角，不拖动窗口；铺满/取中铺满模式下禁止拖动
   const handleMouseDownVideoArea = (e) => {
-    if (isVrActive || isMaximized) return;
+    if (isVrActive || isMaximized || cropFillRef.current) return;
     startWindowDrag(e);
   };
 
   const handleTouchStartHeader = (e) => {
     if (e.target.closest('button') || e.target.closest('select')) return;
-    if (isMaximized) return;
+    if (isMaximized || cropFillRef.current) return;
     if (e.touches.length !== 1) return;
     if (onBringToFront) onBringToFront(id);
 
@@ -854,6 +992,7 @@ export default function FloatingVideoWindow({
 
   // Resizing the floating window via bottom-right handle
   const handleMouseDownResize = (e) => {
+    if (cropFillRef.current) return;
     if (e.button !== 0) return;
     e.preventDefault();
     e.stopPropagation();
@@ -1140,8 +1279,8 @@ export default function FloatingVideoWindow({
         left: `${layout.left}px`,
         top: `${layout.top}px`,
         width: `${layout.width}px`,
-        // 铺满模式显式锁定高度（普通窗口高度由内容 16:9 + 控制条撑出）
-        ...(isMaximized ? { height: `${layout.height}px` } : {}),
+        // 铺满/取中铺满模式显式锁定高度（普通窗口高度由内容比例 + 控制条撑出）
+        ...((isMaximized || cropFill) ? { height: `${layout.height}px` } : {}),
         zIndex: hoverScrubberTime !== null ? 9999 : (isDragging || isResizing || isFront ? 500 : 50 + (slotIndex === 1 ? 5 : (slotIndex === 0 ? 1 : 0))),
         transition: (isDragging || isResizing)
           ? 'none'
@@ -1768,9 +1907,10 @@ export default function FloatingVideoWindow({
 
       {/* Video Viewport — 三屏取中时切换为竖屏面板比例；按住左键即可拖动窗口 (PotPlayer 式)，触摸手势由 useTouchGestures 接管 */}
       <div
+        ref={videoViewportRef}
         className={`relative w-full bg-black flex items-center justify-center overflow-hidden touch-none select-none cursor-move ${isMaximized ? 'flex-1 min-h-0' : ''}`}
         style={{
-          aspectRatio: isMaximized ? undefined : (cropThird ? (videoAspect > 0 ? videoAspect / 3 : 16 / 27) : 16 / 9),
+          aspectRatio: (isMaximized || cropFill) ? undefined : (cropThird ? (videoAspect > 0 ? videoAspect / 3 : 16 / 27) : 16 / 9),
           filter: `brightness(${brightness})`,
           WebkitTouchCallout: 'none',
           userSelect: 'none'
@@ -2089,7 +2229,7 @@ export default function FloatingVideoWindow({
                     ? 'text-amber-300 bg-amber-500/25'
                     : 'text-gray-400 hover:text-amber-300'
                 }`}
-                title="三屏取中 (三竖屏拼接横屏视频：只看中间一屏)"
+                title="三屏取中 (独占页面竖屏铺满；手机陀螺仪左右转动可环视三屏全景)"
               >
                 <Crop size={13} />
               </button>

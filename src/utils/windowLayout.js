@@ -20,18 +20,28 @@ export function calculateSlotStyle(slotIndex) {
   const uiH = 34 + 38; // Header (~34px) + Footer (~38px)
 
   // Mobile Phones (< 768px): Stack 2 windows cleanly without overlap for simultaneous playback
+  // 默认锚定屏幕中下方（拇指热区，避开底部导航栏），双窗时自底向上堆叠：slot 0 最靠下
   if (window.innerWidth < 768) {
     const padding = 8;
-    const w = Math.min(420, window.innerWidth - padding * 2);
-    const h = Math.round((w * 9 / 16) + uiH);
-    const left = Math.max(padding, Math.round((window.innerWidth - w) / 2));
     const mobileGap = 8;
-    const top = headerOffset + 4 + (slotIndex * (h + mobileGap));
-    return { 
-      left: Math.round(left), 
-      top: Math.round(top), 
-      width: Math.round(w), 
-      height: Math.round(h) 
+    const availTop = headerOffset + 4;
+    const availBottom = window.innerHeight - bottomOffset;
+    const availH = availBottom - availTop;
+    let w = Math.min(420, window.innerWidth - padding * 2);
+    let h = Math.round((w * 9 / 16) + uiH);
+    // 双窗纵向放不下时按"两窗 + 间距"整体收窄，保证任意屏高下双窗都不与彼此/header 重叠
+    const maxH = Math.floor((availH - mobileGap) / 2);
+    if (h > maxH) {
+      w = Math.max(240, Math.round((maxH - uiH) * 16 / 9));
+      h = Math.round((w * 9 / 16) + uiH);
+    }
+    const left = Math.max(padding, Math.round((window.innerWidth - w) / 2));
+    const top = Math.max(availTop, availBottom - h - (slotIndex * (h + mobileGap)));
+    return {
+      left: Math.round(left),
+      top: Math.round(top),
+      width: Math.round(w),
+      height: Math.round(h)
     };
   }
 

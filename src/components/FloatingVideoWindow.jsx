@@ -246,7 +246,8 @@ export default function FloatingVideoWindow({
       gyroHeadingRef.current = heading;
       if (d > Math.PI) d -= 2 * Math.PI;
       if (d < -Math.PI) d += 2 * Math.PI;
-      cropPanRef.current = Math.max(0, Math.min(100, cropPanRef.current - d * (200 / Math.PI)));
+      const sweepRad = Math.PI / 180 * (playbackDefaultsRef.current.gyroSweepDeg || 90);
+      cropPanRef.current = Math.max(0, Math.min(100, cropPanRef.current - d * (100 / sweepRad)));
       if (videoRef.current) videoRef.current.style.objectPosition = `${cropPanRef.current}% 50%`;
     };
     window.addEventListener('deviceorientation', handleDeviceOrientation, true);
@@ -731,6 +732,20 @@ export default function FloatingVideoWindow({
     if (trickplayItem) preloadAllTrickplaySprites(trickplayItem);
   }, [trickplayItem]);
 
+  // 手机上单开的浮窗默认进入三屏取中铺满（App 侧 autoCrop 标记，仅唯一新窗携带）
+  const autoCropAppliedRef = useRef(false);
+  useEffect(() => {
+    if (autoCropAppliedRef.current || isMaximized || !windowData.autoCrop) return;
+    if (window.innerWidth >= 768) return;
+    autoCropAppliedRef.current = true;
+    preCropLayoutRef.current = layout;
+    setCropThird(true);
+    setCropFill(true);
+    isCustomPositionRef.current = false;
+    setLayout(computeCropFillLayout());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Load and play video when item/part changes + Report Playback to Jellyfin
   useEffect(() => {
     const controller = sessionControllerRef.current;
@@ -887,6 +902,8 @@ export default function FloatingVideoWindow({
     setRawDuration(video.duration);
     // Seek 锁生效期间视频仍在旧位置，timeupdate 不得刷新进度条
     if (seekLockRef.current.isActive()) return;
+    // 滑动/悬停预览期间进度条保持跟手，不被播放进度拉回
+    if (hoverScrubberTime !== null || isWheelSeeking) return;
     const p = (video.currentTime / video.duration) * 100;
     setProgress(p);
     setCurrentTimeText(formatTime(video.currentTime));
@@ -2172,7 +2189,7 @@ export default function FloatingVideoWindow({
 
           <div
             ref={scrubberRef}
-            className="w-full h-2.5 sm:h-2 hover:h-3.5 sm:hover:h-3 bg-white/20 rounded-full cursor-pointer transition-all relative overflow-hidden group/bar touch-none"
+            className={`w-full bg-white/20 rounded-full cursor-pointer transition-all relative overflow-hidden group/bar touch-none ${hoverScrubberTime !== null || isWheelSeeking ? 'h-2.5' : 'h-1'}`}
             onMouseDown={handleScrubberMouseDown}
             onMouseMove={handleScrubberMouseMove}
             onMouseLeave={handleScrubberMouseLeave}
@@ -2189,8 +2206,8 @@ export default function FloatingVideoWindow({
         </div>
 
         {/* Controls Row（窄窗时右侧按钮组自动换行，音量滑块/时间/切片文字按窗宽收起） */}
-        <div className="flex flex-wrap items-center justify-between gap-y-1 text-gray-300 pt-0.5">
-          <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-y-0.5 text-gray-300">
+          <div className="flex items-center gap-1">
             <button
               onClick={togglePlay}
               className="p-1 hover:bg-white/10 rounded text-white transition"
@@ -2227,7 +2244,7 @@ export default function FloatingVideoWindow({
             )}
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1">
             {/* Playback Speed */}
             <select
               value={playbackSpeed}
@@ -2252,9 +2269,9 @@ export default function FloatingVideoWindow({
                   : '换一个 (下一个顶上来)'
               }
             >
-              <SkipForward size={11} />
-              {layout.width >= 400 && (
-                <span>{partsList.length > 1 ? `切片 P${currentPartIndex + 1}/${partsList.length}` : '切片'}</span>
+              <SkipForward size={12} />
+              {partsList.length > 1 && (
+                <span>P{currentPartIndex + 1}/{partsList.length}</span>
               )}
             </button>
 

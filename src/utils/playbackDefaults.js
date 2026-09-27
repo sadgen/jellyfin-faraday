@@ -9,6 +9,14 @@ const STORAGE_KEY = 'faraday_playback_defaults';
 
 export const PATROL_INTERVALS = [30, 45, 60, 90];
 
+// 陀螺仪灵敏度：全景/环视「扫完整幅」所需的手机转动角度，越小越灵敏
+export const GYRO_SWEEP_OPTIONS = [
+  { id: 'low', label: '低', deg: 180 },
+  { id: 'medium', label: '中', deg: 120 },
+  { id: 'high', label: '高', deg: 90 },
+  { id: 'ultra', label: '极灵敏', deg: 30 }
+];
+
 export function getPlaybackDefaults() {
   if (typeof window === 'undefined') {
     return {
@@ -18,7 +26,8 @@ export function getPlaybackDefaults() {
       autoRefill: false,
       smartStart: false,
       patrolMode: false,
-      patrolIntervalSeconds: 45
+      patrolIntervalSeconds: 45,
+      gyroSweepDeg: 90
     };
   }
   try {
@@ -32,7 +41,8 @@ export function getPlaybackDefaults() {
         autoRefill: !!parsed.autoRefill,
         smartStart: !!parsed.smartStart,
         patrolMode: !!parsed.patrolMode,
-        patrolIntervalSeconds: Number(parsed.patrolIntervalSeconds) || 45
+        patrolIntervalSeconds: Number(parsed.patrolIntervalSeconds) || 45,
+        gyroSweepDeg: Number(parsed.gyroSweepDeg) || 90
       };
     }
   } catch {}
@@ -43,7 +53,8 @@ export function getPlaybackDefaults() {
     autoRefill: false,
     smartStart: false,
     patrolMode: false,
-    patrolIntervalSeconds: 45
+    patrolIntervalSeconds: 45,
+    gyroSweepDeg: 90
   };
 }
 

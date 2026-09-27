@@ -294,10 +294,13 @@ export default function InlineVrCanvas({
 
   // Pointer Drag to Look Around (Pitch & Yaw)
   const lastDragXRef = useRef(0);
+  const lastDragYRef = useRef(0);
   const handlePointerDown = (e) => {
     isUserInteractingRef.current = true;
     onPointerDownPointerXRef.current = e.clientX || e.touches?.[0]?.clientX || 0;
     onPointerDownPointerYRef.current = e.clientY || e.touches?.[0]?.clientY || 0;
+    lastDragXRef.current = onPointerDownPointerXRef.current;
+    lastDragYRef.current = onPointerDownPointerYRef.current;
     lastDragXRef.current = onPointerDownPointerXRef.current;
     onPointerDownLonRef.current = lonRef.current;
     onPointerDownLatRef.current = latRef.current;
@@ -309,11 +312,19 @@ export default function InlineVrCanvas({
     const clientY = e.clientY || e.touches?.[0]?.clientY || 0;
 
     if (isGyroActiveRef.current && recenterQuatRef.current) {
-      // 陀螺仪模式下拖拽 = 手动微调零点朝向（水平），与体感追踪叠加
+      // 陀螺仪模式下拖拽 = 手动调整零点朝向（水平 + 俯仰），与体感追踪叠加
       const dYaw = THREE.MathUtils.degToRad((lastDragXRef.current - clientX) * 0.18);
+      const dPitch = THREE.MathUtils.degToRad((clientY - lastDragYRef.current) * 0.18);
       lastDragXRef.current = clientX;
+      lastDragYRef.current = clientY;
       recenterQuatRef.current.premultiply(
         new THREE.Quaternion().setFromAxisAngle(Y_AXIS, dYaw)
+      );
+      // 俯仰绕当前视图右轴旋转（recenter × gyro 的 X 轴），上下视角都能调
+      const totalQ = recenterQuatRef.current.clone().multiply(gyroQuatRef.current || new THREE.Quaternion());
+      const rightAxis = new THREE.Vector3(1, 0, 0).applyQuaternion(totalQ);
+      recenterQuatRef.current.premultiply(
+        new THREE.Quaternion().setFromAxisAngle(rightAxis, dPitch)
       );
       return;
     }

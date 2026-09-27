@@ -334,6 +334,8 @@ export default function App() {
       if (prev.length < 3) {
         const occupiedSlots = prev.map(w => w.slotIndex);
         const targetSlot = [0, 1, 2].find(s => !occupiedSlots.includes(s)) ?? prev.length;
+        // 手机上单开浮窗默认三屏取中铺满（窗口挂 autoCrop 标记，多窗补齐不触发）
+        const autoCrop = typeof window !== 'undefined' && window.innerWidth < 768;
         return [
           ...prev,
           {
@@ -341,7 +343,8 @@ export default function App() {
             slotIndex: targetSlot,
             item,
             startSecond,
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            autoCrop
           }
         ];
       }

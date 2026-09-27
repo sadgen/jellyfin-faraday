@@ -819,6 +819,8 @@ export default function VideoPlayerModal({
     setRawDuration(video.duration);
     // Seek 锁生效期间视频仍在旧位置，timeupdate 不得刷新进度条
     if (seekLockRef.current.isActive()) return;
+    // 滑动/悬停预览期间进度条保持跟手，不被播放进度拉回
+    if (hoverScrubberTime !== null) return;
     const p = (video.currentTime / video.duration) * 100;
     setProgress(p);
     setCurrentTimeText(formatTime(video.currentTime));

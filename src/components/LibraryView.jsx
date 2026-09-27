@@ -8,7 +8,7 @@ import { aggregateActors } from '../utils/actorAggregator';
 import { stackMediaItems } from '../utils/mediaStacking';
 import { sortMediaItems } from '../utils/mediaSorter';
 import { useViewport } from '../hooks/useViewport';
-import { getPlaybackDefaults, setPlaybackDefaults, QUALITY_OPTIONS, SPEED_PRESETS, PATROL_INTERVALS } from '../utils/playbackDefaults';
+import { getPlaybackDefaults, setPlaybackDefaults, QUALITY_OPTIONS, SPEED_PRESETS, PATROL_INTERVALS, GYRO_SWEEP_OPTIONS } from '../utils/playbackDefaults';
 import { SEEK_SPEED_OPTIONS, getStoredSeekSpeed, setStoredSeekSpeed } from '../utils/seekSettings';
 import { GESTURE_ACTIONS, getGestureSettings, setGestureSettings } from '../utils/gestureSettings';
 import MobileActionSheet from './MobileActionSheet';
@@ -1699,6 +1699,25 @@ export default function LibraryView({
 
                   {/* 1. Default Quality */}
                   <div className="flex flex-col gap-1.5">
+                      <span className="text-[11px] text-cyan-300 font-bold">🧭 陀螺仪灵敏度（转动多少度扫完整幅全景）</span>
+                      <div className="grid grid-cols-4 gap-1.5">
+                        {GYRO_SWEEP_OPTIONS.map(o => (
+                          <button
+                            key={o.id}
+                            onClick={() => setPlaybackDefaultsState(setPlaybackDefaults({ gyroSweepDeg: o.deg }))}
+                            className={`py-1 rounded-lg text-[10px] font-bold border transition ${
+                              playbackDefaults.gyroSweepDeg === o.deg
+                                ? 'bg-cyan-500/30 border-cyan-400 text-cyan-200'
+                                : 'bg-black/40 border-white/10 text-gray-400 hover:text-cyan-300'
+                            }`}
+                          >
+                            {o.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col gap-1.5">
                     <span className="text-[11px] text-cyan-300 font-bold">🎥 默认画质</span>
                     <div className="grid grid-cols-5 gap-1.5">
                       {QUALITY_OPTIONS.map(q => (

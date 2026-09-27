@@ -200,29 +200,65 @@ export class PlaybackSessionController {
     // 否则服务器会为一次开窗记录两次播放
     this.armStartedReport(initialSeekTime);
 
-    // 原画直连 = HLS DirectStream（remux 只转容器不重编码，源画质源码率）。
-    // 渐进式流的缓冲完全由浏览器托管：前向缓冲小且不可配，弱网下码率一贴地板就停顿；
-    // 切到 hls.js 沿用 60s 前向缓冲策略，跨缓冲区 seek 由 hls.js 按全量 VOD 播放列表原生完成。
-    let hlsUrl;
+    // 原画直连按源视频编码分流：
+    // - h264 源 → HLS DirectStream remux（只转容器不重编码，源画质源码率）。渐进式流的缓冲
+    //   完全由浏览器托管且不可配，弱网下码率一贴地板就停顿；hls.js 沿用 60s 前向缓冲策略。
+    // - 其他编码（HEVC/AV1 等，VR 库源几乎全是 HEVC）→ 渐进式静态流，设备硬解原文件。
+    //   hls.js 对 TS 封装的非 h264 编码支持不可靠，且 remux 声明 h264 目标会迫使服务器
+    //   重编码（VR 视频被"自动转码"的根因），非 h264 一律不进 remux。
     if (streamQuality === 'direct' && audioStreamIndex === null) {
-      this.playMethod = 'DirectStream';
-      hlsUrl = this.jellyfin.getRemuxHlsUrl(this.itemId, {
-        playSessionId: this.playSessionId,
-        mediaSourceId: this.mediaSourceId,
-        subtitleStreamIndex: this.subtitleStreamIndex
-      });
+      let videoCodec = null;
+      try {
+        const info = await this.jellyfin.getItemPlaybackInfo(this.itemId);
+        videoCodec = info?.MediaSources?.[0]?.MediaStreams?.find(s => s.Type === 'Video')?.Codec || null;
+      } catch { /* 查询失败按未知编码处理，走静态直连 */ }
+
+      if (videoCodec === 'h264' || videoCodec === 'avc') {
+        this.playMethod = 'DirectStream';
+        const hlsUrl = this.jellyfin.getRemuxHlsUrl(this.itemId, {
+          playSessionId: this.playSessionId,
+          mediaSourceId: this.mediaSourceId,
+          subtitleStreamIndex: this.subtitleStreamIndex
+        });
+        this.initHls(hlsUrl, initialSeekTime, currentGeneration);
+      } else {
+        this.playMethod = 'DirectPlay';
+        const directUrl = this.jellyfin.getStreamUrl(this.itemId);
+
+        videoEl.removeAttribute('src');
+        videoEl.src = directUrl;
+        if (initialSeekTime > 0) {
+          try {
+            videoEl.currentTime = initialSeekTime;
+          } catch {}
+        }
+
+        this.startHeartbeat();
+
+        videoEl.play().catch(() => {
+          if (this.generationId !== currentGeneration) return;
+          videoEl.muted = true;
+          videoEl.play().catch(() => {
+            if (this.generationId !== currentGeneration) return;
+            // 直连完全失败（如浏览器无该编码硬解），通知上层回退到转码
+            if (this.onAutoDirectFallback) {
+              this.onAutoDirectFallback();
+            }
+          });
+        });
+      }
     } else {
       this.playMethod = 'Transcode';
       const bitrate = parseInt(streamQuality, 10) || 4000000;
-      hlsUrl = this.jellyfin.getSmoothHlsUrl(this.itemId, bitrate, {
+      const hlsUrl = this.jellyfin.getSmoothHlsUrl(this.itemId, bitrate, {
         playSessionId: this.playSessionId,
         mediaSourceId: this.mediaSourceId,
         audioStreamIndex: this.audioStreamIndex,
         subtitleStreamIndex: this.subtitleStreamIndex
       });
-    }
 
-    this.initHls(hlsUrl, initialSeekTime, currentGeneration);
+      this.initHls(hlsUrl, initialSeekTime, currentGeneration);
+    }
 
     this.notifyState();
   }

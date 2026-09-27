@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
-import { RotateCcw, Glasses, X, Smartphone } from 'lucide-react';
+import { RotateCcw, Glasses, X } from 'lucide-react';
 
 export const VR_MODES = [
   { id: '180_3d_sbs', label: '180° 3D (左右 SBS)' },
@@ -40,7 +40,8 @@ export default function InlineVrCanvas({
   videoRef,
   isActive,
   onClose,
-  initialMode = '180_3d_sbs'
+  initialMode = '180_3d_sbs',
+  gyroActive = false
 }) {
   const containerRef = useRef(null);
   const sceneRef = useRef(null);
@@ -64,13 +65,12 @@ export default function InlineVrCanvas({
 
   const [vrMode, setVrMode] = useState(initialMode);
   const [_fov, setFov] = useState(100);
-  const [isGyroActive, setIsGyroActive] = useState(false);
   const [swapEyes, setSwapEyes] = useState(false);
 
   // 陀螺仪（四元数模式）：gyroQuat = 当前设备朝向，recenterQuat = 零点校准偏置。
   // 渲染循环取 camera.quaternion = recenter × gyro；拖拽拖动 recenter 实现手动转向。
   const isGyroActiveRef = useRef(false);
-  isGyroActiveRef.current = isGyroActive;
+  isGyroActiveRef.current = gyroActive;
   const gyroQuatRef = useRef(null);
   const recenterQuatRef = useRef(null);
 
@@ -268,7 +268,7 @@ export default function InlineVrCanvas({
 
   // Gyroscope / DeviceOrientation Listener on Mobile
   useEffect(() => {
-    if (!isGyroActive) return;
+    if (!gyroActive) return;
 
     const handleDeviceOrientation = (e) => {
       if (e.alpha === null || e.beta === null || e.gamma === null) return;
@@ -282,29 +282,15 @@ export default function InlineVrCanvas({
     return () => {
       window.removeEventListener('deviceorientation', handleDeviceOrientation, true);
     };
-  }, [isGyroActive]);
+  }, [gyroActive]);
 
-  const toggleGyro = async () => {
-    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-      try {
-        const permission = await DeviceOrientationEvent.requestPermission();
-        if (permission === 'granted') {
-          setIsGyroActive(!isGyroActive);
-        } else {
-          alert('需要陀螺仪权限以支持手机体感全景转动');
-        }
-      } catch (err) {
-        console.warn('Gyro permission error:', err);
-      }
-    } else {
-      setIsGyroActive(!isGyroActive);
-    }
-    if (isGyroActive) {
-      // 关闭时清掉校准偏置，回落到普通拖拽视角
+  // 陀螺仪开关由窗口底部按钮统一控制（受控 prop）；关闭时清掉校准偏置，回落到普通拖拽视角
+  useEffect(() => {
+    if (!gyroActive) {
       recenterQuatRef.current = null;
       gyroQuatRef.current = null;
     }
-  };
+  }, [gyroActive]);
 
   // Pointer Drag to Look Around (Pitch & Yaw)
   const lastDragXRef = useRef(0);
@@ -424,24 +410,11 @@ export default function InlineVrCanvas({
             </button>
           )}
 
-          {/* Gyro Sensor Toggle (Mobile) */}
-          <button
-            onClick={toggleGyro}
-            className={`p-1 rounded-lg border transition ${
-              isGyroActive 
-                ? 'bg-emerald-500/40 border-emerald-400 text-emerald-300 animate-pulse' 
-                : 'bg-black/80 hover:bg-black border-white/20 text-gray-300 hover:text-emerald-300'
-            }`}
-            title="手机陀螺仪体感视角追踪"
-          >
-            <Smartphone size={12} />
-          </button>
-
           {/* Reset Orientation / Gyro Recenter */}
           <button
             onClick={resetOrientation}
             className="p-1 rounded-lg bg-black/80 hover:bg-black border border-white/20 text-gray-300 hover:text-cyan-300 transition"
-            title={isGyroActive ? '零点校准（当前持机朝向 = 画面正中）' : '视角复位 (居中)'}
+            title={gyroActive ? '零点校准（当前持机朝向 = 画面正中）' : '视角复位 (居中)'}
           >
             <RotateCcw size={12} />
           </button>

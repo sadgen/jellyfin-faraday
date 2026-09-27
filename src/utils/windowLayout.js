@@ -36,7 +36,11 @@ export function calculateSlotStyle(slotIndex) {
       h = Math.round((w * 9 / 16) + uiH);
     }
     const left = Math.max(padding, Math.round((window.innerWidth - w) / 2));
-    const top = Math.max(availTop, availBottom - h - (slotIndex * (h + mobileGap)));
+    // 锚定屏幕中部（slot 0 居中，双窗时向上堆叠），不再贴底
+    const top = Math.max(
+      availTop,
+      Math.min(Math.round(availTop + (availH - h) / 2) - slotIndex * (h + mobileGap), availBottom - h)
+    );
     return {
       left: Math.round(left),
       top: Math.round(top),

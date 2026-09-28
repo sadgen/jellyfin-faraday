@@ -1378,100 +1378,6 @@ export default function FloatingVideoWindow({
 
   const isFavorite = !!item?.UserData?.IsFavorite;
 
-  // 头部紧凑控制组（footer 控制行已移除）：横屏(左一) → 音量 → 播放/暂停 → 字幕 → 取中
-  const headerControls = (
-    <>
-      {isMobileViewport && (
-        <button
-          onClick={handleLandscapeToggle}
-          className={`p-1 rounded transition ${
-            isLandscape
-              ? 'text-cyan-300 bg-cyan-500/25'
-              : 'text-gray-400 hover:text-cyan-300'
-          }`}
-          title="横屏（全屏并锁定横向）"
-        >
-          <RectangleHorizontal size={13} />
-        </button>
-      )}
-
-      <div className="relative">
-        <button
-          onClick={() => setShowVolumePop(prev => !prev)}
-          className="p-1 rounded text-gray-400 hover:text-cyan-300 transition"
-          title={`音量 ${Math.round((isMuted ? 0 : volume) * 100)}%`}
-        >
-          {isMuted || volume === 0
-            ? <VolumeX size={13} className="text-red-400" />
-            : volume < 0.5
-              ? <Volume1 size={13} />
-              : <Volume2 size={13} />}
-        </button>
-        {showVolumePop && (
-          <>
-            <div className="fixed inset-0 z-40" onClick={() => setShowVolumePop(false)} />
-            <div className="absolute bottom-full right-0 mb-2 z-50 bg-[#0d131f] border border-white/15 rounded-xl px-3 py-2 shadow-2xl flex items-center justify-center h-28">
-              <input
-                type="range"
-                min={0}
-                max={1}
-                step={0.05}
-                value={isMuted ? 0 : volume}
-                onChange={(e) => {
-                  const v = parseFloat(e.target.value);
-                  setVolume(v);
-                  if (isMuted && v > 0) toggleMute();
-                }}
-                className="w-24 rotate-[270deg] accent-cyan-400 cursor-pointer appearance-none bg-white/20 rounded-lg h-1"
-              />
-            </div>
-          </>
-        )}
-      </div>
-
-      <button
-        onClick={togglePlay}
-        className="p-1 hover:bg-white/10 rounded text-white transition"
-        title={isPlaying ? '暂停' : '播放'}
-      >
-        {isPlaying ? <Pause size={13} /> : <Play size={13} />}
-      </button>
-
-      <button
-        onClick={handleToggleSubtitle}
-        className={`p-1 rounded transition ${
-          subtitleStreams.length === 0
-            ? 'text-gray-700'
-            : selectedSubtitleIndex !== -1
-              ? 'text-cyan-300 bg-cyan-500/20'
-              : 'text-gray-400 hover:text-cyan-300'
-        }`}
-        title={
-          subtitleStreams.length === 0
-            ? '字幕开关 (当前视频无可用文本字幕)'
-            : selectedSubtitleIndex !== -1
-              ? '字幕：开 → 点击关闭'
-              : '字幕：关 → 点击开启'
-        }
-      >
-        <Subtitles size={13} />
-      </button>
-
-      {!isMaximized && (
-        <button
-          onClick={handleToggleCropThird}
-          className={`p-1 rounded transition ${
-            cropThird
-              ? 'text-amber-300 bg-amber-500/25'
-              : 'text-gray-400 hover:text-amber-300'
-          }`}
-          title="三屏取中 (独占页面竖屏铺满；手机陀螺仪左右转动可环视三屏全景)"
-        >
-          <Crop size={13} />
-        </button>
-      )}
-    </>
-  );
 
   return (
     <div
@@ -1988,42 +1894,121 @@ export default function FloatingVideoWindow({
           </div>
         )}
 
-        {/* 悬浮控制栏：单手区（贴视频底部），点画面切换显隐，播放中 3s 自动隐藏 */}
+        {/* 悬浮控制圆盘：右下角单手区，径向布局 */}
         {controlsVisible && (
           <div
-            className="absolute inset-x-1.5 bottom-1.5 z-30 flex items-center justify-between gap-0.5 rounded-xl bg-black/60 backdrop-blur-md px-1 py-1 text-gray-300"
+            className="absolute right-2 bottom-2 z-30 w-[84px] h-[84px] rounded-full bg-black/60 backdrop-blur-md border border-white/15 shadow-2xl select-none"
             onClick={(e) => e.stopPropagation()}
             onMouseDown={(e) => e.stopPropagation()}
             onTouchStart={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center gap-0.5">
-              {headerControls}
-            </div>
-            <div className="flex items-center gap-0.5">
+            {/* 中心：播放/暂停 */}
+            <button
+              onClick={togglePlay}
+              className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-cyan-500/90 hover:bg-cyan-400 text-slate-950 flex items-center justify-center shadow-lg transition"
+              title={isPlaying ? '暂停' : '播放'}
+            >
+              {isPlaying ? <Pause size={17} /> : <Play size={17} className="ml-0.5 fill-slate-950" />}
+            </button>
+            {/* 上：三屏取中 */}
+            <button
+              onClick={handleToggleCropThird}
+              className={`absolute left-1/2 -translate-x-1/2 top-0.5 w-7 h-7 rounded-full flex items-center justify-center transition ${cropThird ? 'bg-amber-500/40 text-amber-300' : 'text-gray-300 hover:text-amber-300 hover:bg-white/10'}`}
+              title="三屏取中"
+            >
+              <Crop size={13} />
+            </button>
+            {/* 左：字幕（颜色表状态） */}
+            <button
+              onClick={handleToggleSubtitle}
+              className={`absolute left-0.5 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full flex items-center justify-center transition ${
+                subtitleStreams.length === 0
+                  ? 'text-gray-700'
+                  : selectedSubtitleIndex !== -1
+                    ? 'bg-cyan-500/30 text-cyan-300'
+                    : 'text-gray-300 hover:text-cyan-300 hover:bg-white/10'
+              }`}
+              title={
+                subtitleStreams.length === 0
+                  ? '字幕 (无可用文本字幕)'
+                  : selectedSubtitleIndex !== -1 ? '字幕：开' : '字幕：关'
+              }
+            >
+              <Subtitles size={13} />
+            </button>
+            {/* 右：音量（点开竖向滑杆） */}
+            <div className="absolute right-0.5 top-1/2 -translate-y-1/2">
               <button
-                onClick={handleSkipNext}
-                className="p-1.5 rounded hover:bg-white/10 text-gray-300 hover:text-cyan-300 transition"
-                title={partsList.length > 1 && currentPartIndex < partsList.length - 1 ? `播放下一分段 (Part ${currentPartIndex + 2}/${partsList.length})` : '跳过当前视频 (下一个顶上来)'}
+                onClick={() => setShowVolumePop(prev => !prev)}
+                className="w-7 h-7 rounded-full flex items-center justify-center text-gray-300 hover:text-cyan-300 hover:bg-white/10 transition"
+                title={`音量 ${Math.round((isMuted ? 0 : volume) * 100)}%`}
               >
-                <SkipForward size={13} />
+                {isMuted || volume === 0
+                  ? <VolumeX size={13} className="text-red-400" />
+                  : volume < 0.5
+                    ? <Volume1 size={13} />
+                    : <Volume2 size={13} />}
               </button>
-              <div className="relative">
-                <button
-                  onClick={() => setShowMoreMenu(prev => !prev)}
-                  className={`p-1.5 rounded transition ${showMoreMenu ? 'bg-cyan-500/30 text-cyan-300' : 'text-gray-400 hover:text-cyan-300 hover:bg-white/10'}`}
-                  title="更多功能与播放选项"
-                >
-                  <MoreVertical size={14} />
-                </button>
-              </div>
+              {showVolumePop && (
+                <div className="absolute right-9 bottom-0 z-50 bg-[#0d131f] border border-white/15 rounded-xl px-3 py-2 shadow-2xl flex items-center h-28">
+                  <input
+                    type="range"
+                    min={0} max={1} step={0.05}
+                    value={isMuted ? 0 : volume}
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value);
+                      setVolume(v);
+                      if (isMuted && v > 0) toggleMute();
+                    }}
+                    className="w-24 rotate-[270deg] accent-cyan-400 cursor-pointer appearance-none bg-white/20 rounded-lg h-1"
+                  />
+                </div>
+              )}
+            </div>
+            {/* 下：横屏（手机） */}
+            {isMobileViewport && (
               <button
-                onClick={() => onClose && onClose(id)}
-                className="p-1.5 rounded hover:bg-red-500/20 text-gray-400 hover:text-red-400 transition"
-                title="关闭窗口"
+                onClick={handleLandscapeToggle}
+                className={`absolute left-1/2 -translate-x-1/2 bottom-0.5 w-7 h-7 rounded-full flex items-center justify-center transition ${isLandscape ? 'bg-cyan-500/30 text-cyan-300' : 'text-gray-300 hover:text-cyan-300 hover:bg-white/10'}`}
+                title="横屏（全屏并锁定横向）"
               >
-                <X size={14} />
+                <RectangleHorizontal size={13} />
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* 盘外贴边：下一个 / 更多 / 关闭 */}
+        {controlsVisible && (
+          <div
+            className="absolute right-1 bottom-[92px] z-30 flex flex-col items-center gap-1 text-gray-300"
+            onClick={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
+          >
+            <button
+              onClick={handleSkipNext}
+              className="w-8 h-8 rounded-full bg-black/60 backdrop-blur-md border border-white/15 flex items-center justify-center hover:text-cyan-300 transition"
+              title={partsList.length > 1 && currentPartIndex < partsList.length - 1 ? `播放下一分段 (Part ${currentPartIndex + 2}/${partsList.length})` : '跳过当前视频'}
+            >
+              <SkipForward size={13} />
+            </button>
+            <div className="relative">
+              <button
+                onClick={() => setShowMoreMenu(prev => !prev)}
+                className={`w-8 h-8 rounded-full bg-black/60 backdrop-blur-md border border-white/15 flex items-center justify-center transition ${showMoreMenu ? 'bg-cyan-500/30 text-cyan-300' : 'hover:text-cyan-300'}`}
+                title="更多功能与播放选项"
+              >
+                <MoreVertical size={14} />
               </button>
             </div>
+            <button
+              onClick={() => onClose && onClose(id)}
+              className="w-8 h-8 rounded-full bg-black/60 backdrop-blur-md border border-white/15 flex items-center justify-center hover:bg-red-500/20 hover:text-red-400 transition"
+              title="关闭窗口"
+            >
+              <X size={14} />
+            </button>
           </div>
         )}
       </div>

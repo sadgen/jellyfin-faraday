@@ -29,7 +29,7 @@ import {
   X, ExternalLink, Star, Eye, EyeOff, Image as ImageIcon,
   Glasses, Trash2, FastForward, Sun, Zap, Gauge, RefreshCw, Subtitles, Film,
   Tag, Scaling, FlipHorizontal, MoreVertical, SlidersHorizontal, Crop, RectangleHorizontal
-, RotateCcw } from 'lucide-react';
+, RotateCcw , ChevronDown } from 'lucide-react';
 
 function formatTime(seconds) {
   if (!seconds || isNaN(seconds)) return '00:00';
@@ -1702,15 +1702,16 @@ export default function FloatingVideoWindow({
             onTouchEnd={(e) => e.stopPropagation()}
             onTouchCancel={(e) => e.stopPropagation()}
           >
-            {isVrActive && (
-              <button
-                onClick={() => setVrRecenterTick(t => t + 1)}
-                className="w-9 h-9 rounded-full bg-black/60 backdrop-blur-md border border-white/15 flex items-center justify-center text-gray-300 hover:text-cyan-300 transition"
-                title="VR 零点校准（当前朝向 = 画面正中）"
-              >
-                <RotateCcw size={14} />
-              </button>
-            )}
+            <button
+              onClick={() => {
+                if (isVrActive) setVrRecenterTick(t => t + 1);
+                else resetCropPan();
+              }}
+              className="w-9 h-9 rounded-full bg-black/60 backdrop-blur-md border border-white/15 flex items-center justify-center text-gray-300 hover:text-cyan-300 transition"
+              title={isVrActive ? '视角重置 / 零点校准（当前朝向 = 画面正中）' : '画面居中'}
+            >
+              <RotateCcw size={14} />
+            </button>
             <button
               onClick={handleSkipNext}
               className="w-9 h-9 rounded-full bg-black/60 backdrop-blur-md border border-white/15 flex items-center justify-center hover:text-cyan-300 transition"
@@ -1726,11 +1727,11 @@ export default function FloatingVideoWindow({
               <MoreVertical size={15} />
             </button>
             <button
-              onClick={() => onClose && onClose(id)}
-              className="w-9 h-9 rounded-full bg-black/60 backdrop-blur-md border border-white/15 flex items-center justify-center hover:bg-red-500/20 hover:text-red-400 transition"
-              title="关闭窗口"
+              onClick={(e) => { e.stopPropagation(); setControlsVisible(false); }}
+              className="w-9 h-9 rounded-full bg-black/60 backdrop-blur-md border border-white/15 flex items-center justify-center hover:bg-cyan-500/20 hover:text-cyan-300 transition"
+              title="收起控制区"
             >
-              <X size={15} />
+              <ChevronDown size={15} />
             </button>
           </div>
         )}
@@ -1810,7 +1811,7 @@ export default function FloatingVideoWindow({
         )}
         <div className="flex-1 min-w-0 overflow-hidden" title={item?.Name}>
           {(item?.Name || '').length > 16 ? (
-            <div className="flex whitespace-nowrap animate-marquee will-change-transform" style={{ animationDuration: `${Math.max(4, Math.min(12, (item?.Name || '').length * 0.15))}s` }}>
+            <div className="flex whitespace-nowrap animate-marquee will-change-transform" style={{ animationDuration: `${Math.max(3, Math.min(7, (item?.Name || '').length * 0.08))}s` }}>
               <span className="pr-8 font-bold text-white text-xs flex-shrink-0">{item?.Name}</span>
               <span className="pr-8 font-bold text-white text-xs flex-shrink-0" aria-hidden>{item?.Name}</span>
             </div>

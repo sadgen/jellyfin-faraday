@@ -503,6 +503,8 @@ export default function FloatingVideoWindow({
 
   // INLINE VR Projection State (Auto-detected on load)
   const [isVrActive, setIsVrActive] = useState(false);
+  // 用户手动退出 VR 后，本次条目内不再自动重开（换片重置）
+  const vrUserDisabledRef = useRef(false);
   const [detectedVrMode, setDetectedVrMode] = useState('180_3d_sbs');
 
   // Progress & Duration
@@ -807,10 +809,16 @@ export default function FloatingVideoWindow({
     const isResumeSeek = !!currentPlayingPart.UserData?.PlaybackPositionTicks;
 
     // Auto-detect VR Video format (pure 2D vs 3D-to-2D vs true VR)
+    // 换片重置手动退出标记
+    vrUserDisabledRef.current = false;
     const initialVr = detectVrVideo(currentPlayingPart, videoEl);
     if (initialVr.isVr) {
       setIsVrActive(true);
       setDetectedVrMode(initialVr.mode);
+      if (typeof setSmoothToast === 'function') {
+        setSmoothToast('🥽 已自动进入 VR 全景（菜单「VR 全景视点」或右上角 ✕ 可退出）');
+        setTimeout(() => setSmoothToast(''), 4000);
+      }
     } else {
       setIsVrActive(false);
     }
@@ -834,7 +842,7 @@ export default function FloatingVideoWindow({
       }
       // Re-verify with decoded video dimensions
       const vrCheck = detectVrVideo(currentPlayingPart, videoEl);
-      if (vrCheck.isVr) {
+      if (vrCheck.isVr && !vrUserDisabledRef.current) {
         setIsVrActive(true);
         setDetectedVrMode(vrCheck.mode);
       }
@@ -1521,7 +1529,7 @@ export default function FloatingVideoWindow({
         <InlineVrCanvas
           videoRef={videoRef}
           isActive={isVrActive}
-          onClose={() => setIsVrActive(false)}
+          onClose={() => { vrUserDisabledRef.current = true; setIsVrActive(false); }}
           initialMode={detectedVrMode}
           gyroActive={(isVrActive || cropThird) && (playbackDefaults.gyroSweepDeg || 90) > 0}
           recenterSignal={vrRecenterTick}
@@ -1968,7 +1976,13 @@ export default function FloatingVideoWindow({
 
                         {/* VR 全景 */}
                         <button
-                          onClick={() => setIsVrActive(prev => !prev)}
+                          onClick={() => {
+                            setIsVrActive(prev => {
+                              if (prev) vrUserDisabledRef.current = true;
+                              return !prev;
+                            });
+                            setShowMoreMenu(false);
+                          }}
                           className="flex items-center justify-between py-1.5 px-2 rounded-lg hover:bg-white/10 text-gray-200 transition"
                         >
                           <span className="flex items-center gap-2">

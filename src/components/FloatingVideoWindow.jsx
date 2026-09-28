@@ -110,6 +110,17 @@ export default function FloatingVideoWindow({
   // 音量竖向滑杆弹层
   const [showVolumePop, setShowVolumePop] = useState(false);
 
+  // 悬浮控制栏显隐：点画面切换；播放中 3s 自动隐藏，暂停时常显
+  const [controlsVisible, setControlsVisible] = useState(false);
+  const toggleControls = useCallback(() => {
+    setControlsVisible(prev => !prev);
+  }, []);
+  useEffect(() => {
+    if (!controlsVisible || !isPlaying) return;
+    const t = setTimeout(() => setControlsVisible(false), 3000);
+    return () => clearTimeout(t);
+  }, [controlsVisible, isPlaying]);
+
 
   // 横屏：元素全屏 + 锁定横向（Android Chrome 支持 orientation.lock；桌面仅全屏）
   const [isLandscape, setIsLandscape] = useState(false);
@@ -293,9 +304,6 @@ export default function FloatingVideoWindow({
       el.removeEventListener('touchmove', onMove);
     };
   }, [cropFill]);
-
-  // Long-press Drag state & tactile feedback for mobile
-  const [isLongPressDragging, setIsLongPressDragging] = useState(false);
 
   // 响应式视口（替代渲染期直读 window.innerWidth / innerHeight）
   const { width: vpWidth, height: vpHeight } = useViewport();
@@ -584,7 +592,6 @@ export default function FloatingVideoWindow({
     disableLongPressBoost: true,
     enableLongPressDrag: true,
     onLongPressDragStart: () => {
-      setIsLongPressDragging(true);
       if (!cropFillRef.current) {
         setIsDragging(true);
         isCustomPositionRef.current = true;
@@ -607,7 +614,6 @@ export default function FloatingVideoWindow({
       setLayout(prev => ({ ...prev, left: newX, top: newY }));
     },
     onLongPressDragEnd: () => {
-      setIsLongPressDragging(false);
       setIsDragging(false);
     },
     onSeek: (target) => {
@@ -633,6 +639,9 @@ export default function FloatingVideoWindow({
     },
     onTogglePlay: () => {
       togglePlay();
+    },
+    onTap: () => {
+      toggleControls();
     },
     normalSpeed: playbackSpeed,
     onSpeedChange: (speed) => {
@@ -1030,6 +1039,14 @@ export default function FloatingVideoWindow({
 
   // VR 全景开启时，画面上的鼠标用于环视视角；取中铺满时横向拖动 = 全景平移；均不拖动窗口
   const handleMouseDownVideoArea = (e) => {
+    // 桌面点击画面（无拖动）= 切换悬浮控制栏
+    const downX = e.clientX;
+    const downY = e.clientY;
+    const onMouseUpCheck = (up) => {
+      window.removeEventListener('mouseup', onMouseUpCheck);
+      if (Math.hypot(up.clientX - downX, up.clientY - downY) < 5) toggleControls();
+    };
+    window.addEventListener('mouseup', onMouseUpCheck);
     if (isVrActive || isMaximized) return;
     if (cropFillRef.current) {
       e.preventDefault();
@@ -1548,12 +1565,11 @@ export default function FloatingVideoWindow({
           </span>
         </div>
 
-        <div className="flex items-center gap-1">
-          {/* 手机端或窄窗模式：控制全部上收头部，图标化无文字 */}
-          {(isMobileViewport || layout.width < 460) ? (
-            <>
-          {headerControls}
-              {/* 更多功能下拉菜单 */}
+
+      </div>
+
+      {/* 更多功能菜单：悬浮控制栏展开（窗口根层级，避免被视口裁剪） */}
+      {showMoreMenu && (
               <div className="relative">
                 <button
                   onClick={() => setShowMoreMenu(prev => !prev)}
@@ -1569,7 +1585,7 @@ export default function FloatingVideoWindow({
                   <>
                     <div className="fixed inset-0 z-40" onClick={() => setShowMoreMenu(false)} />
                     <div
-                      className="absolute right-0 top-7 w-60 bg-[#0d131f] border-2 border-cyan-400/70 rounded-2xl p-2.5 shadow-[0_20px_60px_rgba(0,0,0,0.95)] flex flex-col gap-2 z-50 text-xs animate-in fade-in zoom-in-95 duration-100 max-h-[75vh] overflow-y-auto"
+                      className="absolute right-0 bottom-12 w-60 bg-[#0d131f] border-2 border-cyan-400/70 rounded-2xl p-2.5 shadow-[0_20px_60px_rgba(0,0,0,0.95)] flex flex-col gap-2 z-50 text-xs animate-in fade-in zoom-in-95 duration-100 max-h-[75vh] overflow-y-auto"
                       onClick={(e) => e.stopPropagation()}
                     >
                       <div className="flex items-center justify-between border-b border-white/10 pb-1.5 px-1">
@@ -1794,301 +1810,7 @@ export default function FloatingVideoWindow({
                   </>
                 )}
               </div>
-            </>
-          ) : (
-            <>
-              {headerControls}
-
-              {/* Fast-Forward / Rewind Speed Tier Selector (3 档: 慢 5s, 中 15s, 快 30s) */}
-              <div className="relative">
-                <button
-                  onClick={() => setShowSeekSpeedMenu(!showSeekSpeedMenu)}
-                  className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[11px] font-bold text-gray-400 hover:text-cyan-300 hover:bg-white/10 transition"
-                  title="设置快进/快退/滚轮寻轨步长 (慢 5s / 中 15s / 快 30s)"
-                >
-                  <FastForward size={12} className="text-cyan-400" />
-                  <span>{SEEK_SPEED_OPTIONS.find(o => o.id === seekSpeed)?.shortLabel || '15s'}</span>
-                </button>
-
-                {showSeekSpeedMenu && (
-                  <div
-                    className="absolute right-0 top-7 w-36 glass-panel rounded-xl shadow-2xl py-1 z-50 text-xs text-gray-200 divide-y divide-white/5 animate-in fade-in zoom-in-95 duration-100"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <div className="px-3 py-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider">
-                      快进/快退步长
-                    </div>
-                    {SEEK_SPEED_OPTIONS.map(opt => (
-                      <button
-                        key={opt.id}
-                        onClick={() => {
-                          setStoredSeekSpeed(opt.id);
-                          setSeekSpeed(opt.id);
-                          setShowSeekSpeedMenu(false);
-                        }}
-                        className={`w-full px-3 py-1.5 text-left flex items-center justify-between transition ${
-                          seekSpeed === opt.id
-                            ? 'bg-cyan-500/20 text-cyan-300 font-bold'
-                            : 'hover:bg-white/10 text-gray-300'
-                        }`}
-                      >
-                        <span>{opt.label}</span>
-                        {seekSpeed === opt.id && <span className="text-cyan-400 text-xs">✓</span>}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Subtitles & MeiamSub Download */}
-              <button
-                onClick={() => setShowSubtitleModal(true)}
-                className={`p-1 rounded transition ${
-                  selectedSubtitleIndex !== -1 ? 'text-cyan-300 bg-cyan-500/20' : 'text-gray-400 hover:text-cyan-300'
-                }`}
-                title="字幕管理与在线下载 (迅雷/MeiamSub/射手)"
-              >
-                <Subtitles size={13} />
-              </button>
-
-              {/* Quality & Transcode Selector Menu */}
-              <div className="relative">
-                <button
-                  onClick={() => setShowQualityMenu(!showQualityMenu)}
-                  className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-bold transition ${
-                    streamQuality !== 'direct'
-                      ? 'bg-cyan-500/30 text-cyan-300 border border-cyan-400/50 shadow-sm shadow-cyan-500/30'
-                      : 'text-gray-400 hover:text-cyan-300 hover:bg-white/10'
-                  }`}
-                  title="切换播放画质 / 转码模式"
-                >
-                  <Zap size={12} className={streamQuality !== 'direct' ? 'fill-cyan-400 text-cyan-400' : ''} />
-                  <span>{QUALITY_OPTIONS.find(q => q.id === streamQuality)?.shortLabel || '原画'}</span>
-                </button>
-
-                {showQualityMenu && (
-                  <div
-                    className="absolute right-0 top-7 w-44 glass-panel rounded-xl shadow-2xl py-1 z-50 text-xs text-gray-200 divide-y divide-white/5 animate-in fade-in zoom-in-95 duration-100"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <div className="px-3 py-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider">
-                      选择画质 / 转码
-                    </div>
-                    {QUALITY_OPTIONS.map(opt => (
-                      <button
-                        key={opt.id}
-                        onClick={() => changeStreamQuality(opt.id, false)}
-                        className={`w-full px-3 py-1.5 text-left flex items-center justify-between transition ${
-                          streamQuality === opt.id
-                            ? 'bg-cyan-500/20 text-cyan-300 font-bold'
-                            : 'hover:bg-white/10 text-gray-300'
-                        }`}
-                      >
-                        <span>{opt.label}</span>
-                        {streamQuality === opt.id && <span className="text-cyan-400 text-xs">✓</span>}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Refresh / Reload Stream (to load newly downloaded subs) */}
-              <button
-                onClick={handleReloadStream}
-                className="p-1 rounded text-gray-400 hover:text-cyan-300 transition"
-                title="刷新流与媒体信息 (重新加载新下载字幕)"
-              >
-                <RefreshCw size={13} />
-              </button>
-
-              {/* Poster PIP Toggle */}
-              <button
-                onClick={() => setShowPinnedPoster(!showPinnedPoster)}
-                className={`p-1 rounded transition ${
-                  showPinnedPoster ? 'text-cyan-300 bg-cyan-500/20' : 'text-gray-400 hover:text-cyan-300'
-                }`}
-                title="海报画中画 (默认开启 1.5倍)"
-              >
-                <ImageIcon size={13} />
-              </button>
-
-              {/* Inline VR Toggle */}
-              <button
-                onClick={() => setIsVrActive(!isVrActive)}
-                className={`p-1 rounded transition ${
-                  isVrActive ? 'text-amber-300 bg-amber-500/30 animate-pulse' : 'text-gray-400 hover:text-amber-400'
-                }`}
-                title="🥽 开启/退出 当前窗口 VR 全景"
-              >
-                <Glasses size={13} />
-              </button>
-
-              {/* Favorite */}
-              <button
-                onClick={handleToggleFavorite}
-                className={`p-1 rounded transition ${
-                  isFavorite ? 'text-amber-400' : 'text-gray-400 hover:text-amber-400'
-                }`}
-                title={isFavorite ? '取消收藏' : '加入最爱'}
-              >
-                <Star size={13} className={isFavorite ? 'fill-amber-400' : ''} />
-              </button>
-
-              {/* Played */}
-              <button
-                onClick={handleTogglePlayed}
-                className="p-1 rounded text-gray-400 hover:text-cyan-300 transition"
-                title={item?.UserData?.Played ? '标记为未播' : '标记为已播'}
-              >
-                {item?.UserData?.Played ? <EyeOff size={13} /> : <Eye size={13} />}
-              </button>
-
-              {/* 快捷打标 */}
-              <div className="relative">
-                <button
-                  onClick={() => setShowTagMenu(prev => !prev)}
-                  className={`p-1 rounded transition ${
-                    (item?.Tags?.length || 0) > 0 ? 'text-cyan-300 bg-cyan-500/20' : 'text-gray-400 hover:text-cyan-300'
-                  }`}
-                  title="快捷打标 (极品/精选/收藏片段/自制等)"
-                >
-                  <Tag size={13} />
-                </button>
-
-                {showTagMenu && (
-                  <div
-                    className="absolute right-0 top-7 z-50 animate-in fade-in zoom-in-95 duration-100"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <QuickTagSelector
-                      item={item}
-                      onUpdateItem={onUpdateItem}
-                      onClose={() => setShowTagMenu(false)}
-                    />
-                  </div>
-                )}
-              </div>
-
-              {/* 画面比例与水平镜像 */}
-              <div className="relative">
-                <button
-                  onClick={() => setShowAspectMenu(prev => !prev)}
-                  className={`p-1 rounded transition ${
-                    aspectMode !== 'contain' || flipH ? 'text-cyan-300 bg-cyan-500/20' : 'text-gray-400 hover:text-cyan-300'
-                  }`}
-                  title="画面比例与镜像 (原比例/铺满/拉伸/水平镜像)"
-                >
-                  <Scaling size={13} />
-                </button>
-
-                {showAspectMenu && (
-                  <div
-                    className="absolute right-0 top-7 w-36 glass-panel rounded-xl shadow-2xl py-1 z-50 text-xs text-gray-200 divide-y divide-white/5 animate-in fade-in zoom-in-95 duration-100"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <div className="px-3 py-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider">
-                      画面比例
-                    </div>
-                    {[
-                      { id: 'contain', label: '原比例' },
-                      { id: 'cover', label: '铺满裁剪' },
-                      { id: 'fill', label: '满屏拉伸' }
-                    ].map(opt => (
-                      <button
-                        key={opt.id}
-                        onClick={() => { setAspectMode(opt.id); setShowAspectMenu(false); }}
-                        className={`w-full px-3 py-1.5 text-left flex items-center justify-between transition ${
-                          aspectMode === opt.id ? 'bg-cyan-500/20 text-cyan-300 font-bold' : 'hover:bg-white/10 text-gray-300'
-                        }`}
-                      >
-                        <span>{opt.label}</span>
-                        {aspectMode === opt.id && <span className="text-cyan-400 text-xs">✓</span>}
-                      </button>
-                    ))}
-                    <div className="py-1">
-                      <button
-                        onClick={() => { setFlipH(prev => !prev); setShowAspectMenu(false); }}
-                        className={`w-full px-3 py-1.5 text-left flex items-center justify-between transition ${
-                          flipH ? 'bg-cyan-500/20 text-cyan-300 font-bold' : 'hover:bg-white/10 text-gray-300'
-                        }`}
-                      >
-                        <span className="flex items-center gap-1.5">
-                          <FlipHorizontal size={13} />
-                          <span>水平镜像</span>
-                        </span>
-                        {flipH && <span className="text-cyan-400 text-xs">✓</span>}
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Delete Video */}
-              <button
-                onClick={() => setShowDeleteModal(true)}
-                className="p-1 rounded text-gray-400 hover:text-red-400 transition"
-                title="从服务器和磁盘删除"
-              >
-                <Trash2 size={13} />
-              </button>
-
-              {/* External Player Menu */}
-              <div className="relative">
-                <button
-                  onClick={() => setShowPlayerMenu(!showPlayerMenu)}
-                  className="p-1 rounded hover:bg-white/10 text-gray-400 hover:text-cyan-300 transition"
-                  title="MPV / 外部播放器"
-                >
-                  <ExternalLink size={13} />
-                </button>
-
-                {showPlayerMenu && (
-                  <div
-                    className="absolute right-0 top-7 w-32 glass-panel rounded-xl shadow-2xl py-1 z-50 text-xs text-gray-200 divide-y divide-white/5 animate-in fade-in zoom-in-95 duration-100"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <button
-                      onClick={() => { launchPlayer('mpv', item); setShowPlayerMenu(false); }}
-                      className="w-full px-3 py-1.5 text-left hover:bg-white/10 flex items-center justify-between text-cyan-300 font-medium"
-                    >
-                      <span>MPV 播放器</span>
-                      <span className="text-[10px]">mpv://</span>
-                    </button>
-                    <button
-                      onClick={() => { launchPlayer('potplayer', item); setShowPlayerMenu(false); }}
-                      className="w-full px-3 py-1.5 text-left hover:bg-white/10 flex items-center justify-between text-amber-300"
-                    >
-                      <span>PotPlayer</span>
-                      <span className="text-[10px]">pot://</span>
-                    </button>
-                  </div>
-                )}
-              </div>
-            </>
-          )}
-
-          <button
-            onClick={handleSkipNext}
-            className="p-1 rounded hover:bg-white/10 text-gray-400 hover:text-cyan-300 transition"
-            title={
-              partsList.length > 1 && currentPartIndex < partsList.length - 1
-                ? `播放下一分段 (Part ${currentPartIndex + 2}/${partsList.length})`
-                : '跳过当前视频 (下一个顶上来)'
-            }
-          >
-            <SkipForward size={13} />
-          </button>
-
-          {/* Close window (closes this window & promotes next windows forward) */}
-          <button
-            onClick={() => onClose && onClose(id)}
-            className="p-1 rounded hover:bg-red-500/20 text-gray-400 hover:text-red-400 transition"
-            title="关闭窗口 (中键 / 下一个顶上来)"
-          >
-            <X size={14} />
-          </button>
-        </div>
-      </div>
+      )}
 
       {/* 智能跳前奏起播 提示 */}
       {smartStartToast && (
@@ -2111,15 +1833,6 @@ export default function FloatingVideoWindow({
         onMouseDown={handleMouseDownVideoArea}
         {...touchHandlers}
       >
-        {/* Long-press Window Dragging Active Feedback Overlay */}
-        {isLongPressDragging && (
-          <div className="absolute inset-0 z-40 bg-cyan-950/40 backdrop-blur-[1px] flex items-center justify-center pointer-events-none rounded-2xl border-2 border-cyan-400">
-            <div className="px-3.5 py-1.5 rounded-full bg-black/85 border border-cyan-400 text-cyan-300 text-xs font-bold flex items-center gap-1.5 shadow-2xl animate-pulse">
-              <span>🖐️ {cropFill ? '全景平移...' : '正在拖动窗口...'}</span>
-            </div>
-          </div>
-        )}
-
         {/* Smooth Mode Notification Toast */}
         {smoothToast && (
           <div className="absolute top-2 left-1/2 -translate-x-1/2 z-40 px-3 py-1 bg-black/85 backdrop-blur-md border border-cyan-400/60 rounded-full text-[11px] font-bold text-cyan-300 shadow-xl pointer-events-none animate-in fade-in duration-150">
@@ -2271,6 +1984,45 @@ export default function FloatingVideoWindow({
           <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/30 pointer-events-none">
             <div className="w-11 h-11 rounded-full bg-black/60 border border-white/20 flex items-center justify-center text-white">
               <Play size={20} className="ml-0.5 fill-white" />
+            </div>
+          </div>
+        )}
+
+        {/* 悬浮控制栏：单手区（贴视频底部），点画面切换显隐，播放中 3s 自动隐藏 */}
+        {controlsVisible && (
+          <div
+            className="absolute inset-x-1.5 bottom-1.5 z-30 flex items-center justify-between gap-0.5 rounded-xl bg-black/60 backdrop-blur-md px-1 py-1 text-gray-300"
+            onClick={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-0.5">
+              {headerControls}
+            </div>
+            <div className="flex items-center gap-0.5">
+              <button
+                onClick={handleSkipNext}
+                className="p-1.5 rounded hover:bg-white/10 text-gray-300 hover:text-cyan-300 transition"
+                title={partsList.length > 1 && currentPartIndex < partsList.length - 1 ? `播放下一分段 (Part ${currentPartIndex + 2}/${partsList.length})` : '跳过当前视频 (下一个顶上来)'}
+              >
+                <SkipForward size={13} />
+              </button>
+              <div className="relative">
+                <button
+                  onClick={() => setShowMoreMenu(prev => !prev)}
+                  className={`p-1.5 rounded transition ${showMoreMenu ? 'bg-cyan-500/30 text-cyan-300' : 'text-gray-400 hover:text-cyan-300 hover:bg-white/10'}`}
+                  title="更多功能与播放选项"
+                >
+                  <MoreVertical size={14} />
+                </button>
+              </div>
+              <button
+                onClick={() => onClose && onClose(id)}
+                className="p-1.5 rounded hover:bg-red-500/20 text-gray-400 hover:text-red-400 transition"
+                title="关闭窗口"
+              >
+                <X size={14} />
+              </button>
             </div>
           </div>
         )}

@@ -42,6 +42,7 @@ export function useTouchGestures({
   onTogglePlay,
   normalSpeed = 1.0,
   onSpeedChange,
+  onTap,
   disableLongPressBoost = false,
   enableLongPressDrag = false,
   onLongPressDragStart,
@@ -68,11 +69,13 @@ export function useTouchGestures({
   const isBoostedRef = useRef(false);
   const boostRestoreSpeedRef = useRef(1.0); // 冲锋前的档位（修复松手恢复到已提升速度的竞态）
   const fadeTimerRef = useRef(null);
+  const tapTimerRef = useRef(null);
 
   // Unmount cleanup for the fade-out timer
   useEffect(() => () => {
     if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
     if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+    if (tapTimerRef.current) clearTimeout(tapTimerRef.current);
   }, []);
 
   /** 手势结束后让提示滞留片刻再淡出移除 */
@@ -98,6 +101,12 @@ export function useTouchGestures({
     const touch = e.touches[0];
     const rect = containerRef.current?.getBoundingClientRect();
     if (!rect) return;
+
+    // 新触摸取消挂起的单击（双击的第二下会在此被识别，单击不触发）
+    if (tapTimerRef.current) {
+      clearTimeout(tapTimerRef.current);
+      tapTimerRef.current = null;
+    }
 
     // A brand-new touch cancels any lingering fade-out toast immediately
     if (fadeTimerRef.current) {
@@ -312,7 +321,15 @@ export function useTouchGestures({
     } else {
       setGestureState({ type: null, value: 0, text: '', fading: false });
     }
-  }, [gestureState, onSeek, onSeekPreviewEnd, onSpeedChange, videoRef, scheduleGestureFade, onLongPressDragEnd]);
+
+    // 无手势单击（延迟派发，给双击留出识别窗口）
+    if (touchActionRef.current === null && !isDraggingWindowRef.current && !wasBoosted && onTap) {
+      tapTimerRef.current = setTimeout(() => {
+        tapTimerRef.current = null;
+        onTap();
+      }, 280);
+    }
+  }, [gestureState, onSeek, onSeekPreviewEnd, onSpeedChange, videoRef, scheduleGestureFade, onLongPressDragEnd, onTap]);
 
   return {
     gestureState,

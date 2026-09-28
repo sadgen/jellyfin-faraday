@@ -231,39 +231,6 @@ export default function FloatingVideoWindow({
     if (videoRef.current) videoRef.current.style.objectPosition = '';
   };
 
-  // 手机 + 取中铺满：陀螺仪水平转动在整幅三屏拼接画面上左右平移（全景效果）。
-  // 零点 = 开启瞬间的朝向（显示中屏）；转动 180° ≈ 扫完整幅画面；传感器不可用时静止在中屏
-  const gyroHeadingRef = useRef(null);
-  useEffect(() => {
-    if (!cropThird || !cropFill || window.innerWidth >= 768) {
-      gyroHeadingRef.current = null;
-      return;
-    }
-    if ((playbackDefaultsRef.current.gyroSweepDeg || 90) <= 0) {
-      gyroHeadingRef.current = null;
-      return;
-    }
-    const handleDeviceOrientation = (e) => {
-      if (e.alpha === null || e.beta === null || e.gamma === null) return;
-      const heading = deviceHeadingRad(e);
-      if (gyroHeadingRef.current === null) {
-        gyroHeadingRef.current = heading;
-        return;
-      }
-      let d = heading - gyroHeadingRef.current;
-      if (d > Math.PI) d -= 2 * Math.PI;
-      if (d < -Math.PI) d += 2 * Math.PI;
-      // 死区 + 低通：滤掉手持微颤（<0.6°/事件忽略，之后 EMA 平滑跟进）
-      if (Math.abs(d) < 0.012) return;
-      gyroHeadingRef.current += d * 0.15;
-      const applied = d * 0.15;
-      const sweepRad = Math.PI / 180 * (playbackDefaultsRef.current.gyroSweepDeg || 90);
-      cropPanRef.current = Math.max(0, Math.min(100, cropPanRef.current - applied * (100 / sweepRad)));
-      if (videoRef.current) videoRef.current.style.objectPosition = `${cropPanRef.current}% 50%`;
-    };
-    window.addEventListener('deviceorientation', handleDeviceOrientation, true);
-    return () => window.removeEventListener('deviceorientation', handleDeviceOrientation, true);
-  }, [cropThird, cropFill, playbackDefaults.gyroSweepDeg]);
 
   // 取中铺满状态下双指张开放大 → 手机全屏（Android Chrome 的元素级全屏可用；
   // iPhone Safari 不支持元素级 requestFullscreen，表达式静默跳过）；双指收拢退出
@@ -420,6 +387,40 @@ export default function FloatingVideoWindow({
   const [playbackDefaults, setPlaybackDefaultsState] = useState(() => getPlaybackDefaults());
   const playbackDefaultsRef = useRef(playbackDefaults);
   playbackDefaultsRef.current = playbackDefaults;
+
+  // 手机 + 取中铺满：陀螺仪水平转动在整幅三屏拼接画面上左右平移（全景效果）。
+  // 零点 = 开启瞬间的朝向（显示中屏）；转动 180° ≈ 扫完整幅画面；传感器不可用时静止在中屏
+  const gyroHeadingRef = useRef(null);
+  useEffect(() => {
+    if (!cropThird || !cropFill || window.innerWidth >= 768) {
+      gyroHeadingRef.current = null;
+      return;
+    }
+    if ((playbackDefaultsRef.current.gyroSweepDeg || 90) <= 0) {
+      gyroHeadingRef.current = null;
+      return;
+    }
+    const handleDeviceOrientation = (e) => {
+      if (e.alpha === null || e.beta === null || e.gamma === null) return;
+      const heading = deviceHeadingRad(e);
+      if (gyroHeadingRef.current === null) {
+        gyroHeadingRef.current = heading;
+        return;
+      }
+      let d = heading - gyroHeadingRef.current;
+      if (d > Math.PI) d -= 2 * Math.PI;
+      if (d < -Math.PI) d += 2 * Math.PI;
+      // 死区 + 低通：滤掉手持微颤（<0.6°/事件忽略，之后 EMA 平滑跟进）
+      if (Math.abs(d) < 0.012) return;
+      gyroHeadingRef.current += d * 0.15;
+      const applied = d * 0.15;
+      const sweepRad = Math.PI / 180 * (playbackDefaultsRef.current.gyroSweepDeg || 90);
+      cropPanRef.current = Math.max(0, Math.min(100, cropPanRef.current - applied * (100 / sweepRad)));
+      if (videoRef.current) videoRef.current.style.objectPosition = `${cropPanRef.current}% 50%`;
+    };
+    window.addEventListener('deviceorientation', handleDeviceOrientation, true);
+    return () => window.removeEventListener('deviceorientation', handleDeviceOrientation, true);
+  }, [cropThird, cropFill, playbackDefaults.gyroSweepDeg]);
 
   useEffect(() => {
     const handleDefaultsChanged = (e) => {

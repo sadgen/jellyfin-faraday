@@ -318,6 +318,11 @@ export default function App() {
     };
   }, [selectedViewId, searchKeyword, statusFilter, sortMethod, selectedGenre, selectedYear, selectedLetter, fetchAllMedia]);
 
+  // 手机判定：窄屏或触屏设备（横屏手机 innerWidth 超 768 也要默认取中）
+  const isPhoneViewport = () =>
+    typeof window !== 'undefined' && (window.innerWidth < 768 ||
+      (navigator.maxTouchPoints > 1 && window.innerWidth < 1200));
+
   // ==================== FLOATING 3-WINDOW PIP SYSTEM ====================
   // 安卓壳 v1 为单实例原生播放：网页浮窗窗格画面会被原生层接管（互相顶替），
   // 多窗同播属 v2 多实例范围，入口直接降级提示
@@ -334,7 +339,7 @@ export default function App() {
         const occupiedSlots = prev.map(w => w.slotIndex);
         const targetSlot = [0, 1, 2].find(s => !occupiedSlots.includes(s)) ?? prev.length;
         // 手机上单开浮窗默认三屏取中铺满（窗口挂 autoCrop 标记，多窗补齐不触发）
-        const autoCrop = typeof window !== 'undefined' && window.innerWidth < 768;
+        const autoCrop = isPhoneViewport();
         return [
           ...prev,
           {
@@ -367,7 +372,7 @@ export default function App() {
           item,
           startSecond,
           timestamp: Date.now(),
-          autoCrop: typeof window !== 'undefined' && window.innerWidth < 768
+          autoCrop: isPhoneViewport()
         }
       ];
     });

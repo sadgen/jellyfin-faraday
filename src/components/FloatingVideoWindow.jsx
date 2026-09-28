@@ -748,7 +748,9 @@ export default function FloatingVideoWindow({
   const autoCropAppliedRef = useRef(false);
   useEffect(() => {
     if (autoCropAppliedRef.current || isMaximized || !windowData.autoCrop) return;
-    if (window.innerWidth >= 768) return;
+    const phone = window.innerWidth < 768 ||
+      (navigator.maxTouchPoints > 1 && window.innerWidth < 1200);
+    if (!phone) return;
     autoCropAppliedRef.current = true;
     preCropLayoutRef.current = layout;
     setCropThird(true);

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
-import { RotateCcw, Glasses, X } from 'lucide-react';
+import { Glasses, X } from 'lucide-react';
 
 export const VR_MODES = [
   { id: '180_3d_sbs', label: '180° 3D (左右 SBS)' },
@@ -41,7 +41,8 @@ export default function InlineVrCanvas({
   isActive,
   onClose,
   initialMode = '180_3d_sbs',
-  gyroActive = false
+  gyroActive = false,
+  recenterSignal = 0
 }) {
   const containerRef = useRef(null);
   const sceneRef = useRef(null);
@@ -266,6 +267,11 @@ export default function InlineVrCanvas({
   const calibrateGyroRef = useRef(calibrateGyro);
   calibrateGyroRef.current = calibrateGyro;
 
+  // 重置按钮由外部控制盘提供（recenterSignal 递增触发零点校准）
+  useEffect(() => {
+    if (recenterSignal > 0) calibrateGyroRef.current();
+  }, [recenterSignal]);
+
   // Gyroscope / DeviceOrientation Listener on Mobile
   useEffect(() => {
     if (!gyroActive) return;
@@ -276,8 +282,8 @@ export default function InlineVrCanvas({
       // 低通 + 死区：slerp 追目标姿态，滤掉手持微颤（<0.3°/事件忽略）
       if (!gyroQuatRef.current) {
         gyroQuatRef.current = target;
-      } else if (gyroQuatRef.current.angleTo(target) > 0.005) {
-        gyroQuatRef.current.slerp(target, 0.3);
+      } else if (gyroQuatRef.current.angleTo(target) > 0.008) {
+        gyroQuatRef.current.slerp(target, 0.15);
       }
       // 首个事件自动校准一次：开启陀螺仪的瞬间，正对画面中心
       if (!recenterQuatRef.current) calibrateGyroRef.current();
@@ -426,14 +432,6 @@ export default function InlineVrCanvas({
             </button>
           )}
 
-          {/* Reset Orientation / Gyro Recenter */}
-          <button
-            onClick={resetOrientation}
-            className="p-1 rounded-lg bg-black/80 hover:bg-black border border-white/20 text-gray-300 hover:text-cyan-300 transition"
-            title={gyroActive ? '零点校准（当前持机朝向 = 画面正中）' : '视角复位 (居中)'}
-          >
-            <RotateCcw size={12} />
-          </button>
 
           {/* Exit VR */}
           <button

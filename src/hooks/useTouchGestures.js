@@ -70,6 +70,7 @@ export function useTouchGestures({
   const boostRestoreSpeedRef = useRef(1.0); // 冲锋前的档位（修复松手恢复到已提升速度的竞态）
   const fadeTimerRef = useRef(null);
   const tapTimerRef = useRef(null);
+  const touchStartSeenRef = useRef(false);
 
   // Unmount cleanup for the fade-out timer
   useEffect(() => () => {
@@ -114,6 +115,8 @@ export function useTouchGestures({
       fadeTimerRef.current = null;
       setGestureState({ type: null, value: 0, text: '', fading: false });
     }
+
+    touchStartSeenRef.current = true;
 
     const relX = touch.clientX - rect.left;
     const relY = touch.clientY - rect.top;
@@ -322,13 +325,16 @@ export function useTouchGestures({
       setGestureState({ type: null, value: 0, text: '', fading: false });
     }
 
-    // 无手势单击（延迟派发，给双击留出识别窗口）
-    if (touchActionRef.current === null && !isDraggingWindowRef.current && !wasBoosted && onTap) {
+    // 无手势单击（延迟派发，给双击留出识别窗口）。
+    // 必须真实经历过本层的 touchstart（浮层 stopPropagation 掉 touchstart 时
+    // touchend 仍会冒泡到本层，绝不能再派发 tap —— 否则点控制盘按钮会翻转盘的显隐）
+    if (touchStartSeenRef.current && touchActionRef.current === null && !isDraggingWindowRef.current && !wasBoosted && onTap) {
       tapTimerRef.current = setTimeout(() => {
         tapTimerRef.current = null;
         onTap();
       }, 280);
     }
+    touchStartSeenRef.current = false;
   }, [gestureState, onSeek, onSeekPreviewEnd, onSpeedChange, videoRef, scheduleGestureFade, onLongPressDragEnd, onTap]);
 
   return {

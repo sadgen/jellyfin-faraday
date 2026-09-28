@@ -29,7 +29,7 @@ import {
   X, ExternalLink, Star, Eye, EyeOff, Image as ImageIcon,
   Glasses, Trash2, FastForward, Sun, Zap, Gauge, RefreshCw, Subtitles, Film,
   Tag, Scaling, FlipHorizontal, MoreVertical, SlidersHorizontal, Crop, RectangleHorizontal
-} from 'lucide-react';
+, RotateCcw } from 'lucide-react';
 
 function formatTime(seconds) {
   if (!seconds || isNaN(seconds)) return '00:00';
@@ -109,6 +109,8 @@ export default function FloatingVideoWindow({
 
   // 音量竖向滑杆弹层
   const [showVolumePop, setShowVolumePop] = useState(false);
+  // VR 零点校准信号（控制盘按钮递增，InlineVrCanvas 监听执行）
+  const [vrRecenterTick, setVrRecenterTick] = useState(0);
 
 
   // 横屏：元素全屏 + 锁定横向（Android Chrome 支持 orientation.lock；桌面仅全屏）
@@ -249,9 +251,9 @@ export default function FloatingVideoWindow({
       if (d > Math.PI) d -= 2 * Math.PI;
       if (d < -Math.PI) d += 2 * Math.PI;
       // 死区 + 低通：滤掉手持微颤（<0.6°/事件忽略，之后 EMA 平滑跟进）
-      if (Math.abs(d) < 0.01) return;
-      gyroHeadingRef.current += d * 0.3;
-      const applied = d * 0.3;
+      if (Math.abs(d) < 0.012) return;
+      gyroHeadingRef.current += d * 0.15;
+      const applied = d * 0.15;
       const sweepRad = Math.PI / 180 * (playbackDefaultsRef.current.gyroSweepDeg || 90);
       cropPanRef.current = Math.max(0, Math.min(100, cropPanRef.current - applied * (100 / sweepRad)));
       if (videoRef.current) videoRef.current.style.objectPosition = `${cropPanRef.current}% 50%`;
@@ -1505,6 +1507,7 @@ export default function FloatingVideoWindow({
           onClose={() => setIsVrActive(false)}
           initialMode={detectedVrMode}
           gyroActive={isVrActive || cropThird}
+          recenterSignal={vrRecenterTick}
         />
 
         {/* Mobile Touch Gesture HUD Overlay */}
@@ -1594,6 +1597,8 @@ export default function FloatingVideoWindow({
             onClick={(e) => { e.stopPropagation(); toggleControls(); }}
             onMouseDown={(e) => e.stopPropagation()}
             onTouchStart={(e) => e.stopPropagation()}
+            onTouchEnd={(e) => e.stopPropagation()}
+            onTouchCancel={(e) => e.stopPropagation()}
             className="absolute right-2 bottom-2 z-30 w-10 h-10 rounded-full bg-black/60 backdrop-blur-md border border-white/20 flex items-center justify-center text-gray-200 hover:text-cyan-300 shadow-xl transition"
             title="播放控制"
           >
@@ -1608,6 +1613,8 @@ export default function FloatingVideoWindow({
             onClick={(e) => e.stopPropagation()}
             onMouseDown={(e) => e.stopPropagation()}
             onTouchStart={(e) => e.stopPropagation()}
+            onTouchEnd={(e) => e.stopPropagation()}
+            onTouchCancel={(e) => e.stopPropagation()}
           >
             {/* 中心：播放/暂停 */}
             <button
@@ -1692,7 +1699,18 @@ export default function FloatingVideoWindow({
             onClick={(e) => e.stopPropagation()}
             onMouseDown={(e) => e.stopPropagation()}
             onTouchStart={(e) => e.stopPropagation()}
+            onTouchEnd={(e) => e.stopPropagation()}
+            onTouchCancel={(e) => e.stopPropagation()}
           >
+            {isVrActive && (
+              <button
+                onClick={() => setVrRecenterTick(t => t + 1)}
+                className="w-9 h-9 rounded-full bg-black/60 backdrop-blur-md border border-white/15 flex items-center justify-center text-gray-300 hover:text-cyan-300 transition"
+                title="VR 零点校准（当前朝向 = 画面正中）"
+              >
+                <RotateCcw size={14} />
+              </button>
+            )}
             <button
               onClick={handleSkipNext}
               className="w-9 h-9 rounded-full bg-black/60 backdrop-blur-md border border-white/15 flex items-center justify-center hover:text-cyan-300 transition"
@@ -1792,7 +1810,7 @@ export default function FloatingVideoWindow({
         )}
         <div className="flex-1 min-w-0 overflow-hidden" title={item?.Name}>
           {(item?.Name || '').length > 16 ? (
-            <div className="flex whitespace-nowrap animate-marquee will-change-transform" style={{ animationDuration: `${Math.max(8, Math.min(30, (item?.Name || '').length * 0.35))}s` }}>
+            <div className="flex whitespace-nowrap animate-marquee will-change-transform" style={{ animationDuration: `${Math.max(4, Math.min(12, (item?.Name || '').length * 0.15))}s` }}>
               <span className="pr-8 font-bold text-white text-xs flex-shrink-0">{item?.Name}</span>
               <span className="pr-8 font-bold text-white text-xs flex-shrink-0" aria-hidden>{item?.Name}</span>
             </div>

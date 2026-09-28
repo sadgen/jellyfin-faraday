@@ -11,6 +11,7 @@ export const PATROL_INTERVALS = [30, 45, 60, 90];
 
 // 陀螺仪灵敏度：全景/环视「扫完整幅」所需的手机转动角度，越小越灵敏
 export const GYRO_SWEEP_OPTIONS = [
+  { id: 'off', label: '关闭', deg: 0 },
   { id: 'low', label: '低', deg: 180 },
   { id: 'medium', label: '中', deg: 120 },
   { id: 'high', label: '高', deg: 90 },

@@ -239,6 +239,10 @@ export default function FloatingVideoWindow({
       gyroHeadingRef.current = null;
       return;
     }
+    if ((playbackDefaultsRef.current.gyroSweepDeg || 90) <= 0) {
+      gyroHeadingRef.current = null;
+      return;
+    }
     const handleDeviceOrientation = (e) => {
       if (e.alpha === null || e.beta === null || e.gamma === null) return;
       const heading = deviceHeadingRad(e);
@@ -259,7 +263,7 @@ export default function FloatingVideoWindow({
     };
     window.addEventListener('deviceorientation', handleDeviceOrientation, true);
     return () => window.removeEventListener('deviceorientation', handleDeviceOrientation, true);
-  }, [cropThird, cropFill]);
+  }, [cropThird, cropFill, playbackDefaults.gyroSweepDeg]);
 
   // 取中铺满状态下双指张开放大 → 手机全屏（Android Chrome 的元素级全屏可用；
   // iPhone Safari 不支持元素级 requestFullscreen，表达式静默跳过）；双指收拢退出
@@ -1369,6 +1373,22 @@ export default function FloatingVideoWindow({
   const isFavorite = !!item?.UserData?.IsFavorite;
 
 
+  // 标题跑马灯仅在真实溢出时启用（量宽度而非数字数，桌面宽窗不滚）
+  const titleBoxRef = useRef(null);
+  const titleTextRef = useRef(null);
+  const [titleOverflow, setTitleOverflow] = useState(false);
+  useEffect(() => {
+    const check = () => {
+      const box = titleBoxRef.current;
+      const txt = titleTextRef.current;
+      if (box && txt) setTitleOverflow(txt.scrollWidth > box.clientWidth + 2);
+    };
+    check();
+    const ro = new ResizeObserver(check);
+    if (titleBoxRef.current) ro.observe(titleBoxRef.current);
+    return () => ro.disconnect();
+  }, [item?.Name, cropThird, cropFill]);
+
   // 视角重置：VR=零点校准；普通/取中=画面居中
   const handleResetView = () => {
     if (isVrActive) setVrRecenterTick(t => t + 1);
@@ -1502,7 +1522,7 @@ export default function FloatingVideoWindow({
           isActive={isVrActive}
           onClose={() => setIsVrActive(false)}
           initialMode={detectedVrMode}
-          gyroActive={isVrActive || cropThird}
+          gyroActive={(isVrActive || cropThird) && (playbackDefaults.gyroSweepDeg || 90) > 0}
           recenterSignal={vrRecenterTick}
         />
 
@@ -1661,14 +1681,14 @@ export default function FloatingVideoWindow({
             </select>
           </div>
         )}
-        <div className="flex-1 min-w-0 overflow-hidden" title={item?.Name}>
-          {(item?.Name || '').length > 16 ? (
-            <div className="flex whitespace-nowrap animate-marquee will-change-transform" style={{ animationDuration: `${Math.max(3, Math.min(7, (item?.Name || '').length * 0.08))}s` }}>
-              <span className="pr-8 font-bold text-white text-xs flex-shrink-0">{item?.Name}</span>
+        <div ref={titleBoxRef} className="flex-1 min-w-0 overflow-hidden" title={item?.Name}>
+          {titleOverflow ? (
+            <div className="flex whitespace-nowrap animate-marquee will-change-transform" style={{ animationDuration: '8s' }}>
+              <span ref={titleTextRef} className="pr-8 font-bold text-white text-xs flex-shrink-0">{item?.Name}</span>
               <span className="pr-8 font-bold text-white text-xs flex-shrink-0" aria-hidden>{item?.Name}</span>
             </div>
           ) : (
-            <span className="font-bold text-white text-xs truncate block">{item?.Name || '视频预览'}</span>
+            <span ref={titleTextRef} className="font-bold text-white text-xs truncate block">{item?.Name || '视频预览'}</span>
           )}
         </div>
         <button

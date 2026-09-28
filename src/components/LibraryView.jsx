@@ -1710,7 +1710,7 @@ export default function LibraryView({
                   {/* 1. Default Quality */}
                   <div className="flex flex-col gap-1.5">
                       <span className="text-[11px] text-cyan-300 font-bold">🧭 陀螺仪灵敏度（转动多少度扫完整幅全景）</span>
-                      <div className="grid grid-cols-4 gap-1.5">
+                      <div className="grid grid-cols-5 gap-1">
                         {GYRO_SWEEP_OPTIONS.map(o => (
                           <button
                             key={o.id}

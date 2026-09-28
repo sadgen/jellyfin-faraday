@@ -36,11 +36,12 @@ export function calculateSlotStyle(slotIndex) {
       h = Math.round((w * 9 / 16) + uiH);
     }
     const left = Math.max(padding, Math.round((window.innerWidth - w) / 2));
-    // 锚定屏幕中部（slot 0 居中，双窗时向上堆叠），不再贴底
-    const top = Math.max(
-      availTop,
-      Math.min(Math.round(availTop + (availH - h) / 2) - slotIndex * (h + mobileGap), availBottom - h)
-    );
+    // 双窗作为一组整体在可用区垂直居中，组内按序堆叠——保证任意屏高下两窗永不重叠
+    const count = 2;
+    const totalH = count * h + mobileGap;
+    let blockTop = availTop + (availH - totalH) / 2;
+    blockTop = Math.max(availTop, Math.min(blockTop, availBottom - totalH));
+    const top = Math.round(blockTop + slotIndex * (h + mobileGap));
     return {
       left: Math.round(left),
       top: Math.round(top),

@@ -1532,6 +1532,21 @@ export default function LibraryView({
     });
   }, [displayItems, isAllVisibleSelected]);
 
+  // 批量清零播放次数（标记未播放，PlayCount 归零）
+  const handleBatchResetPlayCount = useCallback(async () => {
+    const targets = items.filter(it => selectedItemIds.has(it.Id));
+    if (targets.length === 0) return;
+    const results = await Promise.allSettled(targets.map(it => jellyfin.markPlayed(it.Id, false)));
+    targets.forEach((it, i) => {
+      if (results[i].status === 'fulfilled') {
+        onUpdateItem?.({
+          ...it,
+          UserData: { ...(it.UserData || {}), Played: false, PlayCount: 0 }
+        });
+      }
+    });
+  }, [items, selectedItemIds, onUpdateItem]);
+
   const handleBatchFavorite = useCallback(async (isFav) => {
     const ids = Array.from(selectedItemIds);
     if (ids.length === 0) return;
@@ -3372,6 +3387,16 @@ export default function LibraryView({
           >
             <Star size={13} />
             <span>取消最爱</span>
+          </button>
+
+          {/* Batch Reset Play Count */}
+          <button
+            onClick={handleBatchResetPlayCount}
+            className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/10 text-gray-300 hover:text-cyan-300 font-medium flex items-center gap-1.5 transition"
+            title="将选中的所有媒体标记为未播放（播放次数清零）"
+          >
+            <History size={13} />
+            <span>清零次数</span>
           </button>
 
           {/* Batch Delete */}

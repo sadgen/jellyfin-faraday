@@ -2044,7 +2044,6 @@ export default function FloatingVideoWindow({
                         <button
                           onClick={async () => {
                             if (!item?.Id) return;
-                            if (!confirm(`清零《${item.Name || '该影片'}》的播放次数（标记为未播放）？`)) return;
                             try {
                               await jellyfin.markPlayed(item.Id, false);
                               onUpdateItem?.({

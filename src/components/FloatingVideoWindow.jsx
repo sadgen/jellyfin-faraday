@@ -110,17 +110,6 @@ export default function FloatingVideoWindow({
   // 音量竖向滑杆弹层
   const [showVolumePop, setShowVolumePop] = useState(false);
 
-  // 悬浮控制栏显隐：点画面切换；播放中 3s 自动隐藏，暂停时常显
-  const [controlsVisible, setControlsVisible] = useState(false);
-  const toggleControls = useCallback(() => {
-    setControlsVisible(prev => !prev);
-  }, []);
-  useEffect(() => {
-    if (!controlsVisible || !isPlaying) return;
-    const t = setTimeout(() => setControlsVisible(false), 3000);
-    return () => clearTimeout(t);
-  }, [controlsVisible, isPlaying]);
-
 
   // 横屏：元素全屏 + 锁定横向（Android Chrome 支持 orientation.lock；桌面仅全屏）
   const [isLandscape, setIsLandscape] = useState(false);
@@ -441,6 +430,17 @@ export default function FloatingVideoWindow({
 
   // Playback state
   const [isPlaying, setIsPlaying] = useState(true);
+
+  // 悬浮控制栏显隐：点画面切换；播放中 3s 自动隐藏，暂停时常显
+  const [controlsVisible, setControlsVisible] = useState(false);
+  const toggleControls = useCallback(() => {
+    setControlsVisible(prev => !prev);
+  }, []);
+  useEffect(() => {
+    if (!controlsVisible || !isPlaying) return;
+    const t = setTimeout(() => setControlsVisible(false), 3000);
+    return () => clearTimeout(t);
+  }, [controlsVisible, isPlaying]);
   const [playbackSpeed, setPlaybackSpeed] = useState(() => playbackDefaults.speed || 1.0);
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
@@ -1585,7 +1585,7 @@ export default function FloatingVideoWindow({
                   <>
                     <div className="fixed inset-0 z-40" onClick={() => setShowMoreMenu(false)} />
                     <div
-                      className="absolute right-0 bottom-12 w-60 bg-[#0d131f] border-2 border-cyan-400/70 rounded-2xl p-2.5 shadow-[0_20px_60px_rgba(0,0,0,0.95)] flex flex-col gap-2 z-50 text-xs animate-in fade-in zoom-in-95 duration-100 max-h-[75vh] overflow-y-auto"
+                      className="fixed right-2 bottom-16 w-60 bg-[#0d131f] border-2 border-cyan-400/70 rounded-2xl p-2.5 shadow-[0_20px_60px_rgba(0,0,0,0.95)] flex flex-col gap-2 z-50 text-xs animate-in fade-in zoom-in-95 duration-100 max-h-[75vh] overflow-y-auto"
                       onClick={(e) => e.stopPropagation()}
                     >
                       <div className="flex items-center justify-between border-b border-white/10 pb-1.5 px-1">

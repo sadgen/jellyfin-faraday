@@ -29,7 +29,7 @@ import {
   X, ExternalLink, Star, Eye, EyeOff, Image as ImageIcon,
   Glasses, Trash2, FastForward, Sun, Zap, Gauge, RefreshCw, Subtitles, Film,
   Tag, Scaling, FlipHorizontal, MoreVertical, SlidersHorizontal, Crop, RectangleHorizontal
-, RotateCcw , ChevronDown } from 'lucide-react';
+, RotateCcw , ChevronDown , History } from 'lucide-react';
 
 function formatTime(seconds) {
   if (!seconds || isNaN(seconds)) return '00:00';
@@ -108,8 +108,6 @@ export default function FloatingVideoWindow({
   const cropFillRef = useRef(false);
   cropFillRef.current = cropFill;
 
-  // 音量竖向滑杆弹层
-  const [showVolumePop, setShowVolumePop] = useState(false);
   // VR 零点校准信号（控制盘按钮递增，InlineVrCanvas 监听执行）
   const [vrRecenterTick, setVrRecenterTick] = useState(0);
 
@@ -437,11 +435,6 @@ export default function FloatingVideoWindow({
   // Playback state
   const [isPlaying, setIsPlaying] = useState(true);
 
-  // 悬浮控制栏显隐：点画面切换；播放中 3s 自动隐藏，暂停时常显
-  const [controlsVisible, setControlsVisible] = useState(false);
-  const toggleControls = useCallback(() => {
-    setControlsVisible(prev => !prev);
-  }, []);
   const [playbackSpeed, setPlaybackSpeed] = useState(() => playbackDefaults.speed || 1.0);
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
@@ -1376,6 +1369,12 @@ export default function FloatingVideoWindow({
   const isFavorite = !!item?.UserData?.IsFavorite;
 
 
+  // 视角重置：VR=零点校准；普通/取中=画面居中
+  const handleResetView = () => {
+    if (isVrActive) setVrRecenterTick(t => t + 1);
+    else resetCropPan();
+  };
+
   return (
     <div
       ref={containerRef}
@@ -1588,143 +1587,6 @@ export default function FloatingVideoWindow({
           </div>
         )}
 
-        {/* 常驻悬浮钮：控制区收起时的入口（点击展开圆盘） */}
-        {!controlsVisible && (
-          <button
-            onClick={(e) => { e.stopPropagation(); toggleControls(); }}
-            onMouseDown={(e) => e.stopPropagation()}
-            onTouchStart={(e) => e.stopPropagation()}
-            onTouchEnd={(e) => e.stopPropagation()}
-            onTouchCancel={(e) => e.stopPropagation()}
-            className="absolute right-2 bottom-2 z-30 w-10 h-10 rounded-full bg-black/60 backdrop-blur-md border border-white/20 flex items-center justify-center text-gray-200 hover:text-cyan-300 shadow-xl transition"
-            title="播放控制"
-          >
-            <SlidersHorizontal size={16} />
-          </button>
-        )}
-
-        {/* 悬浮控制圆盘：右下角单手区（点视频收起） */}
-        {controlsVisible && (
-          <div
-            className="absolute right-2 bottom-2 z-30 w-32 h-32 rounded-full bg-black/60 backdrop-blur-md border border-white/15 shadow-2xl select-none"
-            onClick={(e) => e.stopPropagation()}
-            onMouseDown={(e) => e.stopPropagation()}
-            onTouchStart={(e) => e.stopPropagation()}
-            onTouchEnd={(e) => e.stopPropagation()}
-            onTouchCancel={(e) => e.stopPropagation()}
-          >
-            {/* 中心：播放/暂停 */}
-            <button
-              onClick={togglePlay}
-              className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-cyan-500/90 hover:bg-cyan-400 text-slate-950 flex items-center justify-center shadow-lg transition"
-              title={isPlaying ? '暂停' : '播放'}
-            >
-              {isPlaying ? <Pause size={19} /> : <Play size={19} className="ml-0.5 fill-slate-950" />}
-            </button>
-            {/* 上：三屏取中 */}
-            <button
-              onClick={handleToggleCropThird}
-              className={`absolute left-1/2 -translate-x-1/2 top-1 w-9 h-9 rounded-full flex items-center justify-center transition ${cropThird ? 'bg-amber-500/40 text-amber-300' : 'text-gray-300 hover:text-amber-300 hover:bg-white/10'}`}
-              title="三屏取中"
-            >
-              <Crop size={15} />
-            </button>
-            {/* 左：字幕（颜色表状态） */}
-            <button
-              onClick={handleToggleSubtitle}
-              className={`absolute left-1 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full flex items-center justify-center transition ${
-                subtitleStreams.length === 0
-                  ? 'text-gray-700'
-                  : selectedSubtitleIndex !== -1
-                    ? 'bg-cyan-500/30 text-cyan-300'
-                    : 'text-gray-300 hover:text-cyan-300 hover:bg-white/10'
-              }`}
-              title={
-                subtitleStreams.length === 0
-                  ? '字幕 (无可用文本字幕)'
-                  : selectedSubtitleIndex !== -1 ? '字幕：开' : '字幕：关'
-              }
-            >
-              <Subtitles size={15} />
-            </button>
-            {/* 右：音量（点开竖向滑杆） */}
-            <div className="absolute right-1 top-1/2 -translate-y-1/2">
-              <button
-                onClick={() => setShowVolumePop(prev => !prev)}
-                className="w-9 h-9 rounded-full flex items-center justify-center text-gray-300 hover:text-cyan-300 hover:bg-white/10 transition"
-                title={`音量 ${Math.round((isMuted ? 0 : volume) * 100)}%`}
-              >
-                {isMuted || volume === 0
-                  ? <VolumeX size={15} className="text-red-400" />
-                  : volume < 0.5
-                    ? <Volume1 size={15} />
-                    : <Volume2 size={15} />}
-              </button>
-              {showVolumePop && (
-                <div className="absolute right-11 bottom-0 z-50 bg-[#0d131f] border border-white/15 rounded-xl px-3 py-2 shadow-2xl flex items-center h-28">
-                  <input
-                    type="range"
-                    min={0} max={1} step={0.05}
-                    value={isMuted ? 0 : volume}
-                    onChange={(e) => {
-                      const v = parseFloat(e.target.value);
-                      setVolume(v);
-                      if (isMuted && v > 0) toggleMute();
-                    }}
-                    className="w-24 rotate-[270deg] accent-cyan-400 cursor-pointer appearance-none bg-white/20 rounded-lg h-1"
-                  />
-                </div>
-              )}
-            </div>
-            {/* 下：横屏（手机） */}
-            {isMobileViewport && (
-              <button
-                onClick={handleLandscapeToggle}
-                className={`absolute left-1/2 -translate-x-1/2 bottom-1 w-9 h-9 rounded-full flex items-center justify-center transition ${isLandscape ? 'bg-cyan-500/30 text-cyan-300' : 'text-gray-300 hover:text-cyan-300 hover:bg-white/10'}`}
-                title="横屏（全屏并锁定横向）"
-              >
-                <RectangleHorizontal size={15} />
-              </button>
-            )}
-          </div>
-        )}
-
-        {/* 盘外贴边：下一个 / 更多 / 关闭 */}
-        {controlsVisible && (
-          <div
-            className="absolute right-1 bottom-[140px] z-30 flex flex-col items-center gap-1.5 text-gray-300"
-            onClick={(e) => e.stopPropagation()}
-            onMouseDown={(e) => e.stopPropagation()}
-            onTouchStart={(e) => e.stopPropagation()}
-            onTouchEnd={(e) => e.stopPropagation()}
-            onTouchCancel={(e) => e.stopPropagation()}
-          >
-            <button
-              onClick={() => {
-                if (isVrActive) setVrRecenterTick(t => t + 1);
-                else resetCropPan();
-              }}
-              className="w-9 h-9 rounded-full bg-black/60 backdrop-blur-md border border-white/15 flex items-center justify-center text-gray-300 hover:text-cyan-300 transition"
-              title={isVrActive ? '视角重置 / 零点校准（当前朝向 = 画面正中）' : '画面居中'}
-            >
-              <RotateCcw size={14} />
-            </button>
-            <button
-              onClick={() => setShowMoreMenu(prev => !prev)}
-              className={`w-9 h-9 rounded-full bg-black/60 backdrop-blur-md border border-white/15 flex items-center justify-center transition ${showMoreMenu ? 'bg-cyan-500/30 text-cyan-300' : 'hover:text-cyan-300'}`}
-              title="更多功能与播放选项"
-            >
-              <MoreVertical size={15} />
-            </button>
-            <button
-              onClick={(e) => { e.stopPropagation(); setControlsVisible(false); }}
-              className="w-9 h-9 rounded-full bg-black/60 backdrop-blur-md border border-white/15 flex items-center justify-center hover:bg-cyan-500/20 hover:text-cyan-300 transition"
-              title="收起控制区"
-            >
-              <ChevronDown size={15} />
-            </button>
-          </div>
-        )}
       </div>
 
       {/* Scrubber & Controls Footer */}
@@ -1810,6 +1672,37 @@ export default function FloatingVideoWindow({
           )}
         </div>
         <button
+          onClick={() => setShowMoreMenu(prev => !prev)}
+          className={`p-1 rounded transition ${showMoreMenu ? 'bg-cyan-500/30 text-cyan-300' : 'text-gray-400 hover:text-cyan-300 hover:bg-white/10'} flex-shrink-0`}
+          title="播放功能选项"
+        >
+          <MoreVertical size={14} />
+        </button>
+        <button
+          onClick={handleResetView}
+          className="p-1 rounded hover:bg-white/10 text-gray-400 hover:text-cyan-300 transition flex-shrink-0"
+          title={isVrActive ? '视角重置 / 零点校准（当前朝向 = 画面正中）' : '画面居中'}
+        >
+          <RotateCcw size={14} />
+        </button>
+        <button
+          onClick={handleToggleSubtitle}
+          className={`p-1 rounded transition flex-shrink-0 ${
+            subtitleStreams.length === 0
+              ? 'text-gray-700'
+              : selectedSubtitleIndex !== -1
+                ? 'text-cyan-300 bg-cyan-500/20'
+                : 'text-gray-400 hover:text-cyan-300'
+          }`}
+          title={
+            subtitleStreams.length === 0
+              ? '字幕 (无可用文本字幕)'
+              : selectedSubtitleIndex !== -1 ? '字幕：开 → 点击关闭' : '字幕：关 → 点击开启'
+          }
+        >
+          <Subtitles size={14} />
+        </button>
+        <button
           onClick={handleSkipNext}
           className="p-1 rounded hover:bg-white/10 text-gray-400 hover:text-cyan-300 transition flex-shrink-0"
           title={partsList.length > 1 && currentPartIndex < partsList.length - 1 ? `播放下一分段 (Part ${currentPartIndex + 2}/${partsList.length})` : '跳过当前视频 (下一个顶上来)'}
@@ -1845,6 +1738,81 @@ export default function FloatingVideoWindow({
                       className="fixed right-2 bottom-48 w-60 bg-[#0d131f] border-2 border-cyan-400/70 rounded-2xl p-2.5 shadow-[0_20px_60px_rgba(0,0,0,0.95)] flex flex-col gap-2 z-50 text-xs animate-in fade-in zoom-in-95 duration-100 max-h-[75vh] overflow-y-auto"
                       onClick={(e) => e.stopPropagation()}
                     >
+                      {/* 0. 播放控制 */}
+                      <div className="flex flex-col gap-1 px-1">
+                        <span className="text-[10px] text-cyan-300 font-bold">▶ 播放控制</span>
+                        <div className="grid grid-cols-2 gap-1">
+                          <button
+                            onClick={togglePlay}
+                            className="py-1.5 px-1 rounded-lg text-[10px] text-center transition flex items-center justify-center gap-1 bg-slate-800 text-gray-200 hover:bg-slate-700 border border-white/10"
+                          >
+                            {isPlaying ? <Pause size={12} /> : <Play size={12} />}
+                            <span>{isPlaying ? '暂停' : '播放'}</span>
+                          </button>
+                          <button
+                            onClick={() => { handleToggleCropThird(); setShowMoreMenu(false); }}
+                            className={`py-1.5 px-1 rounded-lg text-[10px] text-center transition flex items-center justify-center gap-1 border ${
+                              cropThird
+                                ? 'bg-amber-500/30 border-amber-400/60 text-amber-300'
+                                : 'bg-slate-800 text-gray-300 hover:bg-slate-700 border-white/10'
+                            }`}
+                          >
+                            <Crop size={12} />
+                            <span>三屏取中</span>
+                          </button>
+                          {isMobileViewport && (
+                            <button
+                              onClick={handleLandscapeToggle}
+                              className={`py-1.5 px-1 rounded-lg text-[10px] text-center transition flex items-center justify-center gap-1 border ${
+                                isLandscape
+                                  ? 'bg-cyan-500/30 border-cyan-400/60 text-cyan-300'
+                                  : 'bg-slate-800 text-gray-300 hover:bg-slate-700 border-white/10'
+                              }`}
+                            >
+                              <RectangleHorizontal size={12} />
+                              <span>横屏</span>
+                            </button>
+                          )}
+                          <button
+                            onClick={toggleMute}
+                            className="py-1.5 px-1 rounded-lg text-[10px] text-center transition flex items-center justify-center gap-1 bg-slate-800 text-gray-300 hover:bg-slate-700 border border-white/10"
+                          >
+                            {isMuted || volume === 0
+                              ? <VolumeX size={12} className="text-red-400" />
+                              : volume < 0.5
+                                ? <Volume1 size={12} />
+                                : <Volume2 size={12} />}
+                            <span>{isMuted ? '已静音' : `${Math.round(volume * 100)}%`}</span>
+                          </button>
+                        </div>
+                        <div className="flex items-center gap-2 px-1 py-0.5">
+                          <button
+                            onClick={toggleMute}
+                            className="text-gray-300 hover:text-cyan-300 transition flex-shrink-0"
+                            title="静音切换"
+                          >
+                            {isMuted || volume === 0
+                              ? <VolumeX size={13} className="text-red-400" />
+                              : volume < 0.5
+                                ? <Volume1 size={13} />
+                                : <Volume2 size={13} />}
+                          </button>
+                          <input
+                            type="range"
+                            min={0} max={1} step={0.05}
+                            value={isMuted ? 0 : volume}
+                            onChange={(e) => {
+                              const v = parseFloat(e.target.value);
+                              setVolume(v);
+                              if (isMuted && v > 0) toggleMute();
+                            }}
+                            className="flex-1 accent-cyan-400 cursor-pointer appearance-none bg-white/20 rounded-lg h-1"
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                          <span className="text-[10px] font-mono text-gray-400 flex-shrink-0">{Math.round((isMuted ? 0 : volume) * 100)}%</span>
+                        </div>
+                      </div>
+
                       <div className="flex items-center justify-between border-b border-white/10 pb-1.5 px-1">
                         <span className="font-bold text-white text-xs flex items-center gap-1.5">
                           <SlidersHorizontal size={13} className="text-cyan-400" />
@@ -2051,6 +2019,33 @@ export default function FloatingVideoWindow({
                             </button>
                           </div>
                         </div>
+
+                        {/* 清零播放次数 */}
+                        <button
+                          onClick={async () => {
+                            if (!item?.Id) return;
+                            if (!confirm(`清零《${item.Name || '该影片'}》的播放次数（标记为未播放）？`)) return;
+                            try {
+                              await jellyfin.markPlayed(item.Id, false);
+                              onUpdateItem?.({
+                                ...item,
+                                UserData: { ...(item.UserData || {}), Played: false, PlayCount: 0 }
+                              });
+                              setShowMoreMenu(false);
+                            } catch (err) {
+                              alert(err.message || '清零失败');
+                            }
+                          }}
+                          className="flex items-center justify-between py-1.5 px-2 rounded-lg hover:bg-white/10 text-gray-200 transition border-t border-white/10 mt-1"
+                        >
+                          <span className="flex items-center gap-2">
+                            <History size={13} className="text-cyan-400" />
+                            <span>清零播放次数</span>
+                          </span>
+                          <span className="text-[10px] text-gray-400 font-mono">
+                            {item?.UserData?.PlayCount || 0}次
+                          </span>
+                        </button>
 
                         {/* 从磁盘删除 */}
                         <button

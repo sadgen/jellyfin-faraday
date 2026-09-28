@@ -272,8 +272,13 @@ export default function InlineVrCanvas({
 
     const handleDeviceOrientation = (e) => {
       if (e.alpha === null || e.beta === null || e.gamma === null) return;
-      const q = gyroQuatRef.current || (gyroQuatRef.current = new THREE.Quaternion());
-      deviceOrientationToQuat(e.alpha, e.beta, e.gamma, getScreenAngleDeg(), q);
+      const target = deviceOrientationToQuat(e.alpha, e.beta, e.gamma, getScreenAngleDeg(), new THREE.Quaternion());
+      // 低通 + 死区：slerp 追目标姿态，滤掉手持微颤（<0.3°/事件忽略）
+      if (!gyroQuatRef.current) {
+        gyroQuatRef.current = target;
+      } else if (gyroQuatRef.current.angleTo(target) > 0.005) {
+        gyroQuatRef.current.slerp(target, 0.3);
+      }
       // 首个事件自动校准一次：开启陀螺仪的瞬间，正对画面中心
       if (!recenterQuatRef.current) calibrateGyroRef.current();
     };

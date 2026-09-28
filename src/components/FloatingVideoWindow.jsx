@@ -246,11 +246,14 @@ export default function FloatingVideoWindow({
         return;
       }
       let d = heading - gyroHeadingRef.current;
-      gyroHeadingRef.current = heading;
       if (d > Math.PI) d -= 2 * Math.PI;
       if (d < -Math.PI) d += 2 * Math.PI;
+      // 死区 + 低通：滤掉手持微颤（<0.6°/事件忽略，之后 EMA 平滑跟进）
+      if (Math.abs(d) < 0.01) return;
+      gyroHeadingRef.current += d * 0.3;
+      const applied = d * 0.3;
       const sweepRad = Math.PI / 180 * (playbackDefaultsRef.current.gyroSweepDeg || 90);
-      cropPanRef.current = Math.max(0, Math.min(100, cropPanRef.current - d * (100 / sweepRad)));
+      cropPanRef.current = Math.max(0, Math.min(100, cropPanRef.current - applied * (100 / sweepRad)));
       if (videoRef.current) videoRef.current.style.objectPosition = `${cropPanRef.current}% 50%`;
     };
     window.addEventListener('deviceorientation', handleDeviceOrientation, true);
@@ -436,11 +439,6 @@ export default function FloatingVideoWindow({
   const toggleControls = useCallback(() => {
     setControlsVisible(prev => !prev);
   }, []);
-  useEffect(() => {
-    if (!controlsVisible || !isPlaying) return;
-    const t = setTimeout(() => setControlsVisible(false), 3000);
-    return () => clearTimeout(t);
-  }, [controlsVisible, isPlaying]);
   const [playbackSpeed, setPlaybackSpeed] = useState(() => playbackDefaults.speed || 1.0);
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
@@ -1421,310 +1419,6 @@ export default function FloatingVideoWindow({
         />
       )}
 
-      {/* Draggable Header */}
-      <div
-        ref={headerRef}
-        onMouseDown={startWindowDrag}
-        onTouchStart={handleTouchStartHeader}
-        className={`px-3 py-2 border-b border-white/10 rounded-t-2xl flex items-center justify-between cursor-move text-xs ${
-          slotIndex === 0 ? 'bg-cyan-950/80 text-cyan-200' : 'bg-slate-950/90 text-gray-300'
-        }`}
-      >
-        <div className="flex items-center gap-1.5 min-w-0 flex-1 pr-2">
-          <span className={`w-2 h-2 rounded-full flex-shrink-0 ${slotIndex === 0 ? 'bg-cyan-400 animate-pulse' : 'bg-amber-400'}`} />
-          <span className="px-1.5 py-0.5 rounded bg-white/10 text-[10px] font-mono text-cyan-300 font-bold flex-shrink-0">
-            {slotIndex === 0 ? '主窗' : `副窗 #${slotIndex}`}
-          </span>
-          {/* 霓虹巡更轮巡实时倒计时徽章 */}
-          {playbackDefaults.patrolMode && (
-            <div
-              className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-cyan-950/90 border border-cyan-400/90 text-cyan-300 text-[10px] font-mono font-bold shadow-[0_0_8px_rgba(6,182,212,0.5)] flex-shrink-0 animate-pulse"
-              title={`🚨 霓虹多窗巡更轮巡中：剩余 ${patrolRemainingSec} 秒自动轮换`}
-            >
-              <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping" />
-              <span>巡更 {patrolRemainingSec}s</span>
-            </div>
-          )}
-          {/* Multi-part Video Part Selector */}
-          {partsList.length > 1 && (
-            <div
-              className="flex items-center gap-1 bg-black/50 px-1.5 py-0.5 rounded border border-amber-500/40 flex-shrink-0"
-              onMouseDown={(e) => e.stopPropagation()}
-              onTouchStart={(e) => e.stopPropagation()}
-            >
-              <span className="text-[10px] text-amber-400 font-bold">Part</span>
-              <select
-                value={currentPartIndex}
-                onChange={(e) => setCurrentPartIndex(Number(e.target.value))}
-                className="bg-transparent text-[10px] text-amber-300 font-bold outline-none cursor-pointer"
-              >
-                {partsList.map((p, idx) => (
-                  <option key={p.Id} value={idx} className="bg-slate-900 text-white">
-                    {idx + 1}/{partsList.length}: {p.Name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-          <span className="font-bold text-white text-xs truncate flex-1 min-w-0" title={item?.Name}>
-            {item?.Name || '视频预览'}
-          </span>
-        </div>
-
-
-      </div>
-
-      {/* 更多功能菜单：悬浮控制栏展开（窗口根层级，避免被视口裁剪） */}
-      {showMoreMenu && (
-              <div className="relative">
-                <button
-                  onClick={() => setShowMoreMenu(prev => !prev)}
-                  className={`p-1 rounded transition ${
-                    showMoreMenu ? 'bg-cyan-500/30 text-cyan-300' : 'text-gray-400 hover:text-cyan-300 hover:bg-white/10'
-                  }`}
-                  title="更多功能与播放选项"
-                >
-                  <MoreVertical size={14} />
-                </button>
-
-                {showMoreMenu && (
-                  <>
-                    <div className="fixed inset-0 z-40" onClick={() => setShowMoreMenu(false)} />
-                    <div
-                      className="fixed right-2 bottom-16 w-60 bg-[#0d131f] border-2 border-cyan-400/70 rounded-2xl p-2.5 shadow-[0_20px_60px_rgba(0,0,0,0.95)] flex flex-col gap-2 z-50 text-xs animate-in fade-in zoom-in-95 duration-100 max-h-[75vh] overflow-y-auto"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <div className="flex items-center justify-between border-b border-white/10 pb-1.5 px-1">
-                        <span className="font-bold text-white text-xs flex items-center gap-1.5">
-                          <SlidersHorizontal size={13} className="text-cyan-400" />
-                          播放功能选项
-                        </span>
-                        <button
-                          onClick={() => setShowMoreMenu(false)}
-                          className="p-1 rounded-full text-gray-400 hover:text-white hover:bg-white/10"
-                        >
-                          <X size={13} />
-                        </button>
-                      </div>
-
-                      {/* 1. 画质与清晰度 */}
-                      <div className="flex flex-col gap-1 px-1">
-                        <span className="text-[10px] text-cyan-300 font-bold">🎥 播放画质</span>
-                        <div className="grid grid-cols-3 gap-1">
-                          {QUALITY_OPTIONS.map(opt => (
-                            <button
-                              key={opt.id}
-                              onClick={() => { changeStreamQuality(opt.id, false); setShowMoreMenu(false); }}
-                              className={`py-1 px-1 rounded-lg text-[10px] text-center transition ${
-                                streamQuality === opt.id
-                                  ? 'bg-cyan-400 text-slate-950 font-bold shadow'
-                                  : 'bg-slate-800 text-gray-300 hover:bg-slate-700 border border-white/10'
-                              }`}
-                            >
-                              {opt.shortLabel}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* 2. 快进/寻轨步长 */}
-                      <div className="flex flex-col gap-1 px-1">
-                        <span className="text-[10px] text-cyan-300 font-bold">⏩ 寻轨/快进步长</span>
-                        <div className="grid grid-cols-3 gap-1">
-                          {SEEK_SPEED_OPTIONS.map(opt => (
-                            <button
-                              key={opt.id}
-                              onClick={() => { setStoredSeekSpeed(opt.id); setSeekSpeed(opt.id); setShowMoreMenu(false); }}
-                              className={`py-1 px-1 rounded-lg text-[10px] text-center transition ${
-                                seekSpeed === opt.id
-                                  ? 'bg-cyan-400 text-slate-950 font-bold shadow'
-                                  : 'bg-slate-800 text-gray-300 hover:bg-slate-700 border border-white/10'
-                              }`}
-                            >
-                              {opt.label}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* 3. 画面比例与水平镜像 */}
-                      <div className="flex flex-col gap-1 px-1">
-                        <span className="text-[10px] text-cyan-300 font-bold">📐 画面比例与镜像</span>
-                        <div className="grid grid-cols-4 gap-1">
-                          {[
-                            { id: 'contain', label: '原比例' },
-                            { id: 'cover', label: '铺满' },
-                            { id: 'fill', label: '拉伸' }
-                          ].map(opt => (
-                            <button
-                              key={opt.id}
-                              onClick={() => { setAspectMode(opt.id); setShowMoreMenu(false); }}
-                              className={`py-1 px-1 rounded-lg text-[10px] text-center transition ${
-                                aspectMode === opt.id
-                                  ? 'bg-cyan-400 text-slate-950 font-bold shadow'
-                                  : 'bg-slate-800 text-gray-300 hover:bg-slate-700 border border-white/10'
-                              }`}
-                            >
-                              {opt.label}
-                            </button>
-                          ))}
-                          <button
-                            onClick={() => { setFlipH(prev => !prev); }}
-                            className={`py-1 px-1 rounded-lg text-[10px] text-center transition flex items-center justify-center gap-0.5 ${
-                              flipH
-                                ? 'bg-cyan-400 text-slate-950 font-bold shadow'
-                                : 'bg-slate-800 text-gray-300 hover:bg-slate-700 border border-white/10'
-                            }`}
-                          >
-                            <FlipHorizontal size={11} />
-                            <span>镜像</span>
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* 4. 快捷功能开关列表 */}
-                      <div className="flex flex-col gap-1 border-t border-white/10 pt-1.5 px-1">
-                        {/* 字幕管理 */}
-                        <button
-                          onClick={() => { setShowSubtitleModal(true); setShowMoreMenu(false); }}
-                          className="flex items-center justify-between py-1.5 px-2 rounded-lg hover:bg-white/10 text-gray-200 transition"
-                        >
-                          <span className="flex items-center gap-2">
-                            <Subtitles size={13} className="text-cyan-400" />
-                            <span>字幕管理与下载</span>
-                          </span>
-                          <span className="text-[10px] text-gray-400 font-mono">
-                            {selectedSubtitleIndex !== -1 ? '已选' : '关闭'}
-                          </span>
-                        </button>
-
-                        {/* 快捷打标 */}
-                        <button
-                          onClick={() => { setShowTagMenu(true); setShowMoreMenu(false); }}
-                          className="flex items-center justify-between py-1.5 px-2 rounded-lg hover:bg-white/10 text-gray-200 transition"
-                        >
-                          <span className="flex items-center gap-2">
-                            <Tag size={13} className="text-cyan-400" />
-                            <span>快捷打标</span>
-                          </span>
-                          <span className="text-[10px] text-gray-400">
-                            {(item?.Tags?.length || 0) > 0 ? `${item.Tags.length}个` : '未打标'}
-                          </span>
-                        </button>
-
-                        {/* 海报画中画 */}
-                        <button
-                          onClick={() => setShowPinnedPoster(prev => !prev)}
-                          className="flex items-center justify-between py-1.5 px-2 rounded-lg hover:bg-white/10 text-gray-200 transition"
-                        >
-                          <span className="flex items-center gap-2">
-                            <ImageIcon size={13} className="text-cyan-400" />
-                            <span>海报画中画</span>
-                          </span>
-                          <span className={`text-[10px] font-bold ${showPinnedPoster ? 'text-cyan-400' : 'text-gray-500'}`}>
-                            {showPinnedPoster ? '已开启' : '已关闭'}
-                          </span>
-                        </button>
-
-                        {/* VR 全景 */}
-                        <button
-                          onClick={() => setIsVrActive(prev => !prev)}
-                          className="flex items-center justify-between py-1.5 px-2 rounded-lg hover:bg-white/10 text-gray-200 transition"
-                        >
-                          <span className="flex items-center gap-2">
-                            <Glasses size={13} className="text-amber-400" />
-                            <span>VR 全景视点</span>
-                          </span>
-                          <span className={`text-[10px] font-bold ${isVrActive ? 'text-amber-300' : 'text-gray-500'}`}>
-                            {isVrActive ? '已开启' : '已关闭'}
-                          </span>
-                        </button>
-
-                        {/* 收藏最爱 */}
-                        <button
-                          onClick={handleToggleFavorite}
-                          className="flex items-center justify-between py-1.5 px-2 rounded-lg hover:bg-white/10 text-gray-200 transition"
-                        >
-                          <span className="flex items-center gap-2">
-                            <Star size={13} className={isFavorite ? 'fill-amber-400 text-amber-400' : 'text-gray-400'} />
-                            <span>收藏最爱</span>
-                          </span>
-                          <span className={`text-[10px] font-bold ${isFavorite ? 'text-amber-400' : 'text-gray-500'}`}>
-                            {isFavorite ? '最爱' : '未收藏'}
-                          </span>
-                        </button>
-
-                        {/* 播放状态标记 */}
-                        <button
-                          onClick={handleTogglePlayed}
-                          className="flex items-center justify-between py-1.5 px-2 rounded-lg hover:bg-white/10 text-gray-200 transition"
-                        >
-                          <span className="flex items-center gap-2">
-                            {item?.UserData?.Played ? <EyeOff size={13} className="text-cyan-400" /> : <Eye size={13} className="text-gray-400" />}
-                            <span>播放状态</span>
-                          </span>
-                          <span className="text-[10px] text-gray-400">
-                            {item?.UserData?.Played ? '已看' : '未播'}
-                          </span>
-                        </button>
-
-                        {/* 重新加载/刷新流 */}
-                        <button
-                          onClick={() => { handleReloadStream(); setShowMoreMenu(false); }}
-                          className="flex items-center justify-between py-1.5 px-2 rounded-lg hover:bg-white/10 text-gray-200 transition"
-                        >
-                          <span className="flex items-center gap-2">
-                            <RefreshCw size={13} className="text-cyan-400" />
-                            <span>重新加载流</span>
-                          </span>
-                        </button>
-
-                        {/* 外部播放器 */}
-                        <div className="flex items-center justify-between py-1 px-2 pt-1.5 border-t border-white/10">
-                          <span className="text-[10px] text-gray-400 flex items-center gap-1.5">
-                            <ExternalLink size={12} />
-                            <span>外部播放</span>
-                          </span>
-                          <div className="flex items-center gap-1">
-                            <button
-                              onClick={() => { launchPlayer('mpv', item); setShowMoreMenu(false); }}
-                              className="px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-500/40 text-[10px] font-mono"
-                            >
-                              MPV
-                            </button>
-                            <button
-                              onClick={() => { launchPlayer('potplayer', item); setShowMoreMenu(false); }}
-                              className="px-2 py-0.5 rounded bg-amber-950 text-amber-300 border border-amber-500/40 text-[10px] font-mono"
-                            >
-                              Pot
-                            </button>
-                          </div>
-                        </div>
-
-                        {/* 从磁盘删除 */}
-                        <button
-                          onClick={() => { setShowDeleteModal(true); setShowMoreMenu(false); }}
-                          className="flex items-center justify-between py-1.5 px-2 rounded-lg hover:bg-red-950/40 text-red-400 transition border-t border-white/10 mt-1"
-                        >
-                          <span className="flex items-center gap-2">
-                            <Trash2 size={13} />
-                            <span>从磁盘删除文件</span>
-                          </span>
-                        </button>
-                      </div>
-                    </div>
-                  </>
-                )}
-              </div>
-      )}
-
-      {/* 智能跳前奏起播 提示 */}
-      {smartStartToast && (
-        <div className="absolute top-11 left-1/2 -translate-x-1/2 z-50 px-3 py-1 rounded-full bg-[#0d131f]/95 border border-cyan-400 text-cyan-300 text-[11px] font-bold shadow-xl shadow-cyan-500/30 backdrop-blur-md flex items-center gap-1.5 pointer-events-none animate-in fade-in zoom-in-95 duration-150">
-          <span>{smartStartToast}</span>
-        </div>
-      )}
-
       {/* Video Viewport — 三屏取中时切换为竖屏面板比例；按住左键即可拖动窗口 (PotPlayer 式)，触摸手势由 useTouchGestures 接管 */}
       <div
         ref={videoViewportRef}
@@ -1894,10 +1588,23 @@ export default function FloatingVideoWindow({
           </div>
         )}
 
-        {/* 悬浮控制圆盘：右下角单手区，径向布局 */}
+        {/* 常驻悬浮钮：控制区收起时的入口（点击展开圆盘） */}
+        {!controlsVisible && (
+          <button
+            onClick={(e) => { e.stopPropagation(); toggleControls(); }}
+            onMouseDown={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
+            className="absolute right-2 bottom-2 z-30 w-10 h-10 rounded-full bg-black/60 backdrop-blur-md border border-white/20 flex items-center justify-center text-gray-200 hover:text-cyan-300 shadow-xl transition"
+            title="播放控制"
+          >
+            <SlidersHorizontal size={16} />
+          </button>
+        )}
+
+        {/* 悬浮控制圆盘：右下角单手区（点视频收起） */}
         {controlsVisible && (
           <div
-            className="absolute right-2 bottom-2 z-30 w-[84px] h-[84px] rounded-full bg-black/60 backdrop-blur-md border border-white/15 shadow-2xl select-none"
+            className="absolute right-2 bottom-2 z-30 w-32 h-32 rounded-full bg-black/60 backdrop-blur-md border border-white/15 shadow-2xl select-none"
             onClick={(e) => e.stopPropagation()}
             onMouseDown={(e) => e.stopPropagation()}
             onTouchStart={(e) => e.stopPropagation()}
@@ -1905,23 +1612,23 @@ export default function FloatingVideoWindow({
             {/* 中心：播放/暂停 */}
             <button
               onClick={togglePlay}
-              className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-cyan-500/90 hover:bg-cyan-400 text-slate-950 flex items-center justify-center shadow-lg transition"
+              className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-cyan-500/90 hover:bg-cyan-400 text-slate-950 flex items-center justify-center shadow-lg transition"
               title={isPlaying ? '暂停' : '播放'}
             >
-              {isPlaying ? <Pause size={17} /> : <Play size={17} className="ml-0.5 fill-slate-950" />}
+              {isPlaying ? <Pause size={19} /> : <Play size={19} className="ml-0.5 fill-slate-950" />}
             </button>
             {/* 上：三屏取中 */}
             <button
               onClick={handleToggleCropThird}
-              className={`absolute left-1/2 -translate-x-1/2 top-0.5 w-7 h-7 rounded-full flex items-center justify-center transition ${cropThird ? 'bg-amber-500/40 text-amber-300' : 'text-gray-300 hover:text-amber-300 hover:bg-white/10'}`}
+              className={`absolute left-1/2 -translate-x-1/2 top-1 w-9 h-9 rounded-full flex items-center justify-center transition ${cropThird ? 'bg-amber-500/40 text-amber-300' : 'text-gray-300 hover:text-amber-300 hover:bg-white/10'}`}
               title="三屏取中"
             >
-              <Crop size={13} />
+              <Crop size={15} />
             </button>
             {/* 左：字幕（颜色表状态） */}
             <button
               onClick={handleToggleSubtitle}
-              className={`absolute left-0.5 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full flex items-center justify-center transition ${
+              className={`absolute left-1 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full flex items-center justify-center transition ${
                 subtitleStreams.length === 0
                   ? 'text-gray-700'
                   : selectedSubtitleIndex !== -1
@@ -1934,23 +1641,23 @@ export default function FloatingVideoWindow({
                   : selectedSubtitleIndex !== -1 ? '字幕：开' : '字幕：关'
               }
             >
-              <Subtitles size={13} />
+              <Subtitles size={15} />
             </button>
             {/* 右：音量（点开竖向滑杆） */}
-            <div className="absolute right-0.5 top-1/2 -translate-y-1/2">
+            <div className="absolute right-1 top-1/2 -translate-y-1/2">
               <button
                 onClick={() => setShowVolumePop(prev => !prev)}
-                className="w-7 h-7 rounded-full flex items-center justify-center text-gray-300 hover:text-cyan-300 hover:bg-white/10 transition"
+                className="w-9 h-9 rounded-full flex items-center justify-center text-gray-300 hover:text-cyan-300 hover:bg-white/10 transition"
                 title={`音量 ${Math.round((isMuted ? 0 : volume) * 100)}%`}
               >
                 {isMuted || volume === 0
-                  ? <VolumeX size={13} className="text-red-400" />
+                  ? <VolumeX size={15} className="text-red-400" />
                   : volume < 0.5
-                    ? <Volume1 size={13} />
-                    : <Volume2 size={13} />}
+                    ? <Volume1 size={15} />
+                    : <Volume2 size={15} />}
               </button>
               {showVolumePop && (
-                <div className="absolute right-9 bottom-0 z-50 bg-[#0d131f] border border-white/15 rounded-xl px-3 py-2 shadow-2xl flex items-center h-28">
+                <div className="absolute right-11 bottom-0 z-50 bg-[#0d131f] border border-white/15 rounded-xl px-3 py-2 shadow-2xl flex items-center h-28">
                   <input
                     type="range"
                     min={0} max={1} step={0.05}
@@ -1969,10 +1676,10 @@ export default function FloatingVideoWindow({
             {isMobileViewport && (
               <button
                 onClick={handleLandscapeToggle}
-                className={`absolute left-1/2 -translate-x-1/2 bottom-0.5 w-7 h-7 rounded-full flex items-center justify-center transition ${isLandscape ? 'bg-cyan-500/30 text-cyan-300' : 'text-gray-300 hover:text-cyan-300 hover:bg-white/10'}`}
+                className={`absolute left-1/2 -translate-x-1/2 bottom-1 w-9 h-9 rounded-full flex items-center justify-center transition ${isLandscape ? 'bg-cyan-500/30 text-cyan-300' : 'text-gray-300 hover:text-cyan-300 hover:bg-white/10'}`}
                 title="横屏（全屏并锁定横向）"
               >
-                <RectangleHorizontal size={13} />
+                <RectangleHorizontal size={15} />
               </button>
             )}
           </div>
@@ -1981,33 +1688,31 @@ export default function FloatingVideoWindow({
         {/* 盘外贴边：下一个 / 更多 / 关闭 */}
         {controlsVisible && (
           <div
-            className="absolute right-1 bottom-[92px] z-30 flex flex-col items-center gap-1 text-gray-300"
+            className="absolute right-1 bottom-[140px] z-30 flex flex-col items-center gap-1.5 text-gray-300"
             onClick={(e) => e.stopPropagation()}
             onMouseDown={(e) => e.stopPropagation()}
             onTouchStart={(e) => e.stopPropagation()}
           >
             <button
               onClick={handleSkipNext}
-              className="w-8 h-8 rounded-full bg-black/60 backdrop-blur-md border border-white/15 flex items-center justify-center hover:text-cyan-300 transition"
+              className="w-9 h-9 rounded-full bg-black/60 backdrop-blur-md border border-white/15 flex items-center justify-center hover:text-cyan-300 transition"
               title={partsList.length > 1 && currentPartIndex < partsList.length - 1 ? `播放下一分段 (Part ${currentPartIndex + 2}/${partsList.length})` : '跳过当前视频'}
             >
-              <SkipForward size={13} />
+              <SkipForward size={14} />
             </button>
-            <div className="relative">
-              <button
-                onClick={() => setShowMoreMenu(prev => !prev)}
-                className={`w-8 h-8 rounded-full bg-black/60 backdrop-blur-md border border-white/15 flex items-center justify-center transition ${showMoreMenu ? 'bg-cyan-500/30 text-cyan-300' : 'hover:text-cyan-300'}`}
-                title="更多功能与播放选项"
-              >
-                <MoreVertical size={14} />
-              </button>
-            </div>
+            <button
+              onClick={() => setShowMoreMenu(prev => !prev)}
+              className={`w-9 h-9 rounded-full bg-black/60 backdrop-blur-md border border-white/15 flex items-center justify-center transition ${showMoreMenu ? 'bg-cyan-500/30 text-cyan-300' : 'hover:text-cyan-300'}`}
+              title="更多功能与播放选项"
+            >
+              <MoreVertical size={15} />
+            </button>
             <button
               onClick={() => onClose && onClose(id)}
-              className="w-8 h-8 rounded-full bg-black/60 backdrop-blur-md border border-white/15 flex items-center justify-center hover:bg-red-500/20 hover:text-red-400 transition"
+              className="w-9 h-9 rounded-full bg-black/60 backdrop-blur-md border border-white/15 flex items-center justify-center hover:bg-red-500/20 hover:text-red-400 transition"
               title="关闭窗口"
             >
-              <X size={14} />
+              <X size={15} />
             </button>
           </div>
         )}
@@ -2048,6 +1753,67 @@ export default function FloatingVideoWindow({
         </div>
 
 
+      </div>
+
+      {/* 标题栏（视频下方）：拖动窗口 + 分段 + 滚动标题 + 下一个/关闭 */}
+      <div
+        ref={headerRef}
+        onMouseDown={startWindowDrag}
+        onTouchStart={handleTouchStartHeader}
+        className="px-2 py-1.5 border-t border-white/5 bg-slate-950/95 rounded-b-2xl flex items-center gap-1.5 cursor-move text-xs select-none"
+      >
+        {playbackDefaults.patrolMode && (
+          <div
+            className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-cyan-950/90 border border-cyan-400/90 text-cyan-300 text-[10px] font-mono font-bold flex-shrink-0 animate-pulse"
+            title={`🚨 霓虹多窗巡更轮巡中：剩余 ${patrolRemainingSec} 秒自动轮换`}
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping" />
+            <span>巡更 {patrolRemainingSec}s</span>
+          </div>
+        )}
+        {partsList.length > 1 && (
+          <div
+            className="flex items-center bg-black/50 px-1 py-0.5 rounded border border-amber-500/40 flex-shrink-0"
+            onMouseDown={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
+          >
+            <select
+              value={currentPartIndex}
+              onChange={(e) => setCurrentPartIndex(Number(e.target.value))}
+              className="bg-transparent text-[10px] text-amber-300 font-bold outline-none cursor-pointer"
+            >
+              {partsList.map((p, idx) => (
+                <option key={p.Id} value={idx} className="bg-slate-900 text-white">
+                  P{idx + 1}/{partsList.length}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+        <div className="flex-1 min-w-0 overflow-hidden" title={item?.Name}>
+          {(item?.Name || '').length > 16 ? (
+            <div className="flex whitespace-nowrap animate-marquee will-change-transform" style={{ animationDuration: `${Math.max(8, Math.min(30, (item?.Name || '').length * 0.35))}s` }}>
+              <span className="pr-8 font-bold text-white text-xs flex-shrink-0">{item?.Name}</span>
+              <span className="pr-8 font-bold text-white text-xs flex-shrink-0" aria-hidden>{item?.Name}</span>
+            </div>
+          ) : (
+            <span className="font-bold text-white text-xs truncate block">{item?.Name || '视频预览'}</span>
+          )}
+        </div>
+        <button
+          onClick={handleSkipNext}
+          className="p-1 rounded hover:bg-white/10 text-gray-400 hover:text-cyan-300 transition flex-shrink-0"
+          title={partsList.length > 1 && currentPartIndex < partsList.length - 1 ? `播放下一分段 (Part ${currentPartIndex + 2}/${partsList.length})` : '跳过当前视频 (下一个顶上来)'}
+        >
+          <SkipForward size={13} />
+        </button>
+        <button
+          onClick={() => onClose && onClose(id)}
+          className="p-1 rounded hover:bg-red-500/20 text-gray-400 hover:text-red-400 transition flex-shrink-0"
+          title="关闭窗口 (中键 / 下一个顶上来)"
+        >
+          <X size={14} />
+        </button>
       </div>
 
       {/* SE Corner Resizer Handle (Bottom-Right) */}

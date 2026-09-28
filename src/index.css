@@ -90,3 +90,10 @@ a,
 .animate-shimmer {
   animation: shimmer 1.8s infinite;
 }
+
+/* 窗口标题跑马灯（超长标题滚动显示） */
+@keyframes marquee {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+.animate-marquee { animation: marquee 12s linear infinite; }

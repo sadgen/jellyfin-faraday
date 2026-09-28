@@ -574,7 +574,8 @@ export default function App() {
                 id: `win-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
                 slotIndex: tailSlot,
                 item: randomItem,
-                timestamp: Date.now()
+                timestamp: Date.now(),
+                autoCrop: !!target.crop
               }
             ];
           }
@@ -621,7 +622,8 @@ export default function App() {
           id: `win-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
           slotIndex: tailSlot,
           item: randomItem,
-          timestamp: Date.now()
+          timestamp: Date.now(),
+          autoCrop: !!target.crop
         }
       ];
     });
@@ -650,6 +652,12 @@ export default function App() {
       if (!target) return prev;
       return [target];
     });
+  }, []);
+
+  // 窗口形态（是否取中铺满）回报，存到窗口记录上供换片继承
+  const handleCropChangeWindow = useCallback((winId, crop) => {
+    console.log('[crop-report]', winId, crop);
+    setFloatingWindows(prev => prev.map(w => w.id === winId ? { ...w, crop } : w));
   }, []);
 
   const handleUpdateItem = useCallback((updatedItem) => {
@@ -867,6 +875,7 @@ export default function App() {
           onExpandWindow={(item) => setModalPlayingItem(item)}
           onMaximizeWindow={handleMaximizeFloatingWindow}
           onExclusiveWindow={handleExclusiveFloatingWindow}
+          onCropChangeWindow={handleCropChangeWindow}
           onBringToFront={handleBringFloatingToFront}
           onUpdateItem={handleUpdateItem}
           onDeleteItem={handleDeleteItem}

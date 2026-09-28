@@ -67,6 +67,7 @@ export default function FloatingVideoWindow({
   onSkip,
   onExpand: _onExpand,
   onExclusiveCrop,
+  onCropChange,
   onBringToFront,
   onUpdateItem,
   onDeleteItem,
@@ -640,9 +641,6 @@ export default function FloatingVideoWindow({
     onTogglePlay: () => {
       togglePlay();
     },
-    onTap: () => {
-      toggleControls();
-    },
     normalSpeed: playbackSpeed,
     onSpeedChange: (speed) => {
       setPlaybackSpeed(speed);
@@ -743,6 +741,11 @@ export default function FloatingVideoWindow({
   useEffect(() => {
     if (trickplayItem) preloadAllTrickplaySprites(trickplayItem);
   }, [trickplayItem]);
+
+  // 形态上报给 App（换片时继承当前窗形态）
+  useEffect(() => {
+    if (onCropChange) onCropChange(id, cropThird && cropFill);
+  }, [id, cropThird, cropFill, onCropChange]);
 
   // 手机上单开的浮窗默认进入三屏取中铺满（App 侧 autoCrop 标记，仅唯一新窗携带）
   const autoCropAppliedRef = useRef(false);
@@ -1041,14 +1044,6 @@ export default function FloatingVideoWindow({
 
   // VR 全景开启时，画面上的鼠标用于环视视角；取中铺满时横向拖动 = 全景平移；均不拖动窗口
   const handleMouseDownVideoArea = (e) => {
-    // 桌面点击画面（无拖动）= 切换悬浮控制栏
-    const downX = e.clientX;
-    const downY = e.clientY;
-    const onMouseUpCheck = (up) => {
-      window.removeEventListener('mouseup', onMouseUpCheck);
-      if (Math.hypot(up.clientX - downX, up.clientY - downY) < 5) toggleControls();
-    };
-    window.addEventListener('mouseup', onMouseUpCheck);
     if (isVrActive || isMaximized) return;
     if (cropFillRef.current) {
       e.preventDefault();
@@ -1713,13 +1708,6 @@ export default function FloatingVideoWindow({
               title={isVrActive ? '视角重置 / 零点校准（当前朝向 = 画面正中）' : '画面居中'}
             >
               <RotateCcw size={14} />
-            </button>
-            <button
-              onClick={handleSkipNext}
-              className="w-9 h-9 rounded-full bg-black/60 backdrop-blur-md border border-white/15 flex items-center justify-center hover:text-cyan-300 transition"
-              title={partsList.length > 1 && currentPartIndex < partsList.length - 1 ? `播放下一分段 (Part ${currentPartIndex + 2}/${partsList.length})` : '跳过当前视频'}
-            >
-              <SkipForward size={14} />
             </button>
             <button
               onClick={() => setShowMoreMenu(prev => !prev)}

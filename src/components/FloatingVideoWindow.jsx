@@ -1835,6 +1835,582 @@ export default function FloatingVideoWindow({
         </button>
       </div>
 
+      {/* 更多功能菜单：悬浮控制栏展开（窗口根层级，避免被视口裁剪） */}
+      {showMoreMenu && (
+              <div className="relative">
+                <button
+                  onClick={() => setShowMoreMenu(prev => !prev)}
+                  className={`p-1 rounded transition ${
+                    showMoreMenu ? 'bg-cyan-500/30 text-cyan-300' : 'text-gray-400 hover:text-cyan-300 hover:bg-white/10'
+                  }`}
+                  title="更多功能与播放选项"
+                >
+                  <MoreVertical size={14} />
+                </button>
+
+                {showMoreMenu && (
+                  <>
+                    <div className="fixed inset-0 z-40" onClick={() => setShowMoreMenu(false)} />
+                    <div
+                      className="fixed right-2 bottom-48 w-60 bg-[#0d131f] border-2 border-cyan-400/70 rounded-2xl p-2.5 shadow-[0_20px_60px_rgba(0,0,0,0.95)] flex flex-col gap-2 z-50 text-xs animate-in fade-in zoom-in-95 duration-100 max-h-[75vh] overflow-y-auto"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <div className="flex items-center justify-between border-b border-white/10 pb-1.5 px-1">
+                        <span className="font-bold text-white text-xs flex items-center gap-1.5">
+                          <SlidersHorizontal size={13} className="text-cyan-400" />
+                          播放功能选项
+                        </span>
+                        <button
+                          onClick={() => setShowMoreMenu(false)}
+                          className="p-1 rounded-full text-gray-400 hover:text-white hover:bg-white/10"
+                        >
+                          <X size={13} />
+                        </button>
+                      </div>
+
+                      {/* 1. 画质与清晰度 */}
+                      <div className="flex flex-col gap-1 px-1">
+                        <span className="text-[10px] text-cyan-300 font-bold">🎥 播放画质</span>
+                        <div className="grid grid-cols-3 gap-1">
+                          {QUALITY_OPTIONS.map(opt => (
+                            <button
+                              key={opt.id}
+                              onClick={() => { changeStreamQuality(opt.id, false); setShowMoreMenu(false); }}
+                              className={`py-1 px-1 rounded-lg text-[10px] text-center transition ${
+                                streamQuality === opt.id
+                                  ? 'bg-cyan-400 text-slate-950 font-bold shadow'
+                                  : 'bg-slate-800 text-gray-300 hover:bg-slate-700 border border-white/10'
+                              }`}
+                            >
+                              {opt.shortLabel}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* 2. 快进/寻轨步长 */}
+                      <div className="flex flex-col gap-1 px-1">
+                        <span className="text-[10px] text-cyan-300 font-bold">⏩ 寻轨/快进步长</span>
+                        <div className="grid grid-cols-3 gap-1">
+                          {SEEK_SPEED_OPTIONS.map(opt => (
+                            <button
+                              key={opt.id}
+                              onClick={() => { setStoredSeekSpeed(opt.id); setSeekSpeed(opt.id); setShowMoreMenu(false); }}
+                              className={`py-1 px-1 rounded-lg text-[10px] text-center transition ${
+                                seekSpeed === opt.id
+                                  ? 'bg-cyan-400 text-slate-950 font-bold shadow'
+                                  : 'bg-slate-800 text-gray-300 hover:bg-slate-700 border border-white/10'
+                              }`}
+                            >
+                              {opt.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* 3. 画面比例与水平镜像 */}
+                      <div className="flex flex-col gap-1 px-1">
+                        <span className="text-[10px] text-cyan-300 font-bold">📐 画面比例与镜像</span>
+                        <div className="grid grid-cols-4 gap-1">
+                          {[
+                            { id: 'contain', label: '原比例' },
+                            { id: 'cover', label: '铺满' },
+                            { id: 'fill', label: '拉伸' }
+                          ].map(opt => (
+                            <button
+                              key={opt.id}
+                              onClick={() => { setAspectMode(opt.id); setShowMoreMenu(false); }}
+                              className={`py-1 px-1 rounded-lg text-[10px] text-center transition ${
+                                aspectMode === opt.id
+                                  ? 'bg-cyan-400 text-slate-950 font-bold shadow'
+                                  : 'bg-slate-800 text-gray-300 hover:bg-slate-700 border border-white/10'
+                              }`}
+                            >
+                              {opt.label}
+                            </button>
+                          ))}
+                          <button
+                            onClick={() => { setFlipH(prev => !prev); }}
+                            className={`py-1 px-1 rounded-lg text-[10px] text-center transition flex items-center justify-center gap-0.5 ${
+                              flipH
+                                ? 'bg-cyan-400 text-slate-950 font-bold shadow'
+                                : 'bg-slate-800 text-gray-300 hover:bg-slate-700 border border-white/10'
+                            }`}
+                          >
+                            <FlipHorizontal size={11} />
+                            <span>镜像</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* 4. 快捷功能开关列表 */}
+                      <div className="flex flex-col gap-1 border-t border-white/10 pt-1.5 px-1">
+                        {/* 字幕管理 */}
+                        <button
+                          onClick={() => { setShowSubtitleModal(true); setShowMoreMenu(false); }}
+                          className="flex items-center justify-between py-1.5 px-2 rounded-lg hover:bg-white/10 text-gray-200 transition"
+                        >
+                          <span className="flex items-center gap-2">
+                            <Subtitles size={13} className="text-cyan-400" />
+                            <span>字幕管理与下载</span>
+                          </span>
+                          <span className="text-[10px] text-gray-400 font-mono">
+                            {selectedSubtitleIndex !== -1 ? '已选' : '关闭'}
+                          </span>
+                        </button>
+
+                        {/* 快捷打标 */}
+                        <button
+                          onClick={() => { setShowTagMenu(true); setShowMoreMenu(false); }}
+                          className="flex items-center justify-between py-1.5 px-2 rounded-lg hover:bg-white/10 text-gray-200 transition"
+                        >
+                          <span className="flex items-center gap-2">
+                            <Tag size={13} className="text-cyan-400" />
+                            <span>快捷打标</span>
+                          </span>
+                          <span className="text-[10px] text-gray-400">
+                            {(item?.Tags?.length || 0) > 0 ? `${item.Tags.length}个` : '未打标'}
+                          </span>
+                        </button>
+
+                        {/* 海报画中画 */}
+                        <button
+                          onClick={() => setShowPinnedPoster(prev => !prev)}
+                          className="flex items-center justify-between py-1.5 px-2 rounded-lg hover:bg-white/10 text-gray-200 transition"
+                        >
+                          <span className="flex items-center gap-2">
+                            <ImageIcon size={13} className="text-cyan-400" />
+                            <span>海报画中画</span>
+                          </span>
+                          <span className={`text-[10px] font-bold ${showPinnedPoster ? 'text-cyan-400' : 'text-gray-500'}`}>
+                            {showPinnedPoster ? '已开启' : '已关闭'}
+                          </span>
+                        </button>
+
+                        {/* VR 全景 */}
+                        <button
+                          onClick={() => setIsVrActive(prev => !prev)}
+                          className="flex items-center justify-between py-1.5 px-2 rounded-lg hover:bg-white/10 text-gray-200 transition"
+                        >
+                          <span className="flex items-center gap-2">
+                            <Glasses size={13} className="text-amber-400" />
+                            <span>VR 全景视点</span>
+                          </span>
+                          <span className={`text-[10px] font-bold ${isVrActive ? 'text-amber-300' : 'text-gray-500'}`}>
+                            {isVrActive ? '已开启' : '已关闭'}
+                          </span>
+                        </button>
+
+                        {/* 收藏最爱 */}
+                        <button
+                          onClick={handleToggleFavorite}
+                          className="flex items-center justify-between py-1.5 px-2 rounded-lg hover:bg-white/10 text-gray-200 transition"
+                        >
+                          <span className="flex items-center gap-2">
+                            <Star size={13} className={isFavorite ? 'fill-amber-400 text-amber-400' : 'text-gray-400'} />
+                            <span>收藏最爱</span>
+                          </span>
+                          <span className={`text-[10px] font-bold ${isFavorite ? 'text-amber-400' : 'text-gray-500'}`}>
+                            {isFavorite ? '最爱' : '未收藏'}
+                          </span>
+                        </button>
+
+                        {/* 播放状态标记 */}
+                        <button
+                          onClick={handleTogglePlayed}
+                          className="flex items-center justify-between py-1.5 px-2 rounded-lg hover:bg-white/10 text-gray-200 transition"
+                        >
+                          <span className="flex items-center gap-2">
+                            {item?.UserData?.Played ? <EyeOff size={13} className="text-cyan-400" /> : <Eye size={13} className="text-gray-400" />}
+                            <span>播放状态</span>
+                          </span>
+                          <span className="text-[10px] text-gray-400">
+                            {item?.UserData?.Played ? '已看' : '未播'}
+                          </span>
+                        </button>
+
+                        {/* 重新加载/刷新流 */}
+                        <button
+                          onClick={() => { handleReloadStream(); setShowMoreMenu(false); }}
+                          className="flex items-center justify-between py-1.5 px-2 rounded-lg hover:bg-white/10 text-gray-200 transition"
+                        >
+                          <span className="flex items-center gap-2">
+                            <RefreshCw size={13} className="text-cyan-400" />
+                            <span>重新加载流</span>
+                          </span>
+                        </button>
+
+                        {/* 外部播放器 */}
+                        <div className="flex items-center justify-between py-1 px-2 pt-1.5 border-t border-white/10">
+                          <span className="text-[10px] text-gray-400 flex items-center gap-1.5">
+                            <ExternalLink size={12} />
+                            <span>外部播放</span>
+                          </span>
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => { launchPlayer('mpv', item); setShowMoreMenu(false); }}
+                              className="px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-500/40 text-[10px] font-mono"
+                            >
+                              MPV
+                            </button>
+                            <button
+                              onClick={() => { launchPlayer('potplayer', item); setShowMoreMenu(false); }}
+                              className="px-2 py-0.5 rounded bg-amber-950 text-amber-300 border border-amber-500/40 text-[10px] font-mono"
+                            >
+                              Pot
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* 从磁盘删除 */}
+                        <button
+                          onClick={() => { setShowDeleteModal(true); setShowMoreMenu(false); }}
+                          className="flex items-center justify-between py-1.5 px-2 rounded-lg hover:bg-red-950/40 text-red-400 transition border-t border-white/10 mt-1"
+                        >
+                          <span className="flex items-center gap-2">
+                            <Trash2 size={13} />
+                            <span>从磁盘删除文件</span>
+                          </span>
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+      )}
+
+      {/* 智能跳前奏起播 提示 */}
+      {smartStartToast && (
+        <div className="absolute top-11 left-1/2 -translate-x-1/2 z-50 px-3 py-1 rounded-full bg-[#0d131f]/95 border border-cyan-400 text-cyan-300 text-[11px] font-bold shadow-xl shadow-cyan-500/30 backdrop-blur-md flex items-center gap-1.5 pointer-events-none animate-in fade-in zoom-in-95 duration-150">
+          <span>{smartStartToast}</span>
+        </div>
+      )}
+
+      {/* Video Viewport — 三屏取中时切换为竖屏面板比例；按住左键即可拖动窗口 (PotPlayer 式)，触摸手势由 useTouchGestures 接管 */}
+      <div
+        ref={videoViewportRef}
+        className={`relative w-full bg-black flex items-center justify-center overflow-hidden touch-none select-none cursor-move ${(isMaximized || cropFill) ? 'flex-1 min-h-0' : ''}`}
+        style={{
+          aspectRatio: (isMaximized || cropFill) ? undefined : (cropThird ? (videoAspect > 0 ? videoAspect / 3 : 16 / 27) : 16 / 9),
+          filter: `brightness(${brightness})`,
+          WebkitTouchCallout: 'none',
+          userSelect: 'none'
+        }}
+        onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
+        onMouseDown={handleMouseDownVideoArea}
+        {...touchHandlers}
+      >
+        {/* Smooth Mode Notification Toast */}
+        {smoothToast && (
+          <div className="absolute top-2 left-1/2 -translate-x-1/2 z-40 px-3 py-1 bg-black/85 backdrop-blur-md border border-cyan-400/60 rounded-full text-[11px] font-bold text-cyan-300 shadow-xl pointer-events-none animate-in fade-in duration-150">
+            {smoothToast}
+          </div>
+        )}
+
+        {coverUrl && (
+          <img
+            src={coverUrl}
+            alt=""
+            className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-300 pointer-events-none ${
+              isLoading ? 'opacity-60 blur-sm' : 'opacity-0'
+            }`}
+          />
+        )}
+
+        <video
+          ref={videoRef}
+          playsInline
+          crossOrigin="anonymous"
+          controls={false}
+          controlsList="nodownload noplaybackrate"
+          disablePictureInPicture={true}
+          onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
+          className={`w-full h-full z-10 select-none pointer-events-auto transition-transform duration-200 ${
+            (cropThird && !isMaximized)
+              ? 'object-cover'
+              : aspectMode === 'cover'
+                ? 'object-cover'
+                : aspectMode === 'fill'
+                  ? 'w-full h-full [object-fit:fill]'
+                  : 'object-contain'
+          } ${flipH ? '-scale-x-100' : ''}`}
+          style={{ WebkitTouchCallout: 'none', userSelect: 'none', WebkitUserSelect: 'none' }}
+          onWaiting={() => setIsLoading(true)}
+          onPlaying={() => {
+            setIsLoading(false);
+            setIsPlaying(true);
+            syncSubtitleModes();
+          }}
+          onLoadedData={syncSubtitleModes}
+          onPause={() => setIsPlaying(false)}
+          onEnded={handleEnded}
+          onTimeUpdate={handleTimeUpdate}
+        >
+          {subtitleStreams.map(s => (
+            <track
+              key={`${currentPartId}-${s.Index}`}
+              kind="subtitles"
+              label={s.Title || s.Language || `Subtitle ${s.Index}`}
+              src={jellyfin.getSubtitleTrackUrl(currentPartId, mediaSourceId, s.Index)}
+              srcLang={s.Language || 'zh'}
+              data-index={s.Index}
+            />
+          ))}
+        </video>
+
+        {/* 自定义字幕渲染层（与影院播放器共享样式设置） */}
+        <SubtitleOverlay
+          videoRef={videoRef}
+          visible={selectedSubtitleIndex !== -1}
+          selectedSubtitleIndex={selectedSubtitleIndex}
+        />
+
+        {/* INLINE VR WEBGL CANVAS */}
+        <InlineVrCanvas
+          videoRef={videoRef}
+          isActive={isVrActive}
+          onClose={() => setIsVrActive(false)}
+          initialMode={detectedVrMode}
+          gyroActive={isVrActive || cropThird}
+        />
+
+        {/* Mobile Touch Gesture HUD Overlay */}
+        {gestureState.type && (
+          <div className={`absolute inset-0 z-30 flex items-center justify-center pointer-events-none animate-in fade-in zoom-in-95 duration-100 transition-opacity ${gestureState.fading ? 'opacity-0 duration-500' : 'opacity-100'}`}>
+            <div className="flex flex-col items-center gap-1.5 bg-black/80 backdrop-blur-md px-3.5 py-2.5 rounded-2xl border border-white/10 shadow-2xl text-white">
+              {gestureState.type === 'seek' && <FastForward size={20} className="text-cyan-400 animate-pulse" />}
+              {gestureState.type === 'brightness' && <Sun size={20} className="text-amber-400" />}
+              {(gestureState.type === 'speed_step' || gestureState.type === 'speed_boost') && <Gauge size={20} className="text-amber-400" />}
+              <span className="font-mono font-bold text-[11px]">{gestureState.text}</span>
+            </div>
+          </div>
+        )}
+
+        {/*
+          Pinned Poster Floating PIP View:
+          - Mobile: 1X compact standard size (w-20 xs:w-24)
+          - Desktop: 1.5X enlarged size (sm:w-36)
+        */}
+        {showPinnedPoster && coverUrl && (
+          <div
+            className="absolute top-2 right-2 z-30 w-20 xs:w-24 sm:w-36 aspect-[2/3] rounded-xl overflow-hidden shadow-2xl border sm:border-2 border-cyan-400/60 bg-black/90 backdrop-blur-md animate-in zoom-in-95 duration-150 group/pip cursor-pointer"
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowPosterModal(true);
+            }}
+            title="点击查看高清大图"
+          >
+            <img
+              src={coverUrl}
+              alt="Poster"
+              onError={(e) => { e.currentTarget.style.display = 'none'; }}
+              className="w-full h-full object-cover transition-transform group-hover/pip:scale-105"
+            />
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowPinnedPoster(false);
+              }}
+              className="absolute top-1 right-1 p-1 rounded-full bg-black/80 text-white hover:bg-red-500 transition"
+              title="隐藏海报"
+            >
+              <X size={11} />
+            </button>
+            <div className="absolute bottom-0 inset-x-0 bg-black/75 px-1 py-0.5 text-[8px] sm:text-[9px] text-center text-cyan-300 font-medium truncate backdrop-blur-xs">
+              {item?.Name}
+            </div>
+          </div>
+        )}
+
+        {/* Loading Spinner */}
+        {isLoading && !hasError && (
+          <div className="absolute z-20 flex flex-col items-center justify-center pointer-events-none gap-1">
+            <div className="w-8 h-8 border-2 border-cyan-500/30 border-t-cyan-400 rounded-full animate-spin" />
+          </div>
+        )}
+
+        {/* Playback Error（含失败原因诊断，替代原来的黑屏无提示） */}
+        {hasError && (
+          <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-1.5 bg-black/85 p-2 text-center">
+            <Film size={20} className="text-red-400 flex-shrink-0" />
+            <p className="text-[11px] text-red-300 font-medium">播放失败</p>
+            {errorDetails && (
+              <p className="text-[9px] font-mono text-gray-400 max-w-full break-all leading-relaxed">{errorDetails}</p>
+            )}
+            <button
+              onClick={handleRetryPlayback}
+              className="mt-1 px-3 py-1 rounded-lg bg-jf-accent hover:bg-cyan-400 text-white text-[10px] font-bold transition"
+            >
+              重试
+            </button>
+          </div>
+        )}
+
+        {/* Paused Indicator (纯指示，不拦截鼠标：画面按住仍可拖动窗口，播放/暂停用底部按钮) */}
+        {!isPlaying && !isLoading && !hasError && (
+          <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/30 pointer-events-none">
+            <div className="w-11 h-11 rounded-full bg-black/60 border border-white/20 flex items-center justify-center text-white">
+              <Play size={20} className="ml-0.5 fill-white" />
+            </div>
+          </div>
+        )}
+
+        {/* 悬浮控制圆盘：右下角单手区，径向布局 */}
+        {controlsVisible && (
+          <div
+            className="absolute right-2 bottom-2 z-30 w-[84px] h-[84px] rounded-full bg-black/60 backdrop-blur-md border border-white/15 shadow-2xl select-none"
+            onClick={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
+          >
+            {/* 中心：播放/暂停 */}
+            <button
+              onClick={togglePlay}
+              className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-cyan-500/90 hover:bg-cyan-400 text-slate-950 flex items-center justify-center shadow-lg transition"
+              title={isPlaying ? '暂停' : '播放'}
+            >
+              {isPlaying ? <Pause size={17} /> : <Play size={17} className="ml-0.5 fill-slate-950" />}
+            </button>
+            {/* 上：三屏取中 */}
+            <button
+              onClick={handleToggleCropThird}
+              className={`absolute left-1/2 -translate-x-1/2 top-0.5 w-7 h-7 rounded-full flex items-center justify-center transition ${cropThird ? 'bg-amber-500/40 text-amber-300' : 'text-gray-300 hover:text-amber-300 hover:bg-white/10'}`}
+              title="三屏取中"
+            >
+              <Crop size={13} />
+            </button>
+            {/* 左：字幕（颜色表状态） */}
+            <button
+              onClick={handleToggleSubtitle}
+              className={`absolute left-0.5 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full flex items-center justify-center transition ${
+                subtitleStreams.length === 0
+                  ? 'text-gray-700'
+                  : selectedSubtitleIndex !== -1
+                    ? 'bg-cyan-500/30 text-cyan-300'
+                    : 'text-gray-300 hover:text-cyan-300 hover:bg-white/10'
+              }`}
+              title={
+                subtitleStreams.length === 0
+                  ? '字幕 (无可用文本字幕)'
+                  : selectedSubtitleIndex !== -1 ? '字幕：开' : '字幕：关'
+              }
+            >
+              <Subtitles size={13} />
+            </button>
+            {/* 右：音量（点开竖向滑杆） */}
+            <div className="absolute right-0.5 top-1/2 -translate-y-1/2">
+              <button
+                onClick={() => setShowVolumePop(prev => !prev)}
+                className="w-7 h-7 rounded-full flex items-center justify-center text-gray-300 hover:text-cyan-300 hover:bg-white/10 transition"
+                title={`音量 ${Math.round((isMuted ? 0 : volume) * 100)}%`}
+              >
+                {isMuted || volume === 0
+                  ? <VolumeX size={13} className="text-red-400" />
+                  : volume < 0.5
+                    ? <Volume1 size={13} />
+                    : <Volume2 size={13} />}
+              </button>
+              {showVolumePop && (
+                <div className="absolute right-9 bottom-0 z-50 bg-[#0d131f] border border-white/15 rounded-xl px-3 py-2 shadow-2xl flex items-center h-28">
+                  <input
+                    type="range"
+                    min={0} max={1} step={0.05}
+                    value={isMuted ? 0 : volume}
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value);
+                      setVolume(v);
+                      if (isMuted && v > 0) toggleMute();
+                    }}
+                    className="w-24 rotate-[270deg] accent-cyan-400 cursor-pointer appearance-none bg-white/20 rounded-lg h-1"
+                  />
+                </div>
+              )}
+            </div>
+            {/* 下：横屏（手机） */}
+            {isMobileViewport && (
+              <button
+                onClick={handleLandscapeToggle}
+                className={`absolute left-1/2 -translate-x-1/2 bottom-0.5 w-7 h-7 rounded-full flex items-center justify-center transition ${isLandscape ? 'bg-cyan-500/30 text-cyan-300' : 'text-gray-300 hover:text-cyan-300 hover:bg-white/10'}`}
+                title="横屏（全屏并锁定横向）"
+              >
+                <RectangleHorizontal size={13} />
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* 盘外贴边：下一个 / 更多 / 关闭 */}
+        {controlsVisible && (
+          <div
+            className="absolute right-1 bottom-[92px] z-30 flex flex-col items-center gap-1 text-gray-300"
+            onClick={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
+          >
+            <button
+              onClick={handleSkipNext}
+              className="w-8 h-8 rounded-full bg-black/60 backdrop-blur-md border border-white/15 flex items-center justify-center hover:text-cyan-300 transition"
+              title={partsList.length > 1 && currentPartIndex < partsList.length - 1 ? `播放下一分段 (Part ${currentPartIndex + 2}/${partsList.length})` : '跳过当前视频'}
+            >
+              <SkipForward size={13} />
+            </button>
+            <div className="relative">
+              <button
+                onClick={() => setShowMoreMenu(prev => !prev)}
+                className={`w-8 h-8 rounded-full bg-black/60 backdrop-blur-md border border-white/15 flex items-center justify-center transition ${showMoreMenu ? 'bg-cyan-500/30 text-cyan-300' : 'hover:text-cyan-300'}`}
+                title="更多功能与播放选项"
+              >
+                <MoreVertical size={14} />
+              </button>
+            </div>
+            <button
+              onClick={() => onClose && onClose(id)}
+              className="w-8 h-8 rounded-full bg-black/60 backdrop-blur-md border border-white/15 flex items-center justify-center hover:bg-red-500/20 hover:text-red-400 transition"
+              title="关闭窗口"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Scrubber & Controls Footer */}
+      <div ref={footerRef} className="p-2.5 bg-slate-950/95 border-t border-white/5 rounded-b-2xl flex flex-col gap-1.5 text-xs">
+        {/* Scrubber with Real-time Drag & Centered Trickplay */}
+        <div className="relative w-full">
+          {/* Scrubber-level Trickplay Thumbnail：桌面常规；铺满/取中铺满（窗口贴底，含手机）恒挂进度条上方 */}
+          {(!isMobileViewport || cropFill || isMaximized) && (
+            <TrickplayScrubberThumbnail
+              item={trickplayItem}
+              hoverTime={hoverScrubberTime}
+              hoverPercent={hoverScrubberPercent}
+              containerWidth={scrubberWidth}
+              mode="scrubber"
+              position={(cropFill || isMaximized) ? 'above' : ((layout.top + (layout.height || layout.width * 9 / 16 + 72)) > vpHeight * 0.7 ? 'above' : 'below')}
+            />
+          )}
+
+          <div
+            ref={scrubberRef}
+            className={`w-full bg-white/20 rounded-full cursor-pointer transition-all relative overflow-hidden group/bar touch-none ${hoverScrubberTime !== null || isWheelSeeking ? 'h-2' : 'h-0.5'}`}
+            onMouseDown={handleScrubberMouseDown}
+            onMouseMove={handleScrubberMouseMove}
+            onMouseLeave={handleScrubberMouseLeave}
+            onTouchStart={handleScrubberTouchStart}
+            onTouchMove={handleScrubberTouchMove}
+            onTouchEnd={handleScrubberTouchEnd}
+            onTouchCancel={handleScrubberTouchEnd}
+          >
+            <div
+              className="absolute top-0 left-0 bottom-0 bg-cyan-400 shadow-sm shadow-cyan-400/50 rounded-full transition-all duration-75"
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+        </div>
+
+
+      </div>
+
       {/* SE Corner Resizer Handle (Bottom-Right) */}
       {!isMaximized && (
         <div

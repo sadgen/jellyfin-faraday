@@ -1028,6 +1028,9 @@ export default function LibraryView({
   // 响应式视口（替代渲染期直读 window.innerWidth）
   const { width: vpWidth } = useViewport();
   const isMobileViewport = vpWidth < 768;
+  // 手机判定（含横屏手机）：窄屏或触屏+中等宽度
+  const isPhoneLike = typeof navigator !== 'undefined' &&
+    (isMobileViewport || (navigator.maxTouchPoints > 1 && vpWidth < 1200));
 
   // Default Playback Settings State & Quick Popover
   const [showPlaybackDefaultsMenu, setShowPlaybackDefaultsMenu] = useState(false);
@@ -2274,7 +2277,7 @@ export default function LibraryView({
           </div>
 
           {/* 手机端：筛选下拉菜单（桌面端隐藏，防止按钮过多溢出） */}
-          {isMobileViewport ? (
+          {isPhoneLike ? (
             <div className="relative flex-shrink-0">
               <button
                 onClick={() => setShowMobileFilterMenu(prev => !prev)}

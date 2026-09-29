@@ -43,6 +43,7 @@ export function useTouchGestures({
   normalSpeed = 1.0,
   onSpeedChange,
   onTap,
+  onCloseSwipe = null,
   disableLongPressBoost = false,
   enableLongPressDrag = false,
   onLongPressDragStart,
@@ -130,7 +131,9 @@ export function useTouchGestures({
       relY,
       isLeftHalf,
       rectWidth: rect.width,
-      rectHeight: rect.height
+      rectHeight: rect.height,
+      rectLeft: rect.left,
+      rectTop: rect.top
     };
 
     touchActionRef.current = null;
@@ -218,6 +221,12 @@ export function useTouchGestures({
     // Determine gesture direction on first significant movement (> 12px)
     // 轴判定宽松（jellow 同款）：|dy| < 2|dx| 即算横向 seek，斜着划也生效
     if (!touchActionRef.current && Math.hypot(dx, dy) > 12) {
+      // 手机：从窗口左边缘（触摸点距窗口左缘 24px 内）向右滑 = 关闭手势（优先于 seek/亮度判定）
+      if (onCloseSwipe && start.relX <= 24 && dx > Math.abs(dy)) {
+        touchActionRef.current = 'close_swipe';
+        if (onCloseSwipe.onDragStart) onCloseSwipe.onDragStart(dx);
+        return;
+      }
       if (Math.abs(dx) * 2 > Math.abs(dy)) {
         // Horizontal -> Seek
         touchActionRef.current = 'seek';
@@ -237,6 +246,12 @@ export function useTouchGestures({
     if (!touchActionRef.current) return;
 
     e.preventDefault();
+
+    if (touchActionRef.current === 'close_swipe') {
+      // 关闭手势：窗口实时跟手平移（dx 为相对触摸起点位移）
+      if (onCloseSwipe.onDragMove) onCloseSwipe.onDragMove(dx);
+      return;
+    }
 
     if (touchActionRef.current === 'seek') {
       // jellow 真参数：整窗宽一划 = 全片时长；滑动过程只刷文字+缩略图，松手才 seek 一次
@@ -309,6 +324,12 @@ export function useTouchGestures({
       if (onSpeedChange) onSpeedChange(boostRestoreSpeedRef.current);
     }
 
+    if (touchActionRef.current === 'close_swipe') {
+      touchActionRef.current = null;
+      if (onCloseSwipe.onDragEnd) onCloseSwipe.onDragEnd();
+      return;
+    }
+
     if (touchActionRef.current === 'seek' && gestureState.type === 'seek') {
       if (onSeek) onSeek(gestureState.value);
       if (videoRef.current) videoRef.current.currentTime = gestureState.value;
@@ -335,7 +356,7 @@ export function useTouchGestures({
       }, 280);
     }
     touchStartSeenRef.current = false;
-  }, [gestureState, onSeek, onSeekPreviewEnd, onSpeedChange, videoRef, scheduleGestureFade, onLongPressDragEnd, onTap]);
+  }, [gestureState, onSeek, onSeekPreviewEnd, onSpeedChange, videoRef, scheduleGestureFade, onLongPressDragEnd, onTap, onCloseSwipe]);
 
   return {
     gestureState,

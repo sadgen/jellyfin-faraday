@@ -641,6 +641,28 @@ export default function FloatingVideoWindow({
     onTogglePlay: () => {
       togglePlay();
     },
+    onCloseSwipe: {
+      onDragStart: () => {
+        dragStartPosRef.current = { left: layout.left, top: layout.top };
+      },
+      onDragMove: (dx) => {
+        // 实时跟手：窗口随手指右移（带阻尼，最多 1.4 倍窗宽）
+        const damped = Math.min(dx, layout.width * 1.4);
+        setLayout(prev => ({ ...prev, left: Math.min(window.innerWidth - 60, dragStartPosRef.current.left + Math.max(0, damped)) }));
+      },
+      onDragEnd: () => {
+        // 松手判定：窗口中心越过屏幕 45% → 关闭并前窗顶上；否则弹回原位
+        const win = containerRef.current;
+        if (win) {
+          const r = win.getBoundingClientRect();
+          if (r.left + r.width / 2 > window.innerWidth * 0.45) {
+            if (onClose) onClose(id);
+            return;
+          }
+        }
+        setLayout(prev => ({ ...prev, left: dragStartPosRef.current.left }));
+      }
+    },
     normalSpeed: playbackSpeed,
     onSpeedChange: (speed) => {
       setPlaybackSpeed(speed);

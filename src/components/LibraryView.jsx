@@ -1013,15 +1013,12 @@ export default function LibraryView({
   const [showDuplicatesOnly, setShowDuplicatesOnly] = useState(false);
   const [showMobileFilterMenu, setShowMobileFilterMenu] = useState(false);
   const mobileFilterBtnRef = useRef(null);
-  const [mobileFilterMenuPos, setMobileFilterMenuPos] = useState({ top: 64, right: 8 });
+  const [mobileFilterMenuTop, setMobileFilterMenuTop] = useState(64);
   const toggleMobileFilterMenu = useCallback(() => {
     const el = mobileFilterBtnRef.current;
     if (el) {
       const r = el.getBoundingClientRect();
-      setMobileFilterMenuPos({
-        top: Math.min(r.bottom + 8, window.innerHeight - 16),
-        right: Math.max(8, window.innerWidth - r.right)
-      });
+      setMobileFilterMenuTop(Math.min(r.bottom + 6, window.innerHeight - 200));
     }
     setShowMobileFilterMenu(prev => !prev);
   }, []);
@@ -2316,26 +2313,26 @@ export default function LibraryView({
                     onClick={() => setShowMobileFilterMenu(false)}
                   />
                   <div
-                    className="fixed z-50 w-72 bg-[#0d131f] border-2 border-cyan-400/60 rounded-2xl p-3.5 shadow-[0_20px_60px_rgba(0,0,0,0.95)] flex flex-col gap-3 text-xs animate-in fade-in zoom-in-95 duration-100 max-h-[70vh] overflow-y-auto"
-                    style={{ top: mobileFilterMenuPos.top, right: mobileFilterMenuPos.right }}
+                    className="fixed left-0 right-0 mx-auto z-50 w-[88vw] max-w-[270px] bg-[#0d131f] border-2 border-cyan-400/60 rounded-2xl p-2.5 shadow-[0_20px_60px_rgba(0,0,0,0.95)] flex flex-col gap-2 text-xs animate-in fade-in duration-100 max-h-[75vh] overflow-y-auto"
+                    style={{ top: mobileFilterMenuTop }}
                     onClick={(e) => e.stopPropagation()}
                   >
-                    <div className="flex items-center justify-between border-b border-white/15 pb-2">
-                      <span className="font-bold text-white text-sm flex items-center gap-1.5">
-                        <SlidersHorizontal size={13} className="text-cyan-400" />
+                    <div className="flex items-center justify-between border-b border-white/15 pb-1.5">
+                      <span className="font-bold text-white text-xs flex items-center gap-1.5">
+                        <SlidersHorizontal size={12} className="text-cyan-400" />
                         筛选选项
                       </span>
                       <button
                         onClick={() => setShowMobileFilterMenu(false)}
                         className="p-1 rounded-full text-gray-400 hover:text-white hover:bg-white/10 transition"
                       >
-                        <X size={14} />
+                        <X size={12} />
                       </button>
                     </div>
 
                     {/* 播放状态 */}
-                    <div className="flex flex-col gap-1.5">
-                      <span className="text-[10px] text-cyan-300 font-bold">播放状态</span>
+                    <div className="flex flex-col gap-1">
+                      <span className="text-[9px] text-cyan-300 font-bold">播放状态</span>
                       <div className="grid grid-cols-3 gap-1">
                         {STATUS_OPTIONS.map(f => {
                           const active = (statusFilter || 'all') === f.id;
@@ -2343,9 +2340,9 @@ export default function LibraryView({
                             <button
                               key={f.id}
                               onClick={() => onStatusFilterChange(active && f.id !== 'all' ? 'all' : f.id)}
-                              className={`py-1.5 rounded-lg text-[11px] text-center transition ${
+                              className={`py-1 rounded-md text-[10px] text-center transition ${
                                 active
-                                  ? 'bg-cyan-400 text-slate-950 font-extrabold shadow-md shadow-cyan-400/40'
+                                  ? 'bg-cyan-400 text-slate-950 font-extrabold shadow-sm shadow-cyan-400/40'
                                   : 'bg-slate-800 text-gray-300 hover:bg-slate-700 border border-white/10'
                               }`}
                             >
@@ -2357,8 +2354,8 @@ export default function LibraryView({
                     </div>
 
                     {/* 收藏筛选 */}
-                    <div className="flex flex-col gap-1.5">
-                      <span className="text-[10px] text-cyan-300 font-bold">收藏</span>
+                    <div className="flex flex-col gap-1">
+                      <span className="text-[9px] text-cyan-300 font-bold">收藏</span>
                       <div className="grid grid-cols-3 gap-1">
                         {[
                           { id: 'all', label: '全部' },
@@ -2373,9 +2370,9 @@ export default function LibraryView({
                             <button
                               key={opt.id}
                               onClick={() => setFavoriteFilter(opt.id)}
-                              className={`py-1.5 rounded-lg text-[11px] text-center transition ${
+                              className={`py-1 rounded-md text-[10px] text-center transition ${
                                 active
-                                  ? 'bg-cyan-400 text-slate-950 font-extrabold shadow-md shadow-cyan-400/40'
+                                  ? 'bg-cyan-400 text-slate-950 font-extrabold shadow-sm shadow-cyan-400/40'
                                   : 'bg-slate-800 text-gray-300 hover:bg-slate-700 border border-white/10'
                               }`}
                             >
@@ -2387,8 +2384,8 @@ export default function LibraryView({
                     </div>
 
                     {/* 播放次数 */}
-                    <div className="flex flex-col gap-1.5">
-                      <span className="text-[10px] text-cyan-300 font-bold">播放次数</span>
+                    <div className="flex flex-col gap-1">
+                      <span className="text-[9px] text-cyan-300 font-bold">播放次数</span>
                       <div className="grid grid-cols-3 gap-1">
                         {PLAY_COUNT_OPTIONS.map(opt => {
                           const active = playCountFilter === opt.id;
@@ -2396,9 +2393,9 @@ export default function LibraryView({
                             <button
                               key={opt.id}
                               onClick={() => setPlayCountFilter(active ? 'all' : opt.id)}
-                              className={`py-1.5 rounded-lg text-[11px] text-center transition ${
+                              className={`py-1 rounded-md text-[10px] text-center transition ${
                                 active
-                                  ? 'bg-cyan-400 text-slate-950 font-extrabold shadow-md shadow-cyan-400/40'
+                                  ? 'bg-cyan-400 text-slate-950 font-extrabold shadow-sm shadow-cyan-400/40'
                                   : 'bg-slate-800 text-gray-300 hover:bg-slate-700 border border-white/10'
                               }`}
                             >
@@ -2411,19 +2408,19 @@ export default function LibraryView({
 
                     {/* 仅显示重复影片 */}
                     <div className="flex items-center justify-between pt-1 border-t border-white/10">
-                      <span className="text-[11px] text-gray-200 font-medium flex items-center gap-1">
-                        <Layers size={11} className="text-red-400" />
-                        <span>仅显示重复影片</span>
+                      <span className="text-[10px] text-gray-200 font-medium flex items-center gap-1">
+                        <Layers size={10} className="text-red-400" />
+                        <span>仅重复影片</span>
                       </span>
                       <button
                         onClick={() => setShowDuplicatesOnly(prev => !prev)}
-                        className={`px-3 py-1 rounded-lg text-[11px] font-bold transition ${
+                        className={`px-2 py-0.5 rounded-md text-[10px] font-bold transition ${
                           showDuplicatesOnly
                             ? 'bg-red-600 text-white shadow'
                             : 'bg-slate-800 text-gray-300 hover:bg-slate-700 border border-white/10'
                         }`}
                       >
-                        {showDuplicatesOnly ? `已开启 (${duplicateCount})` : '已关闭'}
+                        {showDuplicatesOnly ? `开启(${duplicateCount})` : '关闭'}
                       </button>
                     </div>
                   </div>

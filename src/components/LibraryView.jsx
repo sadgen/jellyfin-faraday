@@ -1012,6 +1012,19 @@ export default function LibraryView({
   const [playCountFilter, setPlayCountFilter] = useState('all');
   const [showDuplicatesOnly, setShowDuplicatesOnly] = useState(false);
   const [showMobileFilterMenu, setShowMobileFilterMenu] = useState(false);
+  const mobileFilterBtnRef = useRef(null);
+  const [mobileFilterMenuPos, setMobileFilterMenuPos] = useState({ top: 64, right: 8 });
+  const toggleMobileFilterMenu = useCallback(() => {
+    const el = mobileFilterBtnRef.current;
+    if (el) {
+      const r = el.getBoundingClientRect();
+      setMobileFilterMenuPos({
+        top: Math.min(r.bottom + 8, window.innerHeight - 16),
+        right: Math.max(8, window.innerWidth - r.right)
+      });
+    }
+    setShowMobileFilterMenu(prev => !prev);
+  }, []);
   const [showMobileSubTabMenu, setShowMobileSubTabMenu] = useState(false);
   const [showMobileLayoutMenu, setShowMobileLayoutMenu] = useState(false);
   const [enableStacking, setEnableStacking] = useState(() => {
@@ -2280,7 +2293,8 @@ export default function LibraryView({
           {isPhoneLike ? (
             <div className="relative flex-shrink-0">
               <button
-                onClick={() => setShowMobileFilterMenu(prev => !prev)}
+                ref={mobileFilterBtnRef}
+                onClick={toggleMobileFilterMenu}
                 className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl border text-xs font-bold transition ${
                   hasActiveMobileFilters
                     ? 'bg-cyan-500/30 border-cyan-400/60 text-cyan-300 shadow-sm shadow-cyan-500/30'
@@ -2295,14 +2309,15 @@ export default function LibraryView({
                 )}
               </button>
 
-              {showMobileFilterMenu && (
+              {showMobileFilterMenu && createPortal(
                 <>
                   <div
                     className="fixed inset-0 z-40"
                     onClick={() => setShowMobileFilterMenu(false)}
                   />
                   <div
-                    className="absolute right-0 top-[calc(100%+8px)] z-50 w-72 bg-[#0d131f] border-2 border-cyan-400/60 rounded-2xl p-3.5 shadow-[0_20px_60px_rgba(0,0,0,0.95)] flex flex-col gap-3 text-xs animate-in fade-in zoom-in-95 duration-100 max-h-[70vh] overflow-y-auto"
+                    className="fixed z-50 w-72 bg-[#0d131f] border-2 border-cyan-400/60 rounded-2xl p-3.5 shadow-[0_20px_60px_rgba(0,0,0,0.95)] flex flex-col gap-3 text-xs animate-in fade-in zoom-in-95 duration-100 max-h-[70vh] overflow-y-auto"
+                    style={{ top: mobileFilterMenuPos.top, right: mobileFilterMenuPos.right }}
                     onClick={(e) => e.stopPropagation()}
                   >
                     <div className="flex items-center justify-between border-b border-white/15 pb-2">
@@ -2413,7 +2428,7 @@ export default function LibraryView({
                     </div>
                   </div>
                 </>
-              )}
+              , document.body)}
             </div>
           ) : (
             <div className="flex items-center bg-black/40 p-0.5 rounded-xl border border-white/5 gap-0.5 sm:gap-1 overflow-x-auto flex-shrink-0">

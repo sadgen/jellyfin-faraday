@@ -2607,8 +2607,8 @@ export default function LibraryView({
         onScroll={handleScroll}
         className="flex-1 overflow-y-auto p-2 sm:p-5 pb-24 md:pb-20"
       >
-        {/* A-Z 字母索引（仅影片视图） */}
-        {activeSubTab === 'items' && (
+        {/* A-Z 字母索引（仅影片视图；手机版隐藏——用处不大还占屏） */}
+        {activeSubTab === 'items' && !isPhoneLike && (
           <div className="flex items-center gap-0.5 flex-wrap mb-2.5 sm:mb-3 bg-black/30 border border-white/5 rounded-xl px-1.5 py-1">
             <button
               onClick={() => onSelectLetter && onSelectLetter('')}
@@ -2830,7 +2830,7 @@ export default function LibraryView({
 
         {/* SUB-VIEW 1: Genres */}
         {activeSubTab === 'genres' && (
-          <div className="grid gap-2.5 sm:gap-3" style={{ gridTemplateColumns: `repeat(${effectiveGridColumns}, minmax(0, 1fr))` }}>
+          <div className="grid gap-1.5 sm:gap-2.5" style={{ gridTemplateColumns: `repeat(${effectiveGridColumns}, minmax(0, 1fr))` }}>
             {genresList.map(genre => (
               <div
                 key={genre.Id}
@@ -2852,7 +2852,7 @@ export default function LibraryView({
 
         {/* SUB-VIEW 2: Persons（仅演员，按出演数量排序，大图卡片） */}
         {activeSubTab === 'persons' && (
-          <div className="grid gap-3 sm:gap-4" style={{ gridTemplateColumns: `repeat(${effectiveGridColumns}, minmax(0, 1fr))` }}>
+          <div className="grid gap-2 sm:gap-3" style={{ gridTemplateColumns: `repeat(${effectiveGridColumns}, minmax(0, 1fr))` }}>
             {actorsLoading && (
               <div className="col-span-full flex items-center gap-2 text-[11px] text-gray-500 py-1">
                 <span className="w-3 h-3 border-2 border-cyan-500/30 border-t-cyan-400 rounded-full animate-spin inline-block" />
@@ -2896,7 +2896,7 @@ export default function LibraryView({
 
         {/* SUB-VIEW 3: Collections */}
         {activeSubTab === 'collections' && (
-          <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${effectiveGridColumns}, minmax(0, 1fr))` }}>
+          <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${effectiveGridColumns}, minmax(0, 1fr))` }}>
             {collectionsList.map(col => {
               const imgUrl = jellyfin.getImageUrl(col.Id, col.ImageTags?.Primary, 'Primary', 300, 80);
               return (
@@ -2933,7 +2933,7 @@ export default function LibraryView({
               <div className="text-sm">暂无年份数据</div>
             </div>
           ) : (
-            <div className="grid gap-2.5 sm:gap-3" style={{ gridTemplateColumns: `repeat(${effectiveGridColumns}, minmax(0, 1fr))` }}>
+            <div className="grid gap-1.5 sm:gap-2.5" style={{ gridTemplateColumns: `repeat(${effectiveGridColumns}, minmax(0, 1fr))` }}>
               {yearsList.map(year => (
                 <div
                   key={year.Id}

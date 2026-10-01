@@ -654,6 +654,67 @@ export default function App() {
     });
   }, []);
 
+  // 手机返回手势/返回键：浮窗打开时 push 同 URL 历史态，popstate 关最新浮窗而非退页
+  const floatingWindowsRef = useRef([]);
+  const prevWinCountRef = useRef(0);
+  useEffect(() => { floatingWindowsRef.current = floatingWindows; }, [floatingWindows]);
+  const winHistoryPushedRef = useRef(0);
+  const ignoreWinPopRef = useRef(false);
+  const closingViaPopRef = useRef(false);
+
+  useEffect(() => {
+    const onPopState = () => {
+      if (ignoreWinPopRef.current) {
+        ignoreWinPopRef.current = false;
+        return;
+      }
+      const wins = floatingWindowsRef.current;
+      if (wins.length > 0) {
+        // 后退 = 关闭最新打开的浮窗（一个个退）
+        const newest = [...wins].sort((a, b) => b.timestamp - a.timestamp)[0];
+        winHistoryPushedRef.current = Math.max(0, winHistoryPushedRef.current - 1);
+        closingViaPopRef.current = true;
+        handleCloseFloatingWindow(newest.id);
+      }
+      // 无浮窗时不拦截，浏览器正常后退
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, [handleCloseFloatingWindow]);
+
+  useEffect(() => {
+    const isPhone = window.innerWidth < 768 ||
+      (navigator.maxTouchPoints > 1 && window.innerWidth < 1200);
+    if (!isPhone) {
+      prevWinCountRef.current = floatingWindows.length;
+      return;
+    }
+    const prev = prevWinCountRef.current;
+    const curr = floatingWindows.length;
+    if (curr > prev) {
+      // 每开一窗 push 一个同 URL 历史态（后退手势由此接管）
+      for (let i = 0; i < curr - prev; i++) {
+        window.history.pushState({ faradayWin: true }, '');
+        winHistoryPushedRef.current++;
+      }
+    } else if (curr < prev) {
+      const diff = prev - curr;
+      if (closingViaPopRef.current) {
+        // popstate 已消费对应历史态，只同步计数
+        closingViaPopRef.current = false;
+        winHistoryPushedRef.current = Math.max(0, winHistoryPushedRef.current - diff);
+      } else {
+        // UI 主动关闭（✕/滑关）：消费对应历史态，保持返回键语义同步
+        if (winHistoryPushedRef.current >= diff) {
+          ignoreWinPopRef.current = true;
+          window.history.go(-diff);
+          winHistoryPushedRef.current -= diff;
+        }
+      }
+    }
+    prevWinCountRef.current = curr;
+  }, [floatingWindows.length]);
+
   // 窗口形态（是否取中铺满）回报，存到窗口记录上供换片继承
   const handleCropChangeWindow = useCallback((winId, crop) => {
     console.log('[crop-report]', winId, crop);

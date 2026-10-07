@@ -11,6 +11,7 @@ import { useViewport } from '../hooks/useViewport';
 import { getPlaybackDefaults, setPlaybackDefaults, QUALITY_OPTIONS, SPEED_PRESETS, PATROL_INTERVALS, GYRO_SWEEP_OPTIONS } from '../utils/playbackDefaults';
 import { SEEK_SPEED_OPTIONS, getStoredSeekSpeed, setStoredSeekSpeed } from '../utils/seekSettings';
 import { GESTURE_ACTIONS, getGestureSettings, setGestureSettings } from '../utils/gestureSettings';
+import { pushSentinel, consumeSentinel, sentinelDepth } from '../utils/backSentinel';
 import MobileActionSheet from './MobileActionSheet';
 import DeleteConfirmModal from './DeleteConfirmModal';
 import CardContextMenu from './CardContextMenu';
@@ -261,6 +262,8 @@ const MediaCard = memo(function MediaCard({
   // 相对映射（手指滑出海报不受限，屏幕即擦洗轨），叠加半步迟滞过滤微颤、显示原始时间；
   // 触摸隐式捕获保证整根手指的移动都派发给起始海报，松手即收
   const handleCoverTouchMove = useCallback((e) => {
+    // 多选模式下禁用触摸擦洗：点卡=选中，且为边缘滑入退出多选的手势让路
+    if (isSelecting) return;
     if (!e.touches || e.touches.length === 0) return;
     const touch = e.touches[0];
     const rect = e.currentTarget.getBoundingClientRect();
@@ -309,7 +312,7 @@ const MediaCard = memo(function MediaCard({
     setHoverPercent(mapped);
     setTrickplayTime(durationSec * mapped);
     setIsNearTop(rect.top < 240);
-  }, [durationSec, item]);
+  }, [durationSec, item, isSelecting]);
 
   const handleCoverTouchEnd = useCallback(() => {
     touchScrubRef.current = { started: false, scrubbing: false, canceled: false, startX: 0, startY: 0, startPercent: 0 };
@@ -1614,6 +1617,109 @@ export default function LibraryView({
   const handleClearSelection = useCallback(() => {
     setSelectedItemIds(new Set());
   }, []);
+
+  // 手机返回键接管：多选批量栏或操作面板打开时压入返回哨兵——后退一次
+  // 关闭面板并取消选择（与 App 浮窗哨兵共存：层激活期间浮窗后退挂起）
+  const selectLayerActive = isMobileViewport && (isSelecting || !!actionSheetItem);
+  useEffect(() => {
+    const prev = window.__faradayLayerActive;
+    window.__faradayLayerActive = selectLayerActive;
+    if (selectLayerActive && !prev && sentinelDepth() === 0) {
+      pushSentinel(() => {
+        setActionSheetItem(null);
+        handleClearSelection();
+      });
+    } else if (!selectLayerActive && prev) {
+      consumeSentinel();
+    }
+  }, [selectLayerActive, actionSheetItem, handleClearSelection]);
+
+  // 左右屏幕边缘滑入：操作面板打开时跟手平移、松手越过阈值斜飞关闭并取消选择
+  useEffect(() => {
+    if (!selectLayerActive || !actionSheetItem) return;
+    let sx = 0, sy = 0, dragging = false, sheetEl = null;
+    const start = (e) => {
+      if (e.touches.length !== 1) return;
+      const t = e.touches[0];
+      if (t.clientX > 30 && t.clientX < window.innerWidth - 30) return;
+      sx = t.clientX;
+      sy = t.clientY;
+      sheetEl = [...document.querySelectorAll('div')].find(d => {
+        const cls = (d.className || '').toString();
+        return cls.includes('fixed inset-0') && cls.includes('justify-end');
+      }) || null;
+    };
+    const move = (e) => {
+      if (!sheetEl) return;
+      const t = e.touches[0];
+      const dx = t.clientX - sx, dy = t.clientY - sy;
+      if (!dragging) {
+        if (Math.hypot(dx, dy) < 12) return;
+        if (Math.abs(dx) <= Math.abs(dy)) { sheetEl = null; return; }
+        dragging = true;
+      }
+      e.preventDefault();
+      e.stopPropagation();
+      sheetEl.style.transition = 'none';
+      sheetEl.style.transform = `translateX(${dx * 0.9}px)`;
+    };
+    const end = (e) => {
+      if (!sheetEl) return;
+      const dx = e.changedTouches[0].clientX - sx;
+      const el = sheetEl;
+      dragging = false;
+      sheetEl = null;
+      if (Math.abs(dx) > window.innerWidth * 0.3) {
+        el.style.transition = 'transform 180ms ease';
+        el.style.transform = `translateX(${dx > 0 ? window.innerWidth : -window.innerWidth}px)`;
+        setTimeout(() => {
+          setActionSheetItem(null);
+          handleClearSelection();
+        }, 160);
+      } else {
+        el.style.transition = 'transform 200ms ease';
+        el.style.transform = '';
+      }
+    };
+    window.addEventListener('touchstart', start, { capture: true, passive: true });
+    window.addEventListener('touchmove', move, { capture: true, passive: false });
+    window.addEventListener('touchend', end, { capture: true, passive: true });
+    return () => {
+      window.removeEventListener('touchstart', start, { capture: true });
+      window.removeEventListener('touchmove', move, { capture: true });
+      window.removeEventListener('touchend', end, { capture: true });
+    };
+  }, [selectLayerActive, actionSheetItem, handleClearSelection]);
+
+  // 左右屏幕边缘滑入（纯多选模式、无面板）：横滑超过 44px 直接退出多选；
+  // 多选态下海报触摸擦洗已禁用（见 MediaCard），此手势无冲突
+  useEffect(() => {
+    if (!selectLayerActive || actionSheetItem) return;
+    let sx = 0, sy = 0, armed = false;
+    const start = (e) => {
+      if (e.touches.length !== 1) return;
+      const t = e.touches[0];
+      if (t.clientX > 28 && t.clientX < window.innerWidth - 28) return;
+      sx = t.clientX;
+      sy = t.clientY;
+      armed = true;
+    };
+    const move = (e) => {
+      if (!armed) return;
+      const t = e.touches[0];
+      const dx = t.clientX - sx, dy = t.clientY - sy;
+      if (Math.abs(dx) > 44 && Math.abs(dx) > Math.abs(dy)) {
+        armed = false;
+        handleClearSelection();
+      }
+    };
+    window.addEventListener('touchstart', start, { capture: true, passive: true });
+    window.addEventListener('touchmove', move, { capture: true, passive: true });
+    return () => {
+      window.removeEventListener('touchstart', start, { capture: true });
+      window.removeEventListener('touchmove', move, { capture: true });
+    };
+  }, [selectLayerActive, actionSheetItem, handleClearSelection]);
 
   const isAllVisibleSelected = useMemo(() => {
     if (displayItems.length === 0) return false;

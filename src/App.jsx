@@ -10,6 +10,7 @@ import {
 import { sortMediaItems } from './utils/mediaSorter';
 import { getPlaybackDefaults, setPlaybackDefaults } from './utils/playbackDefaults';
 import { saveAccount } from './utils/accountStore';
+import { suppressPopOnce } from './utils/backSentinel';
 import LibraryView from './components/LibraryView';
 import FloatingWindowsContainer from './components/FloatingWindowsContainer';
 import LoginModal from './components/LoginModal';
@@ -668,6 +669,8 @@ export default function App() {
         ignoreWinPopRef.current = false;
         return;
       }
+      // 多选批量栏/操作面板的返回哨兵层激活时，后退归协调器处理（先关多选层）
+      if (window.__faradayLayerActive) return;
       const wins = floatingWindowsRef.current;
       if (wins.length > 0) {
         // 后退 = 关闭最新打开的浮窗（一个个退）
@@ -707,6 +710,7 @@ export default function App() {
         // UI 主动关闭（✕/滑关）：消费对应历史态，保持返回键语义同步
         if (winHistoryPushedRef.current >= diff) {
           ignoreWinPopRef.current = true;
+          suppressPopOnce(); // 程序性后退：防止返回哨兵协调器误消费多选层
           window.history.go(-diff);
           winHistoryPushedRef.current -= diff;
         }

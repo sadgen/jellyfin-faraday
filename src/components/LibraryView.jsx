@@ -386,7 +386,7 @@ const MediaCard = memo(function MediaCard({
       style={{
         // 浮窗打开时悬停卡片抬升上限压到浮窗层（z-40）之下，trickplay 照常显示；
         // 鼠标在浮窗上时事件被浮窗拦截，不会触发下方海报的预览
-        zIndex: (isHovered || tpStyle) ? (belowFloatingWindows ? 30 : 999) : 1
+        zIndex: isSelecting ? 1 : (isHovered || tpStyle) ? (belowFloatingWindows ? 30 : 999) : 1
       }}
       className={`group relative flex flex-col bg-slate-900/50 rounded-xl transition-all duration-150 select-none will-change-transform ${
         isSelected
@@ -2798,7 +2798,7 @@ export default function LibraryView({
       {/* Main Content Viewport with Infinite Progressive Loading */}
       <div
         onScroll={handleScroll}
-        className="flex-1 overflow-y-auto p-2 sm:p-5 pb-24 md:pb-20"
+        className="flex-1 overflow-y-auto p-1.5 sm:p-2.5 pb-24 md:pb-20"
       >
         {/* A-Z 字母索引（仅影片视图；手机版隐藏——用处不大还占屏） */}
         {activeSubTab === 'items' && !isPhoneLike && (
@@ -3559,7 +3559,7 @@ export default function LibraryView({
 
       {/* Floating Multi-Select Batch Action Bar */}
       {selectedItemIds.size > 0 && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 sm:gap-3 px-4 py-2.5 rounded-2xl bg-slate-950/95 border border-cyan-500/50 shadow-2xl shadow-cyan-500/25 backdrop-blur-xl text-xs animate-in slide-in-from-bottom-5 duration-200 flex-wrap justify-center max-w-[95vw]">
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[9999] flex items-center gap-2 sm:gap-3 px-4 py-2.5 rounded-2xl bg-slate-950/95 border border-cyan-500/50 shadow-2xl shadow-cyan-500/25 backdrop-blur-xl text-xs animate-in slide-in-from-bottom-5 duration-200 flex-wrap justify-center max-w-[95vw]">
           
           {/* Selected Count Indicator */}
           <div className="flex items-center gap-2 pr-2 border-r border-white/10 font-bold text-white font-mono">

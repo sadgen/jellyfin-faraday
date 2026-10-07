@@ -7,8 +7,10 @@ import { jellyfin } from '../api/jellyfinClient';
 
 /**
  * Parse Trickplay info from item details or MediaSources
+ * preferredWidth 缺省为 null = 使用清单中实际存在的最高档位
+ * （服务端多档时任意场景都拿最清晰的档；单档服务器自动回退到唯一档）
  */
-export function getTrickplayInfo(item, { preferredWidth = 320 } = {}) {
+export function getTrickplayInfo(item, { preferredWidth = null } = {}) {
   const defaultAr = (item?.Width && item?.Height && item.Height > 0)
     ? (item.Width / item.Height)
     : (item?.PrimaryImageAspectRatio && item.PrimaryImageAspectRatio > 0 ? item.PrimaryImageAspectRatio : (16 / 9));
@@ -45,7 +47,8 @@ export function getTrickplayInfo(item, { preferredWidth = 320 } = {}) {
     config = manifests[keys[0]];
   }
 
-  let width = preferredWidth;
+  // 两条分支（config.Width 单档 / 数字键多档）都会完整赋值 width
+  let width;
   let height = 180;
   let interval = 10;
   let cols = 10;
@@ -68,32 +71,33 @@ export function getTrickplayInfo(item, { preferredWidth = 320 } = {}) {
     }
   } else {
     const widths = Object.keys(config).map(Number).filter(n => !isNaN(n));
-    if (widths.length > 0) {
-      // 性能关键：优先选用 320 档位。
-      // 640 档位单张雪碧图高达 8MB~25MB（7280万像素），下载耗时 1~4s 且解压显存近 300MB，
-      // 会造成严重掉帧卡顿；320 档位仅 0.8MB~2.8MB，加载与 GPU 渲染极快且在缩略图尺寸下清晰度无损。
-      if (widths.includes(preferredWidth)) {
-        width = preferredWidth;
-      } else if (preferredWidth === 320 && widths.includes(640)) {
-        width = 640;
-      } else {
-        width = widths.reduce((prev, curr) => Math.abs(curr - preferredWidth) < Math.abs(prev - preferredWidth) ? curr : prev);
-      }
-      const m = config[width.toString()] || config[width];
-      if (m) {
-        if (m.Height) height = m.Height;
-        let rawInterval = m.Interval || 10000;
-        if (rawInterval > 1000000) interval = rawInterval / 10000000;
-        else if (rawInterval > 100) interval = rawInterval / 1000;
-        else interval = rawInterval;
+    // 清单里没有任何数字宽度档位（空嵌套对象）：视为无 Trickplay，
+    // 避免拼出指向 404 的 URL 渲染出黑框
+    if (widths.length === 0) {
+      return { ...defaultRet, id, hasTrickplay: false };
+    }
+    // preferredWidth 未指定 = 取实际存在的最高档（清晰度优先）
+    if (widths.includes(preferredWidth)) {
+      width = preferredWidth;
+    } else if (preferredWidth === null) {
+      width = Math.max(...widths);
+    } else {
+      width = widths.reduce((prev, curr) => Math.abs(curr - preferredWidth) < Math.abs(prev - preferredWidth) ? curr : prev);
+    }
+    const m = config[width.toString()] || config[width];
+    if (m) {
+      if (m.Height) height = m.Height;
+      let rawInterval = m.Interval || 10000;
+      if (rawInterval > 1000000) interval = rawInterval / 10000000;
+      else if (rawInterval > 100) interval = rawInterval / 1000;
+      else interval = rawInterval;
 
-        if (m.TileWidth && m.TileWidth <= 20) {
-          cols = m.TileWidth;
-          rows = m.TileHeight || m.TileWidth;
-        } else if (m.ThumbnailWidth && m.Width > m.ThumbnailWidth) {
-          cols = Math.round(m.Width / m.ThumbnailWidth);
-          rows = Math.round(m.Height / m.ThumbnailHeight);
-        }
+      if (m.TileWidth && m.TileWidth <= 20) {
+        cols = m.TileWidth;
+        rows = m.TileHeight || m.TileWidth;
+      } else if (m.ThumbnailWidth && m.Width > m.ThumbnailWidth) {
+        cols = Math.round(m.Width / m.ThumbnailWidth);
+        rows = Math.round(m.Height / m.ThumbnailHeight);
       }
     }
   }

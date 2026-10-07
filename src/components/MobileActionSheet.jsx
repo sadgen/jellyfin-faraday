@@ -63,7 +63,7 @@ export default function MobileActionSheet({
 
   return (
     <div 
-      className="md:hidden fixed inset-0 z-50 flex flex-col justify-end bg-black/80 backdrop-blur-sm animate-in fade-in duration-150"
+      className="md:hidden fixed inset-0 z-[9999] flex flex-col justify-end bg-black/80 backdrop-blur-sm animate-in fade-in duration-150"
       onClick={onClose}
     >
       {/* Bottom Sheet Drawer */}

@@ -313,10 +313,9 @@ const MediaCard = memo(function MediaCard({
 
   const handleCoverTouchEnd = useCallback(() => {
     touchScrubRef.current = { started: false, scrubbing: false, canceled: false, startX: 0, startY: 0, startPercent: 0 };
-    setTimeout(() => {
-      setTrickplayTime(null);
-      setHoverPercent(0);
-    }, 500);
+    // 松手立即收起预览（无延迟）
+    setTrickplayTime(null);
+    setHoverPercent(0);
   }, []);
 
   const handleCoverMouseLeave = useCallback(() => {

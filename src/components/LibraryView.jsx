@@ -166,8 +166,9 @@ const MediaCard = memo(function MediaCard({
   const longPressTimerRef = useRef(null);
   const isLongPressActiveRef = useRef(false);
   const startPosRef = useRef({ x: 0, y: 0 });
-  // 触摸擦洗会话状态（touchend 重置）：started=已记录起点 / scrubbing=横向擦洗中 / canceled=判定为滚动
-  const touchScrubRef = useRef({ started: false, scrubbing: false, canceled: false, startX: 0, startY: 0 });
+  // 触摸擦洗会话状态（touchend 重置）：started=已记录起点 / scrubbing=横向擦洗中 /
+  // canceled=判定为滚动 / startPercent=擦洗激活瞬间的时间锚点（全屏相对映射基准）
+  const touchScrubRef = useRef({ started: false, scrubbing: false, canceled: false, startX: 0, startY: 0, startPercent: 0 });
   // 最近一次提交时的原始触点百分比（迟滞死区的比较基准）
   const touchPercentRef = useRef(0);
 
@@ -256,8 +257,9 @@ const MediaCard = memo(function MediaCard({
   // Touch tracking for mobile devices (trickplay follows finger)
   // 手机手指易颤：竖版海报把整部片长压在一百多像素宽度上，1px 抖动就是几分钟跳帧。
   // 策略：位移<10px 视为点按（保留按位置起播）；垂直位移占优视为滚动网格并取消本次；
-  // 进入擦洗后半步迟滞过滤微颤、显示原始触点时间（缓慢滑动每帧可达可停）；
-  // 触摸隐式捕获使手指滑出海报后擦洗继续生效（端点钳制），松手即收
+  // 进入擦洗后为「隐形全屏进度条」：以按下位置锚定起播时间，横向位移按「整屏宽=全片长」
+  // 相对映射（手指滑出海报不受限，屏幕即擦洗轨），叠加半步迟滞过滤微颤、显示原始时间；
+  // 触摸隐式捕获保证整根手指的移动都派发给起始海报，松手即收
   const handleCoverTouchMove = useCallback((e) => {
     if (!e.touches || e.touches.length === 0) return;
     const touch = e.touches[0];
@@ -290,25 +292,26 @@ const MediaCard = memo(function MediaCard({
         return;
       }
       g.scrubbing = true;
+      g.startPercent = rawPercent; // 激活瞬间的时间锚点
       touchPercentRef.current = rawPercent;
     }
     if (g.canceled) return;
 
-    // 纯迟滞（不吸附网格）：偏离上次提交点超过半步死区才刷新，显示原始触点时间——
-    // 缓慢滑动时每一帧 Trickplay 都可达可停，死区（≥2.5px）滤掉 ±1~2px 的手指微颤。
-    // 死区步长取「片长/60」与「5px 换算」的较大者，适配百余像素宽的手机竖版海报
-    const tpInterval = getTrickplayInfo(item).interval || 10;
-    const timeStepPercent = durationSec > 0 ? Math.max(tpInterval, durationSec / 60) / durationSec : 0.02;
-    const stepPercent = Math.max(timeStepPercent, 5 / rect.width);
-    if (Math.abs(rawPercent - touchPercentRef.current) < stepPercent / 2) return;
-    touchPercentRef.current = rawPercent;
-    setHoverPercent(rawPercent);
-    setTrickplayTime(durationSec * rawPercent);
+    // 相对映射：屏幕宽 = 全片长。死区（半步）取「片长/120」与「3px/屏宽」较大者，
+    // 比海报轴细 ~3 倍，缓慢滑动接近逐帧；微颤（±3px 内）不触发刷新
+    const dx = touch.clientX - g.startX;
+    const screenW = window.innerWidth || rect.width;
+    const mapped = Math.max(0, Math.min(1, g.startPercent + dx / screenW));
+    const stepPercent = Math.max(1 / 120, 3 / screenW);
+    if (Math.abs(mapped - touchPercentRef.current) < stepPercent / 2) return;
+    touchPercentRef.current = mapped;
+    setHoverPercent(mapped);
+    setTrickplayTime(durationSec * mapped);
     setIsNearTop(rect.top < 240);
   }, [durationSec, item]);
 
   const handleCoverTouchEnd = useCallback(() => {
-    touchScrubRef.current = { started: false, scrubbing: false, canceled: false, startX: 0, startY: 0 };
+    touchScrubRef.current = { started: false, scrubbing: false, canceled: false, startX: 0, startY: 0, startPercent: 0 };
     setTimeout(() => {
       setTrickplayTime(null);
       setHoverPercent(0);

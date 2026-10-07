@@ -187,7 +187,7 @@ const MediaCard = memo(function MediaCard({
       } catch {
         // ignore
       }
-    }, 450);
+    }, 800);  // 800ms：450ms 会撞上擦洗 trickplay 前手指在触点的犹豫期（300~700ms）造成误多选
   }, [item.Id, onToggleSelect]);
 
   const handlePointerMove = useCallback((e) => {
@@ -782,7 +782,7 @@ const MediaListRow = memo(function MediaListRow({
       } catch {
         // ignore
       }
-    }, 450);
+    }, 800);  // 800ms：450ms 会撞上擦洗 trickplay 前手指在触点的犹豫期（300~700ms）造成误多选
   }, [item.Id, onToggleSelect]);
 
   const handlePointerMove = useCallback((e) => {

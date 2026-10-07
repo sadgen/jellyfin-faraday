@@ -293,10 +293,12 @@ const MediaCard = memo(function MediaCard({
     }
     if (g.canceled) return;
 
-    // 量化 + 迟滞：与上次提交点偏离超过半步才更新，步长取 Trickplay 帧间隔与片长/60 的较大值
+    // 量化 + 迟滞：与上次提交点偏离超过半步才更新。步长取「片长/60」与「5px 换算」
+    // 的较大者——手机竖版海报仅百余像素宽，像素约束保证死区 ≥2.5px，
+    // 手指微颤（±1~2px）不会反复跨格跳帧
     const tpInterval = getTrickplayInfo(item).interval || 10;
-    const stepSec = Math.max(tpInterval, durationSec / 60);
-    const stepPercent = durationSec > 0 ? stepSec / durationSec : 0.02;
+    const timeStepPercent = durationSec > 0 ? Math.max(tpInterval, durationSec / 60) / durationSec : 0.02;
+    const stepPercent = Math.max(timeStepPercent, 5 / rect.width);
     if (Math.abs(rawPercent - touchPercentRef.current) < stepPercent / 2) return;
     const snapped = Math.max(0, Math.min(1, Math.round(rawPercent / stepPercent) * stepPercent));
     touchPercentRef.current = rawPercent;

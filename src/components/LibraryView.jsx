@@ -349,6 +349,28 @@ const MediaCard = memo(function MediaCard({
     return getTrickplayStyle(item, trickplayTime);
   }, [item, trickplayTime]);
 
+  // 边缘列海报的预览窗居中于卡片、半宽超出屏外——渲染后实测其视口位置，
+  // 越界则整窗水平内收（绘制前同步完成无闪烁）；箭头反向补偿保持指向海报中心
+  const previewRef = useRef(null);
+  const [previewShift, setPreviewShift] = useState(0);
+  useLayoutEffect(() => {
+    if (!tpStyle) {
+      setPreviewShift(0);
+      return;
+    }
+    const el = previewRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const margin = 8;
+    let shift = 0;
+    if (r.width > 0) {
+      if (r.left < margin) shift = margin - r.left;
+      else if (r.right > vw - margin) shift = (vw - margin) - r.right;
+    }
+    setPreviewShift(shift);
+  }, [tpStyle, tpInfo.isVertical]);
+
   return (
     <div
       onMouseEnter={() => setIsHovered(true)}
@@ -394,14 +416,19 @@ const MediaCard = memo(function MediaCard({
         Auto boundary: floats below card if near top, above card otherwise!
       */}
       {!isBackdrop && tpStyle && (
-        <div 
-          className={`absolute left-1/2 -translate-x-1/2 z-50 flex flex-col items-center pointer-events-none animate-in fade-in zoom-in-95 duration-100 ${
+        <div
+          ref={previewRef}
+          className={`absolute left-1/2 z-50 flex flex-col items-center pointer-events-none animate-in fade-in zoom-in-95 duration-100 ${
             isNearTop ? 'top-[calc(100%+8px)]' : 'bottom-[calc(100%+8px)]'
           }`}
+          style={{ transform: `translateX(calc(-50% + ${previewShift}px))` }}
         >
-          {/* Upward arrow if positioned below */}
+          {/* Upward arrow if positioned below（反向补偿钳制偏移，保持指向海报中心） */}
           {isNearTop && (
-            <div className="w-0 h-0 border-x-8 border-x-transparent border-b-8 border-b-cyan-400 mb-0.5" />
+            <div
+              className="w-0 h-0 border-x-8 border-x-transparent border-b-8 border-b-cyan-400 mb-0.5"
+              style={{ transform: `translateX(${-previewShift}px)` }}
+            />
           )}
 
           {/* 2X-Enlarged HD Frame（自适应横屏 16:9 / 竖屏 9:16，避免被硬拉伸） */}
@@ -419,9 +446,12 @@ const MediaCard = memo(function MediaCard({
             </div>
           </div>
 
-          {/* Downward arrow if positioned above */}
+          {/* Downward arrow if positioned above（反向补偿钳制偏移） */}
           {!isNearTop && (
-            <div className="w-0 h-0 border-x-8 border-x-transparent border-t-8 border-t-cyan-400 mt-0.5" />
+            <div
+              className="w-0 h-0 border-x-8 border-x-transparent border-t-8 border-t-cyan-400 mt-0.5"
+              style={{ transform: `translateX(${-previewShift}px)` }}
+            />
           )}
         </div>
       )}

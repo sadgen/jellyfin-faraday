@@ -183,11 +183,15 @@ const MediaCard = memo(function MediaCard({
       if (onToggleSelect) {
         onToggleSelect(item.Id);
       }
-      try {
-        if (navigator.vibrate) navigator.vibrate(40);
-      } catch {
-        // ignore
-      }
+      // 震动延迟到批量操作栏实际绘制的帧（双 rAF），与视觉反馈同步——
+      // 同步震动会早于面板滑入动画约 300ms，手感脱节
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        try {
+          if (navigator.vibrate) navigator.vibrate(40);
+        } catch {
+          // ignore
+        }
+      }));
     }, 800);  // 800ms：450ms 会撞上擦洗 trickplay 前手指在触点的犹豫期（300~700ms）造成误多选
   }, [item.Id, onToggleSelect]);
 

@@ -256,7 +256,8 @@ const MediaCard = memo(function MediaCard({
   // Touch tracking for mobile devices (trickplay follows finger)
   // 手机手指易颤：竖版海报把整部片长压在一百多像素宽度上，1px 抖动就是几分钟跳帧。
   // 策略：位移<10px 视为点按（保留按位置起播）；垂直位移占优视为滚动网格并取消本次；
-  // 进入擦洗后按时间网格量化 + 半步迟滞，微颤不再反复跳帧
+  // 进入擦洗后半步迟滞过滤微颤、显示原始触点时间（缓慢滑动每帧可达可停）；
+  // 触摸隐式捕获使手指滑出海报后擦洗继续生效（端点钳制），松手即收
   const handleCoverTouchMove = useCallback((e) => {
     if (!e.touches || e.touches.length === 0) return;
     const touch = e.touches[0];
@@ -293,17 +294,16 @@ const MediaCard = memo(function MediaCard({
     }
     if (g.canceled) return;
 
-    // 量化 + 迟滞：与上次提交点偏离超过半步才更新。步长取「片长/60」与「5px 换算」
-    // 的较大者——手机竖版海报仅百余像素宽，像素约束保证死区 ≥2.5px，
-    // 手指微颤（±1~2px）不会反复跨格跳帧
+    // 纯迟滞（不吸附网格）：偏离上次提交点超过半步死区才刷新，显示原始触点时间——
+    // 缓慢滑动时每一帧 Trickplay 都可达可停，死区（≥2.5px）滤掉 ±1~2px 的手指微颤。
+    // 死区步长取「片长/60」与「5px 换算」的较大者，适配百余像素宽的手机竖版海报
     const tpInterval = getTrickplayInfo(item).interval || 10;
     const timeStepPercent = durationSec > 0 ? Math.max(tpInterval, durationSec / 60) / durationSec : 0.02;
     const stepPercent = Math.max(timeStepPercent, 5 / rect.width);
     if (Math.abs(rawPercent - touchPercentRef.current) < stepPercent / 2) return;
-    const snapped = Math.max(0, Math.min(1, Math.round(rawPercent / stepPercent) * stepPercent));
     touchPercentRef.current = rawPercent;
-    setHoverPercent(snapped);
-    setTrickplayTime(durationSec * snapped);
+    setHoverPercent(rawPercent);
+    setTrickplayTime(durationSec * rawPercent);
     setIsNearTop(rect.top < 240);
   }, [durationSec, item]);
 

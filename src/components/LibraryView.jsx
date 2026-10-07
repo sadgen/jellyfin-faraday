@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef, useCallback, memo } from 'react';
+import { useState, useMemo, useEffect, useLayoutEffect, useRef, useCallback, memo } from 'react';
 import { createPortal } from 'react-dom';
 import { jellyfin } from '../api/jellyfinClient';
 import { getTrickplayStyle, getTrickplayInfo } from '../utils/trickplay';

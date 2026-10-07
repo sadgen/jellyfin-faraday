@@ -349,8 +349,9 @@ const MediaCard = memo(function MediaCard({
     return getTrickplayStyle(item, trickplayTime);
   }, [item, trickplayTime]);
 
-  // 边缘列海报的预览窗居中于卡片、半宽超出屏外——渲染后实测其视口位置，
-  // 越界则整窗水平内收（绘制前同步完成无闪烁）；箭头反向补偿保持指向海报中心
+  // 边缘列海报的预览窗居中于卡片、半宽超出屏外——用卡片几何 + 预览窗布局宽
+  // 推算理论位置并钳制（offsetWidth 不受 zoom 动画影响、卡片矩形不含子 transform，
+  // 与当前平移状态解耦，恒定输出避免「测已平移矩形→算回0→弹回越界」的振荡）
   const previewRef = useRef(null);
   const [previewShift, setPreviewShift] = useState(0);
   useLayoutEffect(() => {
@@ -359,15 +360,19 @@ const MediaCard = memo(function MediaCard({
       return;
     }
     const el = previewRef.current;
-    if (!el) return;
-    const r = el.getBoundingClientRect();
+    const parent = el?.offsetParent;
+    if (!el || !parent) return;
+    const pr = parent.getBoundingClientRect();
+    const w = el.offsetWidth;
+    if (!w || !pr.width) return;
     const vw = window.innerWidth;
     const margin = 8;
+    const center = pr.left + pr.width / 2;
+    const left = center - w / 2;
+    const right = left + w;
     let shift = 0;
-    if (r.width > 0) {
-      if (r.left < margin) shift = margin - r.left;
-      else if (r.right > vw - margin) shift = (vw - margin) - r.right;
-    }
+    if (left < margin) shift = margin - left;
+    else if (right > vw - margin) shift = (vw - margin) - right;
     setPreviewShift(shift);
   }, [tpStyle, tpInfo.isVertical]);
 
@@ -493,8 +498,10 @@ const MediaCard = memo(function MediaCard({
             src={posterUrl}
             alt={item.Name}
             loading="lazy"
+            draggable={false}
+            onContextMenu={(e) => e.preventDefault()}
             onError={(e) => { e.currentTarget.style.display = 'none'; }}
-            className={`relative w-full h-full transition-opacity duration-200 ${
+            className={`relative w-full h-full transition-opacity duration-200 select-none [-webkit-touch-callout:none] ${
               isBackdrop && tpInfo.isVertical ? 'object-contain bg-black/80' : 'object-cover'
             } ${
               isBackdrop && tpStyle ? 'opacity-0' : 'opacity-100'

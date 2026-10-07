@@ -266,8 +266,6 @@ const MediaCard = memo(function MediaCard({
   // 相对映射（手指滑出海报不受限，屏幕即擦洗轨），叠加半步迟滞过滤微颤、显示原始时间；
   // 触摸隐式捕获保证整根手指的移动都派发给起始海报，松手即收
   const handleCoverTouchMove = useCallback((e) => {
-    // 多选模式下禁用触摸擦洗：点卡=选中，且为边缘滑入退出多选的手势让路
-    if (isSelecting) return;
     if (!e.touches || e.touches.length === 0) return;
     const touch = e.touches[0];
     const rect = e.currentTarget.getBoundingClientRect();
@@ -316,7 +314,7 @@ const MediaCard = memo(function MediaCard({
     setHoverPercent(mapped);
     setTrickplayTime(durationSec * mapped);
     setIsNearTop(rect.top < 240);
-  }, [durationSec, item, isSelecting]);
+  }, [durationSec, item]);
 
   const handleCoverTouchEnd = useCallback(() => {
     touchScrubRef.current = { started: false, scrubbing: false, canceled: false, startX: 0, startY: 0, startPercent: 0 };
@@ -1706,7 +1704,8 @@ export default function LibraryView({
     const start = (e) => {
       if (e.touches.length !== 1) return;
       const t = e.touches[0];
-      if (t.clientX > 28 && t.clientX < window.innerWidth - 28) return;
+      // 14px 窄带：多选态海报擦洗已恢复，带内横滑才判定退出多选（避免与第一列海报擦洗撞车）
+      if (t.clientX > 14 && t.clientX < window.innerWidth - 14) return;
       sx = t.clientX;
       sy = t.clientY;
       armed = true;

@@ -297,12 +297,13 @@ const MediaCard = memo(function MediaCard({
     }
     if (g.canceled) return;
 
-    // 相对映射：屏幕宽 = 全片长。死区（半步）取「片长/120」与「3px/屏宽」较大者，
-    // 比海报轴细 ~3 倍，缓慢滑动接近逐帧；微颤（±3px 内）不触发刷新
+    // 相对映射：屏幕宽 = 全片长。半步死区 1px（全步 2px = 片长/屏宽一半）：
+    // 手机竖屏 ~400px 宽时一部 2 小时电影有 ~200 个停留点、剧集逐帧可停；
+    // 代价是 ±1px 内的手指微颤不再被时间下限兜底，抖动感由真机体验裁决
     const dx = touch.clientX - g.startX;
     const screenW = window.innerWidth || rect.width;
     const mapped = Math.max(0, Math.min(1, g.startPercent + dx / screenW));
-    const stepPercent = Math.max(1 / 120, 3 / screenW);
+    const stepPercent = 2 / screenW;
     if (Math.abs(mapped - touchPercentRef.current) < stepPercent / 2) return;
     touchPercentRef.current = mapped;
     setHoverPercent(mapped);

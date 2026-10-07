@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { getSeekStepSeconds } from '../utils/seekSettings';
 import { TOUCH_SPEED_STEPS } from '../utils/qualityPresets';
 
 /**
@@ -28,7 +29,8 @@ function formatClock(seconds) {
  * 2. Left vertical swipe: Brightness adjust (0.2 - 1.0)
  * 3. Right vertical swipe: Playback speed stepping along SPEED_OPTIONS (up = faster, down = slower),
  *    with a transient toast showing the current speed that fades out after release.
- * 4. Double tap: Play / Pause toggle
+ * 4. Double tap: Play / Pause toggle（左/右 1/3 区双击改为步进快退/快进，步长随设置；
+ *    中间 1/3 区双击仍是播放/暂停；未传 onDoubleTapSeek 时全屏双击维持播放/暂停）
  * 5. Long press: 2.5x speed boost (倍速冲锋，可在不需要时通过 disableLongPressBoost 禁用以支持长按拖窗)
  */
 export function useTouchGestures({
@@ -40,6 +42,7 @@ export function useTouchGestures({
   onSeekPreview,
   onSeekPreviewEnd,
   onTogglePlay,
+  onDoubleTapSeek,
   normalSpeed = 1.0,
   onSpeedChange,
   onTap,
@@ -148,6 +151,28 @@ export function useTouchGestures({
       // Clear double-tap reference
       lastTapRef.current = { time: 0, x: 0, y: 0 };
       if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+
+      // 左/右 1/3 区双击 = 步进快退/快进（步长随设置），中间 1/3 区 = 播放/暂停
+      const start = touchStartRef.current;
+      const zone = start.relX < start.rectWidth / 3
+        ? -1
+        : start.relX > (start.rectWidth * 2) / 3 ? 1 : 0;
+      if (onDoubleTapSeek && zone !== 0) {
+        const step = getSeekStepSeconds();
+        touchActionRef.current = 'double_tap_seek';
+        // 步进 seek 不是单击：消费掉 touchstart 标记，touchend 不派发 onTap（免得翻转控制盘显隐）
+        touchStartSeenRef.current = false;
+        setGestureState({
+          type: 'seek',
+          value: 0,
+          text: `${zone < 0 ? '-' : '+'}${step}s`,
+          fading: false
+        });
+        scheduleGestureFade();
+        onDoubleTapSeek(zone);
+        return;
+      }
+
       if (onTogglePlay) onTogglePlay();
       return;
     }
@@ -190,7 +215,7 @@ export function useTouchGestures({
         }
       }, 400);
     }
-  }, [containerRef, videoRef, onTogglePlay, onSpeedChange, normalSpeed, disableLongPressBoost, enableLongPressDrag, onLongPressDragStart]);
+  }, [containerRef, videoRef, onTogglePlay, onDoubleTapSeek, onSpeedChange, normalSpeed, disableLongPressBoost, enableLongPressDrag, onLongPressDragStart]);
 
   const handleTouchMove = useCallback((e) => {
     if (e.touches.length !== 1) return;
@@ -339,7 +364,7 @@ export function useTouchGestures({
     const endedAction = touchActionRef.current;
     touchActionRef.current = null;
 
-    if ((endedAction === 'speed_step' || endedAction === 'speed_boost' || wasBoosted) && gestureState.type) {
+    if ((endedAction === 'speed_step' || endedAction === 'speed_boost' || endedAction === 'double_tap_seek' || wasBoosted) && gestureState.type) {
       // Keep the speed toast visible briefly, then fade out
       scheduleGestureFade();
     } else {

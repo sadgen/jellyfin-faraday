@@ -166,6 +166,10 @@ const MediaCard = memo(function MediaCard({
   const longPressTimerRef = useRef(null);
   const isLongPressActiveRef = useRef(false);
   const startPosRef = useRef({ x: 0, y: 0 });
+  // 触摸擦洗会话状态（touchend 重置）：started=已记录起点 / scrubbing=横向擦洗中 / canceled=判定为滚动
+  const touchScrubRef = useRef({ started: false, scrubbing: false, canceled: false, startX: 0, startY: 0 });
+  // 最近一次提交时的原始触点百分比（迟滞死区的比较基准）
+  const touchPercentRef = useRef(0);
 
   const handlePointerDown = useCallback((e) => {
     if (e.button !== undefined && e.button !== 0) return;
@@ -250,18 +254,59 @@ const MediaCard = memo(function MediaCard({
   }, [durationSec]);
 
   // Touch tracking for mobile devices (trickplay follows finger)
+  // 手机手指易颤：竖版海报把整部片长压在一百多像素宽度上，1px 抖动就是几分钟跳帧。
+  // 策略：位移<10px 视为点按（保留按位置起播）；垂直位移占优视为滚动网格并取消本次；
+  // 进入擦洗后按时间网格量化 + 半步迟滞，微颤不再反复跳帧
   const handleCoverTouchMove = useCallback((e) => {
     if (!e.touches || e.touches.length === 0) return;
     const touch = e.touches[0];
     const rect = e.currentTarget.getBoundingClientRect();
     if (!rect.width) return;
-    const percent = Math.max(0, Math.min(1, (touch.clientX - rect.left) / rect.width));
-    setHoverPercent(percent);
-    setTrickplayTime(durationSec * percent);
+    const rawPercent = Math.max(0, Math.min(1, (touch.clientX - rect.left) / rect.width));
+
+    const g = touchScrubRef.current;
+    if (!g.started) {
+      g.started = true;
+      g.startX = touch.clientX;
+      g.startY = touch.clientY;
+    }
+
+    if (!g.scrubbing && !g.canceled) {
+      const dx = touch.clientX - g.startX;
+      const dy = touch.clientY - g.startY;
+      if (Math.hypot(dx, dy) < 10) {
+        // 点按：维持原行为（预览落在触点，供点击按位置起播）
+        setHoverPercent(rawPercent);
+        setTrickplayTime(durationSec * rawPercent);
+        setIsNearTop(rect.top < 240);
+        return;
+      }
+      if (Math.abs(dy) > Math.abs(dx)) {
+        // 垂直位移占优 = 滚动网格，收起预览并放弃本次触点的擦洗
+        g.canceled = true;
+        setTrickplayTime(null);
+        setHoverPercent(0);
+        return;
+      }
+      g.scrubbing = true;
+      touchPercentRef.current = rawPercent;
+    }
+    if (g.canceled) return;
+
+    // 量化 + 迟滞：与上次提交点偏离超过半步才更新，步长取 Trickplay 帧间隔与片长/60 的较大值
+    const tpInterval = getTrickplayInfo(item).interval || 10;
+    const stepSec = Math.max(tpInterval, durationSec / 60);
+    const stepPercent = durationSec > 0 ? stepSec / durationSec : 0.02;
+    if (Math.abs(rawPercent - touchPercentRef.current) < stepPercent / 2) return;
+    const snapped = Math.max(0, Math.min(1, Math.round(rawPercent / stepPercent) * stepPercent));
+    touchPercentRef.current = rawPercent;
+    setHoverPercent(snapped);
+    setTrickplayTime(durationSec * snapped);
     setIsNearTop(rect.top < 240);
-  }, [durationSec]);
+  }, [durationSec, item]);
 
   const handleCoverTouchEnd = useCallback(() => {
+    touchScrubRef.current = { started: false, scrubbing: false, canceled: false, startX: 0, startY: 0 };
     setTimeout(() => {
       setTrickplayTime(null);
       setHoverPercent(0);

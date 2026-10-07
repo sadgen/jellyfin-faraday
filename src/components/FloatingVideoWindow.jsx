@@ -663,6 +663,18 @@ export default function FloatingVideoWindow({
         setLayout(prev => ({ ...prev, left: dragStartPosRef.current.left }));
       }
     },
+    // 双击左/右 1/3 区步进快退/快进：以在途 seek 目标为基点累加（连击可叠加），步长随设置档位
+    onDoubleTapSeek: (direction) => {
+      const video = videoRef.current;
+      if (!video || !video.duration) return;
+      const pendingTarget = seekLockRef.current.getPendingTarget();
+      const baseTime = pendingTarget !== null ? pendingTarget : (video.currentTime || 0);
+      const next = Math.max(0, Math.min(video.duration, baseTime + direction * getSeekStepSeconds(seekSpeed)));
+      seekLockRef.current.arm(next);
+      setProgress((next / video.duration) * 100);
+      setCurrentTimeText(formatTime(next));
+      sessionControllerRef.current?.seek(next);
+    },
     normalSpeed: playbackSpeed,
     onSpeedChange: (speed) => {
       setPlaybackSpeed(speed);

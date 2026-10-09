@@ -211,8 +211,11 @@ export default function App() {
     if (!jellyfin.auth.isConfigured) return;
 
     const savedViewId = localStorage.getItem(STORAGE_KEY_VIEW) || '';
+    let cancelled = false;
+    const { serverUrl, userId } = jellyfin.auth;
 
-    loadFullCache().then(cache => {
+    loadFullCache(serverUrl, userId).then(cache => {
+      if (cancelled) return;
       if (cache.items && cache.items.length > 0) {
         const sortedCached = sortMediaItems(cache.items, sortMethod);
         setMediaItems(sortedCached);
@@ -230,6 +233,7 @@ export default function App() {
     });
 
     jellyfin.getUserViews().then(views => {
+      if (cancelled) return;
       if (views && views.length > 0) {
         setUserViews(views);
         if (!savedViewId && !selectedViewIdRef.current) {
@@ -241,6 +245,7 @@ export default function App() {
     }).catch(err => {
       console.warn('Failed to fetch user views:', err);
     });
+    return () => { cancelled = true; };
   }, [isAuthenticated, sessionSeq]);
 
   // 2. Query Media Items & Save to Local Cache
@@ -852,6 +857,8 @@ export default function App() {
     setUserViews([]);
     setFloatingWindows([]);
     localStorage.removeItem(STORAGE_KEY_VIEW);
+    setModalPlayingItem(null);
+    setVrPlayingItem(null);
     setSelectedViewId('');
     setIsLoginModalOpen(true);
   };

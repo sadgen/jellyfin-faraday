@@ -8,7 +8,7 @@
  *   不落入 Cache Storage，避免令牌泄漏）。
  */
 
-const CACHE_NAME = 'faraday-shell-v1';
+const CACHE_NAME = 'faraday-shell-v2';
 const APP_SHELL = ['./', './index.html', './manifest.webmanifest', './faraday.svg'];
 
 self.addEventListener('install', (event) => {
@@ -23,7 +23,7 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then(keys =>
       Promise.all(
-        keys.filter(key => key !== CACHE_NAME).map(key => caches.delete(key))
+        keys.filter(key => key.startsWith('faraday-shell-') && key !== CACHE_NAME).map(key => caches.delete(key))
       )
     ).then(() => self.clients.claim())
   );
@@ -38,6 +38,13 @@ self.addEventListener('fetch', (event) => {
 
   // 不拦截跨域请求（Jellyfin 服务器 API / 流媒体 / 图片，避免缓存含令牌的响应）
   if (url.origin !== self.location.origin) return;
+  // Cache only the app shell and built assets, never same-origin server APIs.
+  const scopePath = new URL(self.registration.scope).pathname;
+  const relativePath = url.pathname.startsWith(scopePath) ? url.pathname.slice(scopePath.length) : null;
+  if (relativePath === null) return;
+  if (url.search || request.headers.has('Authorization') || request.headers.has('X-MediaBrowser-Token')) return;
+  if (request.mode !== 'navigate' && (relativePath === null ||
+      !(relativePath.startsWith('assets/') || ['manifest.webmanifest', 'faraday.svg', 'index.html', ''].includes(relativePath)))) return;
 
   // 导航请求：网络优先，离线回退应用壳
   if (request.mode === 'navigate') {
@@ -45,7 +52,9 @@ self.addEventListener('fetch', (event) => {
       fetch(request)
         .then(response => {
           const copy = response.clone();
-          caches.open(CACHE_NAME).then(cache => cache.put('./index.html', copy)).catch(() => {});
+          if (response.ok && response.headers.get('Content-Type')?.includes('text/html')) {
+            caches.open(CACHE_NAME).then(cache => cache.put('./index.html', copy)).catch(() => {});
+          }
           return response;
         })
         .catch(() =>

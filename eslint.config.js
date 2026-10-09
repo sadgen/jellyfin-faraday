@@ -29,6 +29,7 @@ export default [
         navigator: 'readonly',
         fetch: 'readonly',
         Response: 'readonly',
+        Headers: 'readonly',
         setTimeout: 'readonly',
         clearTimeout: 'readonly',
         setInterval: 'readonly',
@@ -45,6 +46,8 @@ export default [
         URL: 'readonly',
         sessionStorage: 'readonly',
         Image: 'readonly',
+        Event: 'readonly',
+        KeyboardEvent: 'readonly',
         indexedDB: 'readonly',
         __APP_VERSION__: 'readonly'
       },

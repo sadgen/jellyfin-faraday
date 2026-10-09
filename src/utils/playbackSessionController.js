@@ -68,7 +68,10 @@ export class PlaybackSessionController {
     onError = null,
     onAutoDirectFallback = null
   } = {}) {
-    this.jellyfin = jellyfinClient;
+    // Each controller owns the credentials of the account that created it.
+    this.jellyfin = jellyfinClient.auth
+      ? Object.assign(Object.create(Object.getPrototypeOf(jellyfinClient)), jellyfinClient, { auth: { ...jellyfinClient.auth } })
+      : jellyfinClient;
     this.onStateChange = onStateChange;
     this.onError = onError;
     this.onAutoDirectFallback = onAutoDirectFallback;

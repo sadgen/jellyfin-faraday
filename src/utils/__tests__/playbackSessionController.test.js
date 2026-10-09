@@ -48,6 +48,23 @@ function createTimeRanges(ranges) {
 }
 
 describe('playbackSessionController helpers', () => {
+  it('keeps the original account for delayed session stop after switching accounts', async () => {
+    vi.useFakeTimers();
+    try {
+      const stops = [];
+      const client = {
+        auth: { serverUrl: 'https://old.example', token: 'old-token' },
+        stopTranscoding() { stops.push({ ...this.auth }); return Promise.resolve(true); },
+      };
+      const session = new PlaybackSessionController({ jellyfinClient: client });
+      session.scheduleSessionStop({ itemId: 'old-item', playSessionId: 'old-session', positionSec: 12 });
+      client.auth = { serverUrl: 'https://new.example', token: 'new-token' };
+      vi.advanceTimersByTime(SESSION_STOP_DRAIN_MS + 1);
+      expect(stops).toEqual([{ serverUrl: 'https://old.example', token: 'old-token' }]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it('secondsToTicks correctly converts seconds to 10-million ticks', () => {
     expect(secondsToTicks(0)).toBe(0);
     expect(secondsToTicks(1)).toBe(10000000);

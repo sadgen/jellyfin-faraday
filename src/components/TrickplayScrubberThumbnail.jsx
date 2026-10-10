@@ -8,7 +8,8 @@ export default function TrickplayScrubberThumbnail({
   containerWidth,
   position = 'above', // 'above' | 'below'
   centerMode = false, // When true, centers thumbnail horizontally relative to container
-  mode = 'scrubber'   // 'scrubber' (relative to scrubber bar) | 'window' (relative to whole floating window)
+  mode = 'scrubber',  // 'scrubber' (relative to scrubber bar) | 'window' (relative to whole floating window)
+  spaceBelow = null   // window 模式：窗口下沿以下的视口剩余像素；传入后按缩略图实际高度判断下方放不放得下
 }) {
   const tpInfo = useMemo(() => {
     return getTrickplayInfo(item);
@@ -53,7 +54,10 @@ export default function TrickplayScrubberThumbnail({
   const cursorX = Math.max(0, Math.min(cWidth, (hoverPercent || 0) * cWidth));
 
   const isCentered = centerMode || mode === 'window';
-  const isBelow = position === 'below';
+  // window 模式且拿到真实剩余空间：下方放得下（缩略图 + 8px 间隙 + 箭头 + 余量）才挂下方，否则翻到上方
+  const isBelow = (mode === 'window' && spaceBelow !== null && spaceBelow !== undefined)
+    ? spaceBelow >= thumbHeight + 24
+    : position === 'below';
 
   // Positioning classes:
   // When mode === 'window': positioned 8px outside window boundary, centered

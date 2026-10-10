@@ -1494,6 +1494,7 @@ export default function FloatingVideoWindow({
     >
       {/* Window-level Centered Trickplay Thumbnail（全部端通用）：挂在整窗上/下沿外侧，不覆盖本窗画面；
           允许盖住下方其他浮窗（悬停时整窗 z 已抬到 9999）。
+          上/下按「窗口下沿以下真实剩余空间 ≥ 缩略图高度」自适应，不用固定视口比例阈值；
           铺满/取中铺满时窗口贴底，改走 footer 的 scrubber 模式（锚定进度条上方），
           window 模式会挂到窗口上沿外被顶部工具栏挡住 */}
       {!(cropFill || isMaximized) && (
@@ -1503,7 +1504,7 @@ export default function FloatingVideoWindow({
           hoverPercent={hoverScrubberPercent}
           containerWidth={layout.width}
           mode="window"
-          position={(layout.top + (layout.height || layout.width * 9 / 16 + 72)) > vpHeight * 0.7 ? 'above' : 'below'}
+          spaceBelow={vpHeight - (layout.top + (layout.height || layout.width / (cropThird ? (videoAspect > 0 ? videoAspect / 3 : 16 / 27) : 16 / 9) + 72))}
         />
       )}
 

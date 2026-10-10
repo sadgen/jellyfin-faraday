@@ -611,7 +611,9 @@ export default function App() {
       const remaining = prev.filter(w => w.id !== target.id);
       const shifted = remaining.map(w => {
         if (w.slotIndex > skippedSlotIndex) {
-          return { ...w, slotIndex: w.slotIndex - 1 };
+          const newSlot = w.slotIndex - 1;
+          // 与关窗路径同款晋升自动播：播完/跳过换片后晋升到 slot 0 的暂停副窗自动开始播放
+          return { ...w, slotIndex: newSlot, ...(newSlot === 0 ? { startPaused: false } : {}) };
         }
         return w;
       });
@@ -637,7 +639,9 @@ export default function App() {
           slotIndex: tailSlot,
           item: randomItem,
           timestamp: Date.now(),
-          autoCrop: !!target.crop
+          autoCrop: !!target.crop,
+          // 换片补位的新窗同样遵循「副窗自动暂停」设置（tailSlot 0 = 顶替主窗位，照常播放）
+          startPaused: tailSlot > 0 && getPlaybackDefaults().randomSecondaryPause
         }
       ];
     });

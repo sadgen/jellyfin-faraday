@@ -124,7 +124,8 @@ export class PlaybackSessionController {
     playbackSpeed = 1,
     isMuted = false,
     volume = 1,
-    nativeFloating = false
+    nativeFloating = false,
+    autoPlay = true
   }) {
     this.isDestroyed = false;
 
@@ -213,25 +214,33 @@ export class PlaybackSessionController {
 
       videoEl.removeAttribute('src');
       videoEl.src = directUrl;
-      if (initialSeekTime > 0) {
-        try {
-          videoEl.currentTime = initialSeekTime;
-        } catch {}
-      }
 
-      this.startHeartbeat();
+      if (autoPlay) {
+        if (initialSeekTime > 0) {
+          try {
+            videoEl.currentTime = initialSeekTime;
+          } catch {}
+        }
 
-      videoEl.play().catch(() => {
-        if (this.generationId !== currentGeneration) return;
-        videoEl.muted = true;
+        this.startHeartbeat();
+
         videoEl.play().catch(() => {
           if (this.generationId !== currentGeneration) return;
-          // 直连完全失败（如浏览器无该编码硬解），通知上层回退到转码
-          if (this.onAutoDirectFallback) {
-            this.onAutoDirectFallback();
-          }
+          videoEl.muted = true;
+          videoEl.play().catch(() => {
+            if (this.generationId !== currentGeneration) return;
+            // 直连完全失败（如浏览器无该编码硬解），通知上层回退到转码
+            if (this.onAutoDirectFallback) {
+              this.onAutoDirectFallback();
+            }
+          });
         });
-      });
+      } else {
+        // 暂停起播：仅拉流缓冲不出声（随机多窗副窗模式），起播点交给组件的 loadedmetadata 监听
+        videoEl.preload = 'auto';
+        videoEl.load();
+        this.startHeartbeat();
+      }
     } else {
       this.playMethod = 'Transcode';
       const bitrate = parseInt(streamQuality, 10) || 4000000;
@@ -242,7 +251,7 @@ export class PlaybackSessionController {
         subtitleStreamIndex: this.subtitleStreamIndex
       });
 
-      this.initHls(hlsUrl, initialSeekTime, currentGeneration);
+      this.initHls(hlsUrl, initialSeekTime, currentGeneration, autoPlay);
     }
 
     this.notifyState();
@@ -251,7 +260,7 @@ export class PlaybackSessionController {
   /**
    * 初始化 HLS 实例
    */
-  initHls(hlsUrl, initialSeekTime, generation) {
+  initHls(hlsUrl, initialSeekTime, generation, autoPlay = true) {
     const videoEl = this.videoEl;
     if (!videoEl) return;
 
@@ -273,6 +282,7 @@ export class PlaybackSessionController {
         if (this.generationId !== generation) return;
         this.startHeartbeat();
 
+        if (!autoPlay) return;
         videoEl.play().catch(() => {
           if (this.generationId !== generation) return;
           videoEl.muted = true;
@@ -304,6 +314,7 @@ export class PlaybackSessionController {
         } catch {}
       }
       this.startHeartbeat();
+      if (!autoPlay) return;
       videoEl.play().catch(() => {
         if (this.generationId !== generation) return;
         videoEl.muted = true;

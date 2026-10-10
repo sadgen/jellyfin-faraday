@@ -525,13 +525,16 @@ export default function App() {
       const selected = shuffled.slice(0, targetCount - prev.length);
 
       const now = Date.now();
+      // 随机多窗副窗自动暂停设置：主窗（右侧大窗 slot 0）恒播放，副窗按设置仅缓冲
+      const secondaryPause = getPlaybackDefaults().randomSecondaryPause;
       return [
         ...prev,
         ...selected.map((it, idx) => ({
           id: `win-${now}-${prev.length + idx}`,
           slotIndex: prev.length + idx,
           item: it,
-          timestamp: now + idx
+          timestamp: now + idx,
+          startPaused: secondaryPause && prev.length + idx > 0
         }))
       ];
     });

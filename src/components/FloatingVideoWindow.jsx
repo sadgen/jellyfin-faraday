@@ -437,8 +437,9 @@ export default function FloatingVideoWindow({
     return () => window.removeEventListener('faraday:playback_defaults_changed', handleDefaultsChanged);
   }, []);
 
-  // Playback state
-  const [isPlaying, setIsPlaying] = useState(true);
+  // Playback state（随机多窗副窗：startPaused 仅缓冲不自动播，用户按 ⏯ 后本窗恢复正常自动播）
+  const [isPlaying, setIsPlaying] = useState(() => !windowData?.startPaused);
+  const startPausedRef = useRef(!!windowData?.startPaused);
 
   const [playbackSpeed, setPlaybackSpeed] = useState(() => playbackDefaults.speed || 1.0);
   const [isLoading, setIsLoading] = useState(true);
@@ -446,6 +447,8 @@ export default function FloatingVideoWindow({
   const [errorDetails, setErrorDetails] = useState('');
   const [smartStartToast, setSmartStartToast] = useState('');
   const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const moreMenuBtnRef = useRef(null);
+  const [moreMenuPos, setMoreMenuPos] = useState(null);
   const [showPlayerMenu, setShowPlayerMenu] = useState(false);
   const [showPosterModal, setShowPosterModal] = useState(false);
   const [showSubtitleModal, setShowSubtitleModal] = useState(false);
@@ -479,6 +482,26 @@ export default function FloatingVideoWindow({
           : (subtitleStreams[0]?.Index ?? -1)
       );
     }
+  };
+
+  // ⋮ 菜单面板锚定标题栏 ⋮ 按钮右侧展开：fixed 定位防视口裁剪，坐标取按钮实时 rect。
+  // 默认向上展开（窗口下半区）；按钮上方空间不足时改向下展开。宽窄屏都钳制在视口内。
+  const toggleMoreMenu = () => {
+    if (!showMoreMenu && moreMenuBtnRef.current) {
+      const r = moreMenuBtnRef.current.getBoundingClientRect();
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const panelW = 244; // w-60 + border-2×2
+      const right = Math.min(Math.max(vw - r.right, 8), Math.max(8, vw - panelW - 8));
+      const spaceAbove = r.top - 12;
+      if (spaceAbove >= 300) {
+        setMoreMenuPos({ right, bottom: vh - r.top + 6, maxHeight: Math.min(spaceAbove, Math.round(vh * 0.75)) });
+      } else {
+        const spaceBelow = vh - r.bottom - 12;
+        setMoreMenuPos({ right, top: r.bottom + 6, maxHeight: Math.max(180, Math.min(spaceBelow, Math.round(vh * 0.75))) });
+      }
+    }
+    setShowMoreMenu(prev => !prev);
   };
 
   // Fast Forward / Rewind / Seek Step Tier: 'slow' (5s) | 'medium' (15s, default) | 'fast' (30s)
@@ -892,7 +915,8 @@ export default function FloatingVideoWindow({
         playbackSpeed: playbackSpeedRef.current,
         isMuted: isMutedRef.current,
         volume: volumeRef.current,
-        nativeFloating: true
+        nativeFloating: true,
+        autoPlay: !startPausedRef.current
       })
       .then(() => {
         // 安卓壳：画面已交原生迷你窗，网页窗格自动收起（原生豁免 close，会话继续）
@@ -928,7 +952,8 @@ export default function FloatingVideoWindow({
         playbackSpeed: playbackSpeedRef.current,
         isMuted: isMutedRef.current,
         volume: volumeRef.current,
-        nativeFloating: true
+        nativeFloating: true,
+        autoPlay: !startPausedRef.current
       });
       syncSubtitleModes();
     }
@@ -1313,6 +1338,7 @@ export default function FloatingVideoWindow({
     const video = videoRef.current;
     if (!video) return;
     if (video.paused) {
+      startPausedRef.current = false;
       video.play();
       setIsPlaying(true);
     } else {
@@ -1466,17 +1492,18 @@ export default function FloatingVideoWindow({
         (isDragging || isResizing) ? 'ring-2 ring-cyan-400 shadow-cyan-500/50 opacity-95 scale-[1.01]' : 'hover:border-cyan-400'
       }`}
     >
-      {/* Mobile Window-level Centered Trickplay Thumbnail (Adaptive Above / Below entire window)。
+      {/* Window-level Centered Trickplay Thumbnail（全部端通用）：挂在整窗上/下沿外侧，不覆盖本窗画面；
+          允许盖住下方其他浮窗（悬停时整窗 z 已抬到 9999）。
           铺满/取中铺满时窗口贴底，改走 footer 的 scrubber 模式（锚定进度条上方），
           window 模式会挂到窗口上沿外被顶部工具栏挡住 */}
-      {isMobileViewport && !(cropFill || isMaximized) && (
+      {!(cropFill || isMaximized) && (
         <TrickplayScrubberThumbnail
           item={trickplayItem}
           hoverTime={hoverScrubberTime}
           hoverPercent={hoverScrubberPercent}
           containerWidth={layout.width}
           mode="window"
-          position={(layout.top + (layout.height || layout.width * 9 / 16 + 72)) > vpHeight * 0.6 ? 'above' : 'below'}
+          position={(layout.top + (layout.height || layout.width * 9 / 16 + 72)) > vpHeight * 0.7 ? 'above' : 'below'}
         />
       )}
 
@@ -1530,6 +1557,7 @@ export default function FloatingVideoWindow({
           } ${flipH ? '-scale-x-100' : ''}`}
           style={{ WebkitTouchCallout: 'none', userSelect: 'none', WebkitUserSelect: 'none' }}
           onWaiting={() => setIsLoading(true)}
+          onCanPlay={() => setIsLoading(false)}
           onPlaying={() => {
             setIsLoading(false);
             setIsPlaying(true);
@@ -1641,7 +1669,7 @@ export default function FloatingVideoWindow({
           </div>
         )}
 
-        {/* Paused Indicator (纯指示，不拦截鼠标：画面按住仍可拖动窗口，播放/暂停用底部按钮) */}
+        {/* Paused Indicator (纯指示，不拦截鼠标：画面按住仍可拖动窗口，播放/暂停用标题栏 ⏯ 按钮) */}
         {!isPlaying && !isLoading && !hasError && (
           <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/30 pointer-events-none">
             <div className="w-11 h-11 rounded-full bg-black/60 border border-white/20 flex items-center justify-center text-white">
@@ -1656,15 +1684,16 @@ export default function FloatingVideoWindow({
       <div ref={footerRef} className="p-2.5 bg-slate-950/95 border-t border-white/5 rounded-b-2xl flex flex-col gap-1.5 text-xs">
         {/* Scrubber with Real-time Drag & Centered Trickplay */}
         <div className="relative w-full">
-          {/* Scrubber-level Trickplay Thumbnail：桌面常规；铺满/取中铺满（窗口贴底，含手机）恒挂进度条上方 */}
-          {(!isMobileViewport || cropFill || isMaximized) && (
+          {/* Scrubber-level Trickplay Thumbnail：仅铺满/取中铺满（窗口贴底，无窗沿外侧空间）时使用，恒挂进度条上方；
+              普通窗一律走窗口级的 window 模式（挂在窗口外沿） */}
+          {(cropFill || isMaximized) && (
             <TrickplayScrubberThumbnail
               item={trickplayItem}
               hoverTime={hoverScrubberTime}
               hoverPercent={hoverScrubberPercent}
               containerWidth={scrubberWidth}
               mode="scrubber"
-              position={(cropFill || isMaximized) ? 'above' : ((layout.top + (layout.height || layout.width * 9 / 16 + 72)) > vpHeight * 0.7 ? 'above' : 'below')}
+              position="above"
             />
           )}
 
@@ -1735,7 +1764,19 @@ export default function FloatingVideoWindow({
           )}
         </div>
         <button
-          onClick={() => setShowMoreMenu(prev => !prev)}
+          onClick={togglePlay}
+          className={`p-1 rounded transition flex-shrink-0 ${
+            isPlaying
+              ? 'text-gray-400 hover:text-cyan-300 hover:bg-white/10'
+              : 'text-cyan-300 bg-cyan-500/20'
+          }`}
+          title={isPlaying ? '暂停' : '播放'}
+        >
+          {isPlaying ? <Pause size={14} /> : <Play size={14} className="ml-px" />}
+        </button>
+        <button
+          ref={moreMenuBtnRef}
+          onClick={toggleMoreMenu}
           className={`p-1 rounded transition ${showMoreMenu ? 'bg-cyan-500/30 text-cyan-300' : 'text-gray-400 hover:text-cyan-300 hover:bg-white/10'} flex-shrink-0`}
           title="播放功能选项"
         >
@@ -1781,37 +1822,23 @@ export default function FloatingVideoWindow({
         </button>
       </div>
 
-      {/* 更多功能菜单：悬浮控制栏展开（窗口根层级，避免被视口裁剪） */}
+      {/* 更多功能菜单：fixed 定位锚定标题栏 ⋮ 按钮旁（防视口裁剪），坐标在开面板瞬间按按钮 rect 计算 */}
       {showMoreMenu && (
-              <div className="relative">
-                <button
-                  onClick={() => setShowMoreMenu(prev => !prev)}
-                  className={`p-1 rounded transition ${
-                    showMoreMenu ? 'bg-cyan-500/30 text-cyan-300' : 'text-gray-400 hover:text-cyan-300 hover:bg-white/10'
-                  }`}
-                  title="更多功能与播放选项"
-                >
-                  <MoreVertical size={14} />
-                </button>
-
-                {showMoreMenu && (
-                  <>
-                    <div className="fixed inset-0 z-40" onClick={() => setShowMoreMenu(false)} />
-                    <div
-                      className="fixed right-2 bottom-48 w-60 bg-[#0d131f] border-2 border-cyan-400/70 rounded-2xl p-2.5 shadow-[0_20px_60px_rgba(0,0,0,0.95)] flex flex-col gap-2 z-50 text-xs animate-in fade-in zoom-in-95 duration-100 max-h-[75vh] overflow-y-auto"
-                      onClick={(e) => e.stopPropagation()}
-                    >
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setShowMoreMenu(false)} />
+          <div
+            className="fixed w-60 bg-[#0d131f] border-2 border-cyan-400/70 rounded-2xl p-2.5 shadow-[0_20px_60px_rgba(0,0,0,0.95)] flex flex-col gap-2 z-50 text-xs animate-in fade-in zoom-in-95 duration-100 overflow-y-auto"
+            style={{
+              right: moreMenuPos?.right,
+              ...(moreMenuPos?.bottom !== undefined ? { bottom: moreMenuPos.bottom } : { top: moreMenuPos?.top }),
+              maxHeight: moreMenuPos?.maxHeight
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
                       {/* 0. 播放控制 */}
                       <div className="flex flex-col gap-1 px-1">
                         <span className="text-[10px] text-cyan-300 font-bold">▶ 播放控制</span>
                         <div className="grid grid-cols-2 gap-1">
-                          <button
-                            onClick={togglePlay}
-                            className="py-1.5 px-1 rounded-lg text-[10px] text-center transition flex items-center justify-center gap-1 bg-slate-800 text-gray-200 hover:bg-slate-700 border border-white/10"
-                          >
-                            {isPlaying ? <Pause size={12} /> : <Play size={12} />}
-                            <span>{isPlaying ? '暂停' : '播放'}</span>
-                          </button>
                           <button
                             onClick={() => { handleToggleCropThird(); setShowMoreMenu(false); }}
                             className={`py-1.5 px-1 rounded-lg text-[10px] text-center transition flex items-center justify-center gap-1 border ${
@@ -2126,10 +2153,9 @@ export default function FloatingVideoWindow({
                           </span>
                         </button>
                       </div>
-                    </div>
-                  </>
-                )}
-              </div>
+          </div>
+        </>
+
       )}
 
       {/* 智能跳前奏起播 提示 */}

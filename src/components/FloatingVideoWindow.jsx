@@ -1790,6 +1790,15 @@ export default function FloatingVideoWindow({
             </select>
           </div>
         )}
+        {/* 播放次数（标题最左侧，仅数字） */}
+        {!!item?.UserData?.PlayCount && (
+          <span
+            className="flex-shrink-0 text-[10px] font-mono font-bold text-amber-400 tabular-nums"
+            title={`已播放 ${item.UserData.PlayCount} 次`}
+          >
+            {item.UserData.PlayCount}
+          </span>
+        )}
         <div ref={titleBoxRef} className="flex-1 min-w-0 overflow-hidden" title={item?.Name}>
           {titleOverflow ? (
             <div className="flex whitespace-nowrap animate-marquee will-change-transform" style={{ animationDuration: '8s' }}>

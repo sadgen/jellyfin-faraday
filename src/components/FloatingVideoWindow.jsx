@@ -437,22 +437,24 @@ export default function FloatingVideoWindow({
     return () => window.removeEventListener('faraday:playback_defaults_changed', handleDefaultsChanged);
   }, []);
 
-  // Playback state（随机多窗副窗：startPaused 仅缓冲不自动播，用户按 ⏯ 后本窗恢复正常自动播）
+  // Playback state（副窗一律暂停起播仅缓冲；晋升主窗时 App 置 startPaused=false 自动播）
   const [isPlaying, setIsPlaying] = useState(() => !windowData?.startPaused);
   const startPausedRef = useRef(!!windowData?.startPaused);
+  // 是否真正播出过画面：未起播的暂停窗显示封面缩略图，播出过再暂停的显示停住的画面
+  const [everPlayed, setEverPlayed] = useState(false);
 
-  // 副窗晋升主窗：App 在关窗位移时把晋升到 slot 0 的窗口 startPaused 置 false，
-  // 这里捕获 true→false 的晋升瞬间自动起播（手动播放过/本来就暂停的窗不受影响）
+  // 晋升主窗：slotIndex 变为 0 时画面若处于暂停则自动起播（无论是暂停起播还是用户手动暂停的副窗，
+  // 规则：主窗无论怎么打开——晋升或点击——都是播放；已在播的主窗不受影响）
   useEffect(() => {
-    if (!windowData.startPaused && startPausedRef.current) {
-      startPausedRef.current = false;
+    if (slotIndex === 0) {
       const v = videoRef.current;
       if (v && v.paused) {
+        startPausedRef.current = false;
         v.play().catch(() => {});
         setIsPlaying(true);
       }
     }
-  }, [windowData.startPaused]);
+  }, [slotIndex]);
 
   const [playbackSpeed, setPlaybackSpeed] = useState(() => playbackDefaults.speed || 1.0);
   const [isLoading, setIsLoading] = useState(true);
@@ -1452,6 +1454,12 @@ export default function FloatingVideoWindow({
     return jellyfin.getBestImageUrl(item, { maxWidth: 500 });
   }, [item]);
 
+  // 未起播副窗的剧照缩略图（与媒体库剧照展示同源：Backdrop→Thumb→Primary）
+  const thumbCoverUrl = useMemo(() => {
+    if (!item?.Id) return null;
+    return jellyfin.getBestImageUrl(item, { maxWidth: 640, preferBackdrop: true });
+  }, [item]);
+
   const isFavorite = !!item?.UserData?.IsFavorite;
 
 
@@ -1577,6 +1585,7 @@ export default function FloatingVideoWindow({
           onPlaying={() => {
             setIsLoading(false);
             setIsPlaying(true);
+            setEverPlayed(true);
             syncSubtitleModes();
           }}
           onLoadedData={syncSubtitleModes}
@@ -1685,21 +1694,25 @@ export default function FloatingVideoWindow({
           </div>
         )}
 
-        {/* Paused Indicator：中央播放键可直接点击恢复；半透明阻挡层保持不拦截（画面按住仍可拖动窗口） */}
-        {!isPlaying && !isLoading && !hasError && (
-          <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/30 pointer-events-none">
-            <button
-              onClick={(e) => { e.stopPropagation(); togglePlay(); }}
-              onMouseDown={(e) => e.stopPropagation()}
-              onTouchStart={(e) => e.stopPropagation()}
-              onTouchEnd={(e) => e.stopPropagation()}
-              onTouchCancel={(e) => e.stopPropagation()}
-              className="w-11 h-11 rounded-full bg-black/60 border border-white/20 flex items-center justify-center text-white cursor-pointer pointer-events-auto hover:bg-black/85 hover:border-cyan-400/70 hover:scale-105 active:scale-95 transition"
-              title="播放"
-            >
-              <Play size={20} className="ml-0.5 fill-white" />
-            </button>
-          </div>
+        {/* 未起播副窗：显示媒体库同款剧照缩略图（无深色遮罩，点击即播放）；
+            播出过再暂停的窗不盖任何东西，直接显示停住的画面（恢复用标题栏 ⏯） */}
+        {!isPlaying && !isLoading && !hasError && !everPlayed && thumbCoverUrl && (
+          <button
+            onClick={(e) => { e.stopPropagation(); togglePlay(); }}
+            onMouseDown={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
+            onTouchEnd={(e) => e.stopPropagation()}
+            onTouchCancel={(e) => e.stopPropagation()}
+            className="absolute inset-0 z-20 cursor-pointer overflow-hidden group/paused"
+            title="点击播放"
+          >
+            <img src={thumbCoverUrl} alt="" draggable={false} className="w-full h-full object-cover" />
+            <span className="absolute inset-0 flex items-center justify-center">
+              <span className="w-10 h-10 rounded-full bg-black/55 border border-white/25 flex items-center justify-center text-white transition group-hover/paused:scale-110 group-hover/paused:bg-black/75">
+                <Play size={18} className="ml-0.5 fill-white" />
+              </span>
+            </span>
+          </button>
         )}
 
       </div>

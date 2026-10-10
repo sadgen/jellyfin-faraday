@@ -28,8 +28,7 @@ export function getPlaybackDefaults() {
       smartStart: false,
       patrolMode: false,
       patrolIntervalSeconds: 45,
-      gyroSweepDeg: 90,
-      randomSecondaryPause: false
+      gyroSweepDeg: 90
     };
   }
   try {
@@ -44,8 +43,7 @@ export function getPlaybackDefaults() {
         smartStart: !!parsed.smartStart,
         patrolMode: !!parsed.patrolMode,
         patrolIntervalSeconds: Number(parsed.patrolIntervalSeconds) || 45,
-        gyroSweepDeg: Number(parsed.gyroSweepDeg) || 90,
-        randomSecondaryPause: !!parsed.randomSecondaryPause
+        gyroSweepDeg: Number(parsed.gyroSweepDeg) || 90
       };
     }
   } catch {}
@@ -57,8 +55,7 @@ export function getPlaybackDefaults() {
     smartStart: false,
     patrolMode: false,
     patrolIntervalSeconds: 45,
-    gyroSweepDeg: 90,
-    randomSecondaryPause: false
+    gyroSweepDeg: 90
   };
 }
 

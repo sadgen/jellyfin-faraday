@@ -525,8 +525,7 @@ export default function App() {
       const selected = shuffled.slice(0, targetCount - prev.length);
 
       const now = Date.now();
-      // 随机多窗副窗自动暂停设置：主窗（右侧大窗 slot 0）恒播放，副窗按设置仅缓冲
-      const secondaryPause = getPlaybackDefaults().randomSecondaryPause;
+      // 副窗（非主窗位）一律暂停起播仅缓冲；主窗位照常播放
       return [
         ...prev,
         ...selected.map((it, idx) => ({
@@ -534,7 +533,7 @@ export default function App() {
           slotIndex: prev.length + idx,
           item: it,
           timestamp: now + idx,
-          startPaused: secondaryPause && prev.length + idx > 0
+          startPaused: prev.length + idx > 0
         }))
       ];
     });
@@ -588,8 +587,8 @@ export default function App() {
                 item: randomItem,
                 timestamp: Date.now(),
                 autoCrop: !!target.crop,
-                // 自动补窗的新窗同样遵循「副窗自动暂停」设置（tailSlot 0 = 补的是主窗位，照常播放）
-                startPaused: tailSlot > 0 && getPlaybackDefaults().randomSecondaryPause
+                // 补位新窗为副窗位，暂停起播仅缓冲（tailSlot 0 = 补主窗位，照常播放）
+                startPaused: tailSlot > 0
               }
             ];
           }
@@ -640,8 +639,8 @@ export default function App() {
           item: randomItem,
           timestamp: Date.now(),
           autoCrop: !!target.crop,
-          // 换片补位的新窗同样遵循「副窗自动暂停」设置（tailSlot 0 = 顶替主窗位，照常播放）
-          startPaused: tailSlot > 0 && getPlaybackDefaults().randomSecondaryPause
+          // 换片补位的新窗为副窗位，暂停起播仅缓冲（tailSlot 0 = 顶替主窗位，照常播放）
+          startPaused: tailSlot > 0
         }
       ];
     });

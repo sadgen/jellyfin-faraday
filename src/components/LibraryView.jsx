@@ -2107,27 +2107,6 @@ export default function LibraryView({
                     </button>
                   </div>
 
-                  {/* 5.5 Random Multi-window Secondary Auto-pause */}
-                  <div className="flex items-center justify-between pt-1 border-t border-white/10">
-                    <div className="flex flex-col pr-2">
-                      <span className="text-[11px] text-gray-200 font-medium">⏸️ 随机多窗副窗自动暂停</span>
-                      <span className="text-[9px] text-gray-400">随机 2/3 窗时主窗（右侧大窗）照常播放，副窗仅加载缓冲不播放，点 ⏯ 恢复</span>
-                    </div>
-                    <button
-                      onClick={() => {
-                        const updated = setPlaybackDefaults({ randomSecondaryPause: !playbackDefaults.randomSecondaryPause });
-                        setPlaybackDefaultsState(updated);
-                      }}
-                      className={`px-3 py-1 rounded-lg text-[11px] font-bold transition flex-shrink-0 ${
-                        playbackDefaults.randomSecondaryPause
-                          ? 'bg-cyan-400 text-slate-950 font-extrabold shadow-md shadow-cyan-400/40'
-                          : 'bg-slate-800 hover:bg-slate-700 text-gray-400 hover:text-white border border-white/15'
-                      }`}
-                    >
-                      {playbackDefaults.randomSecondaryPause ? '已开启' : '已关闭'}
-                    </button>
-                  </div>
-
                   {/* 6. Smart Start (智能正片起播) */}
                   <div className="flex items-center justify-between pt-1 border-t border-white/10">
                     <div className="flex flex-col">

@@ -9,7 +9,9 @@ export default function TrickplayScrubberThumbnail({
   position = 'above', // 'above' | 'below'
   centerMode = false, // When true, centers thumbnail horizontally relative to container
   mode = 'scrubber',  // 'scrubber' (relative to scrubber bar) | 'window' (relative to whole floating window)
-  spaceBelow = null   // window 模式：窗口下沿以下的视口剩余像素；传入后按缩略图实际高度判断下方放不放得下
+  spaceBelow = null,  // window 模式：窗口下沿以下的视口剩余像素
+  spaceAbove = null,  // window 模式：窗口上沿以上的可用像素（已扣除顶栏）
+  windowLeft = 0      // window 模式：窗口在视口内的横向偏移（跟随钳制按视口计算时需要）
 }) {
   const tpInfo = useMemo(() => {
     return getTrickplayInfo(item);
@@ -32,9 +34,11 @@ export default function TrickplayScrubberThumbnail({
 
   if (!item || hoverTime === null) return null;
 
-  // On Mobile: enlarged size (220px - 280px)
-  // On Desktop: 2X standard size (320px - 380px)
+  // On Mobile: compact dynamic size; On Desktop: same tiers as the library poster
+  // hover preview (sm:480 / landscape lg:540, vertical sm:460) — 560-width sprites
+  // justify the larger surface without upscaling blur
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 640;
+  const vw = typeof window !== 'undefined' ? window.innerWidth : 1280;
   const cWidth = containerWidth || 360;
   const isVertical = tpInfo.isVertical;
   const ar = tpInfo.aspectRatio || (16 / 9);
@@ -42,34 +46,70 @@ export default function TrickplayScrubberThumbnail({
   let thumbWidth, thumbHeight;
   if (isVertical) {
     // 竖屏（9:16等）：限制高度，按宽高比自适应宽度，避免拉伸成 16:9
-    thumbHeight = isMobile ? Math.min(260, Math.max(180, cWidth * 0.75)) : 260;
+    thumbHeight = isMobile ? Math.min(320, Math.max(200, cWidth * 0.8)) : (vw >= 640 ? 460 : 380);
     thumbWidth = Math.max(80, Math.round(thumbHeight * ar));
   } else {
     // 横屏（16:9等）：限制宽度，按宽高比自适应高度
-    thumbWidth = isMobile ? Math.min(270, Math.max(200, cWidth * 0.85)) : 320;
+    thumbWidth = isMobile ? Math.min(320, Math.max(220, cWidth * 0.85)) : (vw >= 1024 ? 540 : 480);
     thumbHeight = Math.max(80, Math.round(thumbWidth / ar));
+  }
+
+  const isWindowMode = mode === 'window';
+  const hasSpace = (v) => v !== null && v !== undefined;
+
+  // window 模式上/下自适应：下方放得下挂下方；否则上方放得下挂上方；
+  // 两侧都放不下 → 选空间大的一侧并按真实空间压缩缩略图高度，保证完整可见不出视口
+  let isBelow = position === 'below';
+  if (isWindowMode && hasSpace(spaceBelow)) {
+    const need = thumbHeight + 24;
+    if (spaceBelow >= need) {
+      isBelow = true;
+    } else if (hasSpace(spaceAbove) && spaceAbove >= need) {
+      isBelow = false;
+    } else {
+      isBelow = !hasSpace(spaceAbove) || spaceBelow >= spaceAbove;
+      const capped = Math.max(140, (isBelow ? spaceBelow : spaceAbove) - 24);
+      if (capped < thumbHeight) {
+        thumbHeight = Math.round(capped);
+        thumbWidth = Math.max(80, Math.round(thumbHeight * ar));
+      }
+    }
   }
 
   // Exact cursor/finger position along scrubber (0px to cWidth)
   const cursorX = Math.max(0, Math.min(cWidth, (hoverPercent || 0) * cWidth));
 
-  const isCentered = centerMode || mode === 'window';
-  // window 模式且拿到真实剩余空间：下方放得下（缩略图 + 8px 间隙 + 箭头 + 余量）才挂下方，否则翻到上方
-  const isBelow = (mode === 'window' && spaceBelow !== null && spaceBelow !== undefined)
-    ? spaceBelow >= thumbHeight + 24
-    : position === 'below';
+  // window 模式：预览跟随光标横向移动，钳制在视口内（允许越出窗沿，不出页面）；
+  // 视口放不下时回退为窗口居中
+  const followX = isWindowMode
+    ? (() => {
+        const half = thumbWidth / 2 + 6;
+        const wl = hasSpace(windowLeft) ? windowLeft : 0;
+        const vpw = typeof window !== 'undefined' ? window.innerWidth : 1280;
+        const minX = half - wl;
+        const maxX = vpw - half - wl;
+        return minX <= maxX ? Math.max(minX, Math.min(maxX, cursorX)) : null;
+      })()
+    : null;
 
   // Positioning classes:
-  // When mode === 'window': positioned 8px outside window boundary, centered
-  // When mode === 'scrubber': positioned 24px (top-6 / bottom-6) relative to scrubber, centered on cursorX with -translate-x-1/2
-  const positionClass = mode === 'window'
-    ? (isBelow ? 'top-[calc(100%+8px)] left-1/2 -translate-x-1/2' : 'bottom-[calc(100%+8px)] left-1/2 -translate-x-1/2')
-    : (isBelow ? 'top-6 -translate-x-1/2' : 'bottom-6 -translate-x-1/2') + (isCentered ? ' left-1/2' : '');
+  // When mode === 'window': anchored 8px outside window boundary (top/bottom edge),
+  //   horizontally follows the scrubber cursor (clamped), falls back to centering
+  // When mode === 'scrubber': positioned 24px (top-6 / bottom-6) relative to scrubber,
+  //   centered on cursorX (or fixed center when centerMode)
+  const positionClass = isWindowMode
+    ? (isBelow ? 'top-[calc(100%+8px)]' : 'bottom-[calc(100%+8px)]')
+    : (isBelow ? 'top-6' : 'bottom-6');
+  const isCentered = centerMode || (isWindowMode && followX === null);
+  const leftClass = isCentered ? ' left-1/2' : '';
+  const leftStyle = isCentered
+    ? undefined
+    : { left: `${isWindowMode ? followX : cursorX}px` };
 
   return (
     <div
-      className={`absolute z-[99999] flex flex-col items-center pointer-events-none ${positionClass}`}
-      style={!isCentered && mode !== 'window' ? { left: `${cursorX}px` } : undefined}
+      className={`absolute z-[99999] flex flex-col items-center pointer-events-none -translate-x-1/2 ${positionClass}${leftClass}`}
+      style={leftStyle}
     >
       {/* Upward pointer arrow when positioned below scrubber or below window */}
       {isBelow && (

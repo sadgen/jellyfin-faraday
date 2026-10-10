@@ -1505,6 +1505,8 @@ export default function FloatingVideoWindow({
           containerWidth={layout.width}
           mode="window"
           spaceBelow={vpHeight - (layout.top + (layout.height || layout.width / (cropThird ? (videoAspect > 0 ? videoAspect / 3 : 16 / 27) : 16 / 9) + 72))}
+          spaceAbove={layout.top - 68}
+          windowLeft={layout.left}
         />
       )}
 

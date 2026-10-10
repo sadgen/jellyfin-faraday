@@ -785,7 +785,44 @@ export default function App() {
 
   const handleDeleteItem = useCallback((deletedId) => {
     setMediaItems(prev => prev.filter(item => item.Id !== deletedId));
-    setFloatingWindows(prev => prev.filter(w => w.item.Id !== deletedId));
+    setFloatingWindows(prev => {
+      const target = prev.find(w => w.item.Id === deletedId);
+      const remaining = prev.filter(w => w.item.Id !== deletedId);
+      // 删除的不是打开中的窗：不影响浮窗布局，也不补新窗
+      if (!target) return prev;
+      // 被删窗空出的位置由后续窗递进补齐（按原顺序重排 slot），晋升到 slot 0 的自动播放（与关窗路径同款）
+      const refiled = remaining
+        .sort((a, b) => a.slotIndex - b.slotIndex)
+        .map((w, idx) => ({ ...w, slotIndex: idx, ...(idx === 0 ? { startPaused: false } : {}) }));
+      // 关窗自动补窗（若开启）：补一部到尾位（补的是主窗位时照常播放）
+      if (autoRefillFloatingWindowsRef.current) {
+        const pool = currentFilteredItemsRef.current.length > 0
+          ? currentFilteredItemsRef.current
+          : mediaItemsRef.current;
+        const activeIds = new Set(refiled.map(w => w.item.Id));
+        const notOpen = pool.filter(it => !activeIds.has(it.Id));
+        if (notOpen.length > 0) {
+          const unplayed = notOpen.filter(it => !it.UserData?.Played);
+          const candidatePool = unplayed.length > 0 ? unplayed : notOpen;
+          const randomItem = candidatePool[Math.floor(Math.random() * candidatePool.length)] || pool[0];
+          if (randomItem && !activeIds.has(randomItem.Id)) {
+            const tailSlot = refiled.length;
+            return [
+              ...refiled,
+              {
+                id: `win-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                slotIndex: tailSlot,
+                item: randomItem,
+                timestamp: Date.now(),
+                autoCrop: !!target.crop,
+                startPaused: tailSlot > 0
+              }
+            ];
+          }
+        }
+      }
+      return refiled;
+    });
     setTotalRecordCount(prev => Math.max(0, prev - 1));
     deleteItemFromCache(deletedId);
   }, []);

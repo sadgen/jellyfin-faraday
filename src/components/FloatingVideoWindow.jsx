@@ -1429,8 +1429,8 @@ export default function FloatingVideoWindow({
 
       await jellyfin.deleteItem(item.Id);
       setShowDeleteModal(false);
+      // onDeleteItem（handleDeleteItem）已含关窗同款逻辑：移除本窗、后续窗递进、晋升自动播、按设置补窗
       if (onDeleteItem) onDeleteItem(item.Id);
-      if (onSkip) onSkip(id); // Triggers shift & slot promotion!
     } catch (err) {
       alert(err.message || '删除失败');
     }

@@ -441,6 +441,19 @@ export default function FloatingVideoWindow({
   const [isPlaying, setIsPlaying] = useState(() => !windowData?.startPaused);
   const startPausedRef = useRef(!!windowData?.startPaused);
 
+  // 副窗晋升主窗：App 在关窗位移时把晋升到 slot 0 的窗口 startPaused 置 false，
+  // 这里捕获 true→false 的晋升瞬间自动起播（手动播放过/本来就暂停的窗不受影响）
+  useEffect(() => {
+    if (!windowData.startPaused && startPausedRef.current) {
+      startPausedRef.current = false;
+      const v = videoRef.current;
+      if (v && v.paused) {
+        v.play().catch(() => {});
+        setIsPlaying(true);
+      }
+    }
+  }, [windowData.startPaused]);
+
   const [playbackSpeed, setPlaybackSpeed] = useState(() => playbackDefaults.speed || 1.0);
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
@@ -1672,12 +1685,20 @@ export default function FloatingVideoWindow({
           </div>
         )}
 
-        {/* Paused Indicator (纯指示，不拦截鼠标：画面按住仍可拖动窗口，播放/暂停用标题栏 ⏯ 按钮) */}
+        {/* Paused Indicator：中央播放键可直接点击恢复；半透明阻挡层保持不拦截（画面按住仍可拖动窗口） */}
         {!isPlaying && !isLoading && !hasError && (
           <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/30 pointer-events-none">
-            <div className="w-11 h-11 rounded-full bg-black/60 border border-white/20 flex items-center justify-center text-white">
+            <button
+              onClick={(e) => { e.stopPropagation(); togglePlay(); }}
+              onMouseDown={(e) => e.stopPropagation()}
+              onTouchStart={(e) => e.stopPropagation()}
+              onTouchEnd={(e) => e.stopPropagation()}
+              onTouchCancel={(e) => e.stopPropagation()}
+              className="w-11 h-11 rounded-full bg-black/60 border border-white/20 flex items-center justify-center text-white cursor-pointer pointer-events-auto hover:bg-black/85 hover:border-cyan-400/70 hover:scale-105 active:scale-95 transition"
+              title="播放"
+            >
               <Play size={20} className="ml-0.5 fill-white" />
-            </div>
+            </button>
           </div>
         )}
 
@@ -1776,6 +1797,17 @@ export default function FloatingVideoWindow({
           title={isPlaying ? '暂停' : '播放'}
         >
           {isPlaying ? <Pause size={14} /> : <Play size={14} className="ml-px" />}
+        </button>
+        <button
+          onClick={handleToggleFavorite}
+          className={`p-1 rounded transition flex-shrink-0 ${
+            isFavorite
+              ? 'text-amber-400 bg-amber-500/20'
+              : 'text-gray-400 hover:text-amber-300 hover:bg-white/10'
+          }`}
+          title={isFavorite ? '取消最爱' : '加入最爱'}
+        >
+          <Star size={14} className={isFavorite ? 'fill-current' : ''} />
         </button>
         <button
           ref={moreMenuBtnRef}
@@ -2055,20 +2087,6 @@ export default function FloatingVideoWindow({
                           </span>
                           <span className={`text-[10px] font-bold ${isVrActive ? 'text-amber-300' : 'text-gray-500'}`}>
                             {isVrActive ? '已开启' : '已关闭'}
-                          </span>
-                        </button>
-
-                        {/* 收藏最爱 */}
-                        <button
-                          onClick={handleToggleFavorite}
-                          className="flex items-center justify-between py-1.5 px-2 rounded-lg hover:bg-white/10 text-gray-200 transition"
-                        >
-                          <span className="flex items-center gap-2">
-                            <Star size={13} className={isFavorite ? 'fill-amber-400 text-amber-400' : 'text-gray-400'} />
-                            <span>收藏最爱</span>
-                          </span>
-                          <span className={`text-[10px] font-bold ${isFavorite ? 'text-amber-400' : 'text-gray-500'}`}>
-                            {isFavorite ? '最爱' : '未收藏'}
                           </span>
                         </button>
 

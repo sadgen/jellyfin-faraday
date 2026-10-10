@@ -559,15 +559,18 @@ export default function App() {
       const remaining = prev.filter(w => w.id !== target.id);
       const shifted = remaining.map(w => {
         if (w.slotIndex > closedSlotIndex) {
-          return { ...w, slotIndex: w.slotIndex - 1 };
+          const newSlot = w.slotIndex - 1;
+          // 晋升为主窗（slot 0）的暂停副窗自动开始播放（组件监听 startPaused true→false 起播）；
+          // 晋升后仍是副窗的保持原暂停状态
+          return { ...w, slotIndex: newSlot, ...(newSlot === 0 ? { startPaused: false } : {}) };
         }
         return w;
       });
 
       // Auto refill if enabled
       if (autoRefillFloatingWindowsRef.current) {
-        const pool = currentFilteredItemsRef.current.length > 0 
-          ? currentFilteredItemsRef.current 
+        const pool = currentFilteredItemsRef.current.length > 0
+          ? currentFilteredItemsRef.current
           : mediaItemsRef.current;
         if (pool.length > 0) {
           const activeIds = new Set(shifted.map(w => w.item.Id));
@@ -584,7 +587,9 @@ export default function App() {
                 slotIndex: tailSlot,
                 item: randomItem,
                 timestamp: Date.now(),
-                autoCrop: !!target.crop
+                autoCrop: !!target.crop,
+                // 自动补窗的新窗同样遵循「副窗自动暂停」设置（tailSlot 0 = 补的是主窗位，照常播放）
+                startPaused: tailSlot > 0 && getPlaybackDefaults().randomSecondaryPause
               }
             ];
           }

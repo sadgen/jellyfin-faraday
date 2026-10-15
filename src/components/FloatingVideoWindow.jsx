@@ -1734,9 +1734,10 @@ export default function FloatingVideoWindow({
             />
           )}
 
+          {/* 命中区：py-2 纵向扩热区、-my-2 抵消占位，条本体视觉不变 */}
           <div
             ref={scrubberRef}
-            className={`w-full bg-white/20 rounded-full cursor-pointer transition-all relative overflow-hidden group/bar touch-none ${hoverScrubberTime !== null || isWheelSeeking ? 'h-2' : 'h-0.5'}`}
+            className="w-full py-2 -my-2 relative group/bar touch-none cursor-pointer"
             onMouseDown={handleScrubberMouseDown}
             onMouseMove={handleScrubberMouseMove}
             onMouseLeave={handleScrubberMouseLeave}
@@ -1746,9 +1747,13 @@ export default function FloatingVideoWindow({
             onTouchCancel={handleScrubberTouchEnd}
           >
             <div
-              className="absolute top-0 left-0 bottom-0 bg-cyan-400 shadow-sm shadow-cyan-400/50 rounded-full transition-all duration-75"
-              style={{ width: `${progress}%` }}
-            />
+              className={`w-full bg-white/20 rounded-full cursor-pointer transition-all relative overflow-hidden ${hoverScrubberTime !== null || isWheelSeeking ? 'h-2' : 'h-0.5'}`}
+            >
+              <div
+                className="absolute top-0 left-0 bottom-0 bg-cyan-400 shadow-sm shadow-cyan-400/50 rounded-full transition-all duration-75"
+                style={{ width: `${progress}%` }}
+              />
+            </div>
           </div>
         </div>
 

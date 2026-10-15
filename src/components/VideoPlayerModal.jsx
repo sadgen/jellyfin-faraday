@@ -1295,9 +1295,10 @@ export default function VideoPlayerModal({
               centerMode={viewport.width < 768}
             />
 
+            {/* 命中区：py-2 纵向扩热区、-my-2 抵消占位，条本体视觉不变 */}
             <div
               ref={scrubberRef}
-              className="w-full h-2.5 hover:h-3.5 bg-white/20 rounded-full cursor-pointer transition-all relative overflow-hidden group/bar touch-none"
+              className="w-full py-2 -my-2 relative group/bar touch-none cursor-pointer"
               onMouseDown={handleScrubberMouseDown}
               onMouseMove={handleScrubberMouseMove}
               onMouseLeave={handleScrubberMouseLeave}
@@ -1306,12 +1307,13 @@ export default function VideoPlayerModal({
               onTouchEnd={handleScrubberTouchEnd}
               onTouchCancel={handleScrubberTouchEnd}
             >
-              <div
-                className="absolute top-0 left-0 bottom-0 bg-cyan-400 rounded-full transition-all duration-75 relative"
-                style={{ width: `${progress}%` }}
-              >
-                <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 rounded-full bg-white shadow-md shadow-black scale-0 group-hover/bar:scale-100 transition-transform" />
-              </div>
+              <div className="w-full h-2.5 group-hover/bar:h-3.5 bg-white/20 rounded-full cursor-pointer transition-all relative overflow-hidden">
+                <div
+                  className="absolute top-0 left-0 bottom-0 bg-cyan-400 rounded-full transition-all duration-75 relative"
+                  style={{ width: `${progress}%` }}
+                >
+                  <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 rounded-full bg-white shadow-md shadow-black scale-0 group-hover/bar:scale-100 transition-transform" />
+                </div>
 
               {/* 章节刻度线：点击直接跳转章首 */}
               {chapters.length >= 2 && (rawDuration > 0 || item?.RunTimeTicks) && chapters.map((ch, i) => {
@@ -1334,6 +1336,7 @@ export default function VideoPlayerModal({
                   />
                 );
               })}
+              </div>
             </div>
           </div>
 

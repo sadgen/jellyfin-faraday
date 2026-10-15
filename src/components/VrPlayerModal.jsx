@@ -779,7 +779,7 @@ export default function VrPlayerModal({
             onTouchEnd={handleScrubberTouchEnd}
             onTouchCancel={handleScrubberTouchEnd}
           >
-            <div className="w-full h-2.5 group-hover/bar:h-3.5 bg-white/20 rounded-full cursor-pointer transition-all relative overflow-hidden">
+            <div className={`w-full ${hoverScrubberTime !== null ? 'h-3.5' : 'h-2.5'} bg-white/20 rounded-full cursor-pointer transition-all relative overflow-hidden`}>
               <div
                 className="absolute top-0 left-0 bottom-0 bg-cyan-400 rounded-full transition-all duration-75"
                 style={{ width: `${progress}%` }}

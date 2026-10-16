@@ -1699,7 +1699,10 @@ export default function FloatingVideoWindow({
         {!isPlaying && !isLoading && !hasError && !everPlayed && thumbCoverUrl && (
           <button
             onClick={(e) => { e.stopPropagation(); togglePlay(); }}
-            onMouseDown={(e) => e.stopPropagation()}
+            onMouseDown={(e) => {
+              // 中键不拦截：要冒泡到根容器触发关窗（PotPlayer 习惯）；左键/触摸拦截防手势层误触
+              if (e.button !== 1) e.stopPropagation();
+            }}
             onTouchStart={(e) => e.stopPropagation()}
             onTouchEnd={(e) => e.stopPropagation()}
             onTouchCancel={(e) => e.stopPropagation()}

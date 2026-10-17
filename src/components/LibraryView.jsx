@@ -384,6 +384,13 @@ const MediaCard = memo(function MediaCard({
     return () => clearInterval(id);
   }, [autoPlaying, tpInfo.hasTrickplay, tpInfo.interval, durationSec]);
 
+  // 自动播放时底部进度条随预览位置同步前进（与鼠标擦洗同款视觉）
+  useEffect(() => {
+    if (autoPlaying && trickplayTime !== null && durationSec > 0) {
+      setHoverPercent(Math.max(0, Math.min(1, trickplayTime / durationSec)));
+    }
+  }, [autoPlaying, trickplayTime, durationSec]);
+
   // 卡片滚出视口自动停（避免屏幕外的自动预览空转拉雪碧图）
   useEffect(() => {
     if (!cardRef.current || typeof IntersectionObserver === 'undefined') return undefined;

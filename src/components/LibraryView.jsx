@@ -272,7 +272,7 @@ const MediaCard = memo(function MediaCard({
   }, []);
 
   const handleCoverMouseMove = useCallback((e) => {
-    if (autoPlayingRef.current) return; // 自动预览中：鼠标移动不抢占，时间轴由定时器驱动
+    // 自动播放中鼠标移动 = 直接跳转定位，定时器从新位置继续逐帧前进
     const target = e.currentTarget;    if (!target) return;
     const rect = target.getBoundingClientRect();
     if (!rect.width) return;
@@ -380,7 +380,7 @@ const MediaCard = memo(function MediaCard({
         const next = (t === null ? 0 : t) + Math.max(1, tpInfo.interval);
         return next >= durationSec ? 0 : next;
       });
-    }, 110);
+    }, 280);
     return () => clearInterval(id);
   }, [autoPlaying, tpInfo.hasTrickplay, tpInfo.interval, durationSec]);
 

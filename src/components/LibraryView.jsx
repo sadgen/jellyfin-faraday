@@ -22,7 +22,7 @@ import {
   ArrowUpDown, X, RefreshCw, Layers, LayoutGrid,
   Grid, List, MoreVertical, Calendar,
   Users, Tag, Check, ChevronRight, ChevronDown,
-  SlidersHorizontal, Info, RotateCcw, History, Zap, ShieldAlert, Sparkles, Wand2, Shuffle, Settings } from 'lucide-react';
+  SlidersHorizontal, Info, RotateCcw, History, Zap, ShieldAlert, Sparkles, Wand2, Shuffle, Settings, Square } from 'lucide-react';
 
 const SUB_TABS = [
   { id: 'items', label: '影片', icon: Film },
@@ -252,6 +252,7 @@ const MediaCard = memo(function MediaCard({
   }, []);
 
   const handleCoverMouseMove = useCallback((e) => {
+    if (autoPlayingRef.current) return; // 自动预览中：鼠标移动不抢占，时间轴由定时器驱动
     const target = e.currentTarget;
     if (!target) return;
     const rect = target.getBoundingClientRect();
@@ -332,6 +333,7 @@ const MediaCard = memo(function MediaCard({
       cancelAnimationFrame(rafIdRef.current);
       rafIdRef.current = null;
     }
+    setAutoPlaying(false);
     setIsHovered(false);
     setTrickplayTime(null);
     setHoverPercent(0);
@@ -341,6 +343,22 @@ const MediaCard = memo(function MediaCard({
   }, []);
 
   const tpInfo = useMemo(() => getTrickplayInfo(item), [item]);
+
+  // 缩略图模式：自动播放 trickplay（点击按钮后按雪碧图帧间隔逐帧前进，循环播放；
+  // 自动播放期间鼠标移动不抢占，再次点击按钮或移出卡片停止）
+  const [autoPlaying, setAutoPlaying] = useState(false);
+  const autoPlayingRef = useRef(false);
+  autoPlayingRef.current = autoPlaying;
+  useEffect(() => {
+    if (!autoPlaying || !tpInfo.hasTrickplay) return undefined;
+    const id = setInterval(() => {
+      setTrickplayTime((t) => {
+        const next = (t === null ? 0 : t) + Math.max(1, tpInfo.interval);
+        return next >= durationSec ? 0 : next;
+      });
+    }, 110);
+    return () => clearInterval(id);
+  }, [autoPlaying, tpInfo.hasTrickplay, tpInfo.interval, durationSec]);
 
   // Trickplay 兜底封面：仅当条目元数据完全没有封面图 tag（Primary/Thumb/Backdrop 均无，
   // 典型如 ScreenGrabber 失败的自制视频）时才用 Trickplay 第 0 帧垫底。
@@ -521,19 +539,43 @@ const MediaCard = memo(function MediaCard({
         {/* BACKDROP MODE: Inline inside 16:9 Card */}
         {isBackdrop && tpStyle && (
           <div className="absolute inset-0 bg-black flex items-center justify-center overflow-hidden pointer-events-none">
-            <div 
+            <div
               className={`relative shadow-2xl bg-center bg-no-repeat ${
                 tpInfo.isVertical ? 'h-full' : 'w-full aspect-video'
               }`}
               style={tpInfo.isVertical ? { ...tpStyle, aspectRatio: `${tpInfo.aspectRatio}` } : tpStyle}
             />
 
-            <div className="absolute bottom-2 left-2 z-30 pointer-events-none">
+            {/* 时间徽章：底部中央（避让左下操作按钮组） */}
+            <div className="absolute bottom-2 left-1/2 -translate-x-1/2 z-20 pointer-events-none">
               <div className="px-2 py-0.5 rounded-full bg-black/85 backdrop-blur-md border border-cyan-400/50 text-[10px] font-mono font-bold text-cyan-300 shadow-lg">
                 {formatTime(trickplayTime)}
               </div>
             </div>
           </div>
+        )}
+
+        {/* BACKDROP MODE: 自动预览开关（悬停显示、激活时常显；自动播放期间鼠标移动不抢占） */}
+        {isBackdrop && isHovered && tpInfo.hasTrickplay && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              if (autoPlayingRef.current) {
+                setAutoPlaying(false);
+              } else {
+                setTrickplayTime((t) => (t === null ? 0 : t));
+                setAutoPlaying(true);
+              }
+            }}
+            className={`absolute top-2 right-9 z-30 p-1.5 rounded-lg backdrop-blur-md border transition ${
+              autoPlaying
+                ? 'opacity-100 bg-cyan-500/90 border-cyan-300 text-slate-950 shadow-lg shadow-cyan-500/40'
+                : 'opacity-0 group-hover:opacity-100 bg-black/70 border-white/10 text-gray-300 hover:text-cyan-300'
+            }`}
+            title={autoPlaying ? '停止自动预览' : '自动播放预览'}
+          >
+            {autoPlaying ? <Square size={12} className="fill-current" /> : <Play size={12} />}
+          </button>
         )}
 
         {/* Bottom Timeline Progress Line on Hover */}

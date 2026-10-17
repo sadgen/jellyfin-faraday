@@ -133,6 +133,39 @@ export function getTrickplayInfo(item, { preferredWidth = null } = {}) {
 
 const spriteCache = new Set();
 
+// 海报可见即预热：进入视口的卡片预载第 0 张雪碧图（悬停首帧零等待）；
+// 没缓存就会经代理下载落盘，有缓存则浏览器/代理直接去重，代价为零
+const prefetchSeen = new Set();
+let posterObserver = null;
+
+export function prefetchTrickplayFirstSheet(item) {
+  if (!item || !jellyfin.auth.serverUrl) return;
+  const key = item.Id;
+  if (prefetchSeen.has(key)) return;
+  prefetchSeen.add(key);
+  const tp = getTrickplayInfo(item);
+  if (!tp.hasTrickplay) return;
+  const targetId = tp.id || item.Id;
+  preloadTrickplaySprite(`${jellyfin.auth.serverUrl}/Videos/${targetId}/Trickplay/${tp.width}/0.jpg?ApiKey=${jellyfin.auth.token}&MediaSourceId=${targetId}`);
+}
+
+export function observePosterPrefetch(el, item) {
+  if (!el || !item || typeof IntersectionObserver === 'undefined') return () => {};
+  if (!posterObserver) {
+    posterObserver = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        posterObserver.unobserve(entry.target);
+        const it = entry.target.__prefetchItem;
+        if (it) prefetchTrickplayFirstSheet(it);
+      }
+    }, { rootMargin: '300px' });
+  }
+  el.__prefetchItem = item;
+  posterObserver.observe(el);
+  return () => posterObserver.unobserve(el);
+}
+
 export function preloadTrickplaySprite(imageUrl) {
   if (!imageUrl || typeof Image === 'undefined' || spriteCache.has(imageUrl)) return;
   spriteCache.add(imageUrl);

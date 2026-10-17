@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useLayoutEffect, useRef, useCallback, memo } from 'react';
 import { createPortal } from 'react-dom';
 import { jellyfin } from '../api/jellyfinClient';
-import { getTrickplayStyle, getTrickplayInfo } from '../utils/trickplay';
+import { getTrickplayStyle, getTrickplayInfo, observePosterPrefetch } from '../utils/trickplay';
 import { detectDuplicateMedia } from '../utils/duplicateChecker';
 import { scanLibraryHealth } from '../utils/healthInspector';
 import { aggregateActors } from '../utils/actorAggregator';
@@ -120,6 +120,10 @@ const MediaCard = memo(function MediaCard({
   const [trickplayTime, setTrickplayTime] = useState(null);
   const [hoverPercent, setHoverPercent] = useState(0);
   const [isNearTop, setIsNearTop] = useState(false);
+
+  // 刷到海报即预热 trickplay 首图（进入视口+缓冲带时触发，悬停 seek 首帧零等待）
+  const cardRef = useRef(null);
+  useEffect(() => observePosterPrefetch(cardRef.current, item), [item]);
 
   const isBackdrop = viewLayout === 'backdrop';
   // 封面回退链：Primary(海报/截图封面) → Thumb → Backdrop → 无 tag 兜底；
@@ -382,6 +386,7 @@ const MediaCard = memo(function MediaCard({
 
   return (
     <div
+      ref={cardRef}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={handleCoverMouseLeave}
       data-item-id={item.Id}

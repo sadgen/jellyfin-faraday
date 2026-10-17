@@ -22,7 +22,7 @@ import {
   ArrowUpDown, X, RefreshCw, Layers, LayoutGrid,
   Grid, List, MoreVertical, Calendar,
   Users, Tag, Check, ChevronRight, ChevronDown,
-  SlidersHorizontal, Info, RotateCcw, History, Zap, ShieldAlert, Sparkles, Wand2, Shuffle, Settings, Square } from 'lucide-react';
+  SlidersHorizontal, Info, RotateCcw, History, Zap, ShieldAlert, Sparkles, Wand2, Shuffle, Settings } from 'lucide-react';
 
 const SUB_TABS = [
   { id: 'items', label: '影片', icon: Film },
@@ -216,6 +216,25 @@ const MediaCard = memo(function MediaCard({
     }
   }, []);
 
+  // 右键缩略图/海报：从鼠标当前位置开始自动播放 trickplay（再右键一次停止）。
+  // 不弹浏览器菜单；自动预览与悬停解耦——鼠标移开继续播，换卡不受影响
+  const handleCoverContextMenu = useCallback((e) => {
+    e.preventDefault();
+    const rect = e.currentTarget.getBoundingClientRect();
+    if (!rect.width) return;
+    const percent = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    setIsNearTop(rect.top < 300);
+    if (autoPlayingRef.current) {
+      setAutoPlaying(false);
+      setTrickplayTime(durationSec * percent);
+      setHoverPercent(percent);
+      return;
+    }
+    setHoverPercent(percent);
+    setTrickplayTime(durationSec * percent);
+    setAutoPlaying(true);
+  }, [durationSec]);
+
   const handleCardClick = useCallback((e) => {
     if (isLongPressActiveRef.current) {
       isLongPressActiveRef.current = false;
@@ -233,6 +252,7 @@ const MediaCard = memo(function MediaCard({
       if (onOpenDetail) onOpenDetail(item);
       return;
     }
+    setAutoPlaying(false); // 起播正片后停掉卡片上的自动预览
     onPlay(item, trickplayTime);
   }, [isSelecting, isSeries, item, onOpenDetail, onPlay, onToggleSelect, trickplayTime]);
 
@@ -253,8 +273,7 @@ const MediaCard = memo(function MediaCard({
 
   const handleCoverMouseMove = useCallback((e) => {
     if (autoPlayingRef.current) return; // 自动预览中：鼠标移动不抢占，时间轴由定时器驱动
-    const target = e.currentTarget;
-    if (!target) return;
+    const target = e.currentTarget;    if (!target) return;
     const rect = target.getBoundingClientRect();
     if (!rect.width) return;
     const percent = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
@@ -333,7 +352,12 @@ const MediaCard = memo(function MediaCard({
       cancelAnimationFrame(rafIdRef.current);
       rafIdRef.current = null;
     }
-    setAutoPlaying(false);
+    // 自动预览不随鼠标离开而停止（右键再次点击才停），保留画面继续逐帧播放
+    if (autoPlayingRef.current) {
+      setIsHovered(false);
+      setHoverPercent(0);
+      return;
+    }
     setIsHovered(false);
     setTrickplayTime(null);
     setHoverPercent(0);
@@ -359,6 +383,18 @@ const MediaCard = memo(function MediaCard({
     }, 110);
     return () => clearInterval(id);
   }, [autoPlaying, tpInfo.hasTrickplay, tpInfo.interval, durationSec]);
+
+  // 卡片滚出视口自动停（避免屏幕外的自动预览空转拉雪碧图）
+  useEffect(() => {
+    if (!cardRef.current || typeof IntersectionObserver === 'undefined') return undefined;
+    const io = new IntersectionObserver((entries) => {
+      for (const en of entries) {
+        if (!en.isIntersecting) setAutoPlaying(false);
+      }
+    });
+    io.observe(cardRef.current);
+    return () => io.disconnect();
+  }, []);
 
   // Trickplay 兜底封面：仅当条目元数据完全没有封面图 tag（Primary/Thumb/Backdrop 均无，
   // 典型如 ScreenGrabber 失败的自制视频）时才用 Trickplay 第 0 帧垫底。
@@ -497,6 +533,7 @@ const MediaCard = memo(function MediaCard({
         onAuxClick={handleCardAuxClick}
         onMouseDown={handleCardMouseDown}
         onMouseMove={handleCoverMouseMove}
+        onContextMenu={handleCoverContextMenu}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
@@ -553,29 +590,6 @@ const MediaCard = memo(function MediaCard({
               </div>
             </div>
           </div>
-        )}
-
-        {/* BACKDROP MODE: 自动预览开关（悬停显示、激活时常显；自动播放期间鼠标移动不抢占） */}
-        {isBackdrop && isHovered && tpInfo.hasTrickplay && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              if (autoPlayingRef.current) {
-                setAutoPlaying(false);
-              } else {
-                setTrickplayTime((t) => (t === null ? 0 : t));
-                setAutoPlaying(true);
-              }
-            }}
-            className={`absolute top-2 right-9 z-30 p-1.5 rounded-lg backdrop-blur-md border transition ${
-              autoPlaying
-                ? 'opacity-100 bg-cyan-500/90 border-cyan-300 text-slate-950 shadow-lg shadow-cyan-500/40'
-                : 'opacity-0 group-hover:opacity-100 bg-black/70 border-white/10 text-gray-300 hover:text-cyan-300'
-            }`}
-            title={autoPlaying ? '停止自动预览' : '自动播放预览'}
-          >
-            {autoPlaying ? <Square size={12} className="fill-current" /> : <Play size={12} />}
-          </button>
         )}
 
         {/* Bottom Timeline Progress Line on Hover */}

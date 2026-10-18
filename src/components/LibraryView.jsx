@@ -406,14 +406,17 @@ const MediaCard = memo(function MediaCard({
   }, []);
 
   // Trickplay 兜底封面：仅当条目元数据完全没有封面图 tag（Primary/Thumb/Backdrop 均无，
-  // 典型如 ScreenGrabber 失败的自制视频）时才用 Trickplay 第 0 帧垫底。
-  // 有封面的条目即使短暂未加载/404 也不拉雪碧图——单张 1MB+，网格批量并发会拖慢整页。
+  // 典型如 ScreenGrabber 失败的自制视频）时才用 Trickplay 第 0 帧垫底；
+  // 有封面 tag 但图片确认加载失败（404/坏链）的卡片，同样垫雪碧图——
+  // 仅该卡触发且 spriteCache 去重 + 代理持久缓存，不会重现整页拖慢。
+  const [posterFailed, setPosterFailed] = useState(false);
+  useEffect(() => { setPosterFailed(false); }, [posterUrl]);
   const coverTrickplayStyle = useMemo(() => {
     if (!tpInfo.hasTrickplay) return null;
     const tags = item.ImageTags || {};
-    if (tags.Primary || tags.Thumb || tags.Backdrop) return null;
+    if (tags.Primary || tags.Thumb || tags.Backdrop) return posterFailed ? getTrickplayStyle(item, 0) : null;
     return getTrickplayStyle(item, 0);
-  }, [item, tpInfo.hasTrickplay]);
+  }, [item, tpInfo.hasTrickplay, posterFailed]);
 
   const tpStyle = useMemo(() => {
     if (trickplayTime === null) return null;
@@ -573,7 +576,7 @@ const MediaCard = memo(function MediaCard({
             loading="lazy"
             draggable={false}
             onContextMenu={(e) => e.preventDefault()}
-            onError={(e) => { e.currentTarget.style.display = 'none'; }}
+            onError={(e) => { e.currentTarget.style.display = 'none'; setPosterFailed(true); }}
             className={`relative w-full h-full transition-opacity duration-200 select-none [-webkit-touch-callout:none] ${
               isBackdrop && tpInfo.isVertical ? 'object-contain bg-black/80' : 'object-cover'
             } ${

@@ -5,6 +5,10 @@
 
 const STORAGE_KEY = 'jellyfin_faraday_auth';
 
+// 字幕下载记录的 DisplayPreferences id（服务器按 userId+client 存，同账号跨设备共享）
+const SUBTITLE_LOG_PREF_ID = '8f3a2b64-1c4d-4e5f-9a6b-7c8d9e0f1a2b';
+const SUBTITLE_LOG_PREF_KEY = 'subtitleDownloadLog';
+
 export class JellyfinClient {
   constructor() {
     this.auth = this.loadStoredAuth();
@@ -1063,6 +1067,49 @@ export class JellyfinClient {
     if (!this.auth.serverUrl || !itemId || subtitleIndex === undefined) return '';
     const srcId = mediaSourceId || itemId;
     return `${this.auth.serverUrl}/Videos/${itemId}/${srcId}/Subtitles/${subtitleIndex}/Stream.vtt?ApiKey=${this.auth.token}&api_key=${this.auth.token}`;
+  }
+
+  /**
+   * 字幕下载记录（时间/来源）存服务端：Jellyfin 本身不记这些信息（文件 mtime 无 API 可读），
+   * 借官方用户级 KV（DisplayPreferences CustomPrefs）在下载时刻由客户端记账，同账号全设备共享。
+   * 返回 { itemId: { 字幕文件名或'#index': {ts,name,provider,index} } }，不可达时返回 null。
+   */
+  async getSubtitleDownloadLog() {
+    if (!this.auth.isConfigured || !this.auth.userId) return null;
+    try {
+      const res = await fetch(`${this.auth.serverUrl}/DisplayPreferences/${SUBTITLE_LOG_PREF_ID}?userId=${this.auth.userId}&client=${this.clientName}`, {
+        headers: this.getAuthHeaders()
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      const raw = data?.CustomPrefs?.[SUBTITLE_LOG_PREF_KEY];
+      return raw ? JSON.parse(raw) : {};
+    } catch {
+      return null;
+    }
+  }
+
+  async saveSubtitleDownloadLog(log) {
+    if (!this.auth.isConfigured || !this.auth.userId) return false;
+    try {
+      const res = await fetch(`${this.auth.serverUrl}/DisplayPreferences/${SUBTITLE_LOG_PREF_ID}?userId=${this.auth.userId}&client=${this.clientName}`, {
+        method: 'POST',
+        headers: this.getAuthHeaders(),
+        body: JSON.stringify({
+          Id: SUBTITLE_LOG_PREF_ID,
+          Client: this.clientName,
+          UserId: this.auth.userId,
+          PageType: 'none',
+          SortBy: 'SortName',
+          RememberIndexing: false,
+          RememberSorting: false,
+          CustomPrefs: { [SUBTITLE_LOG_PREF_KEY]: JSON.stringify(log) }
+        })
+      });
+      return res.ok;
+    } catch {
+      return false;
+    }
   }
 
   /**

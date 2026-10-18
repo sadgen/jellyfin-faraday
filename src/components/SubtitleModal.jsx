@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { jellyfin } from '../api/jellyfinClient';
 import {
   Subtitles, Download, Check, Search,
@@ -30,11 +30,13 @@ async function pollForNewSubtitle(itemId, findNewStream, { intervalMs = 500, tim
   return null;
 }
 
-// 下载记录：Jellyfin 对插件下载的字幕不保留来源与时间，只在本地记账。
+// 下载记录：Jellyfin 对插件下载的字幕不保留来源与时间（文件 mtime 也无 API 可读），
+// 因此在下载时刻由客户端记账。记录存服务端（DisplayPreferences 用户级 KV，同账号
+// 全设备共享），localStorage 只作离线兜底；打开弹窗时自动把本地多出的旧记录迁到服务端。
 // 按字幕文件名关联（轨道重编号不错位），index 作为无 Path 时的兜底键。
 const SUBTITLE_DL_LOG_KEY = 'jf_subtitle_download_log';
 
-function loadSubtitleLog() {
+function loadLocalSubtitleLog() {
   try {
     return JSON.parse(localStorage.getItem(SUBTITLE_DL_LOG_KEY)) || {};
   } catch {
@@ -42,29 +44,44 @@ function loadSubtitleLog() {
   }
 }
 
-function recordSubtitleDownload(itemId, stream, remote) {
+function persistLocalSubtitleLog(log) {
   try {
-    const log = loadSubtitleLog();
-    const entry = {
-      ts: Date.now(),
-      name: remote?.Name || '',
-      provider: remote?.ProviderName || '',
-      index: stream.Index
-    };
-    const bucket = log[itemId] || {};
-    const file = (stream.Path || '').split('/').pop();
-    if (file) bucket[file] = entry;
-    bucket[`#${stream.Index}`] = entry;
-    log[itemId] = bucket;
     localStorage.setItem(SUBTITLE_DL_LOG_KEY, JSON.stringify(log));
   } catch {
-    // 记录失败不影响下载本身
+    // 存储失败不影响下载本身
   }
 }
 
-function lookupSubtitleDownload(itemId, stream) {
-  if (!itemId) return null;
-  const bucket = loadSubtitleLog()[itemId];
+function mergeSubtitleLogs(a, b) {
+  const out = JSON.parse(JSON.stringify(a || {}));
+  for (const [itemId, bucket] of Object.entries(b || {})) {
+    out[itemId] = out[itemId] || {};
+    for (const [key, entry] of Object.entries(bucket)) {
+      const cur = out[itemId][key];
+      if (!cur || (entry?.ts || 0) > (cur?.ts || 0)) out[itemId][key] = entry;
+    }
+  }
+  return out;
+}
+
+function addSubtitleDownload(log, itemId, stream, remote) {
+  const next = JSON.parse(JSON.stringify(log || {}));
+  const entry = {
+    ts: Date.now(),
+    name: remote?.Name || '',
+    provider: remote?.ProviderName || '',
+    index: stream.Index
+  };
+  const bucket = next[itemId] || {};
+  const file = (stream.Path || '').split('/').pop();
+  if (file) bucket[file] = entry;
+  bucket[`#${stream.Index}`] = entry;
+  next[itemId] = bucket;
+  return next;
+}
+
+function lookupSubtitleDownload(log, itemId, stream) {
+  const bucket = itemId ? log?.[itemId] : null;
   if (!bucket) return null;
   const file = (stream.Path || '').split('/').pop();
   return (file && bucket[file]) || bucket[`#${stream.Index}`] || null;
@@ -97,6 +114,12 @@ export default function SubtitleModal({
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [playbackData, setPlaybackData] = useState(null);
+  // 字幕下载记录：服务端为主（同账号全设备共享），本地为离线兜底
+  const [downloadLog, setDownloadLog] = useState(() => loadLocalSubtitleLog());
+  const latestLogRef = useRef(downloadLog);
+  useEffect(() => {
+    latestLogRef.current = downloadLog;
+  }, [downloadLog]);
   // 字幕外观（全局持久化，保存即广播给所有播放器实例）
   const [subStyle, setSubStyle] = useState(() => getSubtitleStyle());
   const updateSubStyle = (patch) => setSubStyle(saveSubtitleStyle(patch));
@@ -108,6 +131,23 @@ export default function SubtitleModal({
         if (data) setPlaybackData(data);
       }).catch(() => {});
     }
+  }, [isOpen, item?.Id]);
+
+  // 打开时拉服务端下载记录并与本地合并；本地多出的旧记录（其它端看不到的）自动迁到服务端
+  useEffect(() => {
+    if (!isOpen || !item?.Id) return;
+    let cancelled = false;
+    (async () => {
+      const serverLog = await jellyfin.getSubtitleDownloadLog();
+      if (cancelled || !serverLog) return; // 服务器不可达：保持本地数据
+      const merged = mergeSubtitleLogs(serverLog, loadLocalSubtitleLog());
+      latestLogRef.current = merged;
+      setDownloadLog(merged);
+      if (JSON.stringify(merged) !== JSON.stringify(serverLog)) {
+        jellyfin.saveSubtitleDownloadLog(merged).catch(() => {});
+      }
+    })();
+    return () => { cancelled = true; };
   }, [isOpen, item?.Id]);
 
   // Extract local subtitle streams (from fresh playbackData or item)
@@ -162,7 +202,11 @@ export default function SubtitleModal({
         const updatedPlayback = await pollForNewSubtitle(item.Id, findNewStream);
         const newStream = updatedPlayback ? findNewStream(updatedPlayback) : null;
         if (newStream) {
-          recordSubtitleDownload(item.Id, newStream, sub);
+          const nextLog = addSubtitleDownload(latestLogRef.current, item.Id, newStream, sub);
+          latestLogRef.current = nextLog;
+          setDownloadLog(nextLog);
+          persistLocalSubtitleLog(nextLog);
+          jellyfin.saveSubtitleDownloadLog(nextLog).catch(() => {});
           setPlaybackData(updatedPlayback);
           setSuccessMsg(`字幕「${sub.Name || '在线字幕'}」已应用到当前播放`);
           if (onSelectSubtitle) onSelectSubtitle(newStream.Index);
@@ -290,7 +334,7 @@ export default function SubtitleModal({
                 const isSelected = currentSubtitleIndex === s.Index;
                 const title = s.Title || s.DisplayTitle || `${s.Language || '字幕'} #${idx + 1}`;
                 const variant = detectChineseVariant(s);
-                const download = lookupSubtitleDownload(item?.Id, s);
+                const download = lookupSubtitleDownload(downloadLog, item?.Id, s);
                 return (
                   <button
                     key={s.Index}

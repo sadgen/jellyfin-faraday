@@ -449,6 +449,10 @@ export default function App() {
     setVrPlayingItem(item);
   }, []);
 
+  // 壳内有活动会话（影院弹窗/浮窗）：页面内容层整体让位——挖洞的透明
+  // 要求那些像素上整条 web 合成链都没画（浮窗后面的网格像素会挡死垫层）
+  const nativePlaybackActive = isNativePlayerAvailable() && (modalPlayingItem != null || floatingWindows.length > 0);
+
   // Single item playback handler (Direct floating window playback)
   const handlePlaySingleItem = useCallback(async (item, startSecond = null) => {
     if (!item) return;
@@ -938,7 +942,7 @@ export default function App() {
 
   return (
     <ErrorBoundary>
-      <div className="relative w-full h-[100dvh] bg-[#080b11] text-gray-100 overflow-hidden flex flex-col">
+      <div className={`relative w-full h-[100dvh] bg-[#080b11] text-gray-100 overflow-hidden flex flex-col ${nativePlaybackActive ? 'native-has-playback' : ''}`}>
         
         {/* Global Error Banner */}
         {errorText && (
@@ -954,8 +958,8 @@ export default function App() {
           </div>
         )}
 
-        {/* Main View Area: Unified Media Library */}
-        <div className="flex-1 w-full h-full overflow-hidden">
+        {/* Main View Area: Unified Media Library（壳内有会话时整层让位给原生垫层） */}
+        <div className="flex-1 w-full h-full overflow-hidden app-page-layer">
           <LibraryView
             items={mediaItems}
             totalRecordCount={totalRecordCount}

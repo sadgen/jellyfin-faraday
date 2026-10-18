@@ -41,6 +41,17 @@
 .native-player .native-win-footer {
   background: rgba(13, 17, 23, 0.94) !important;
 }
+/* 有活动会话：页面内容层让位（visibility 不渲染），根层/body 背景透明，
+   让原生暗幕（DimCanvas）与垫层视频成为洞区的唯一事实源 */
+.native-player .native-has-playback .app-page-layer {
+  visibility: hidden;
+}
+.native-player .native-has-playback #root > div {
+  background: transparent !important;
+}
+.native-player:has(.native-has-playback) body {
+  background: transparent !important;
+}
 
 html {
   height: 100%;

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { isNativePlayerAvailable } from '../utils/nativePlayerBridge';
+import { isNativePlayerAvailable, nativePlayerBridge } from '../utils/nativePlayerBridge';
 import { jellyfin } from '../api/jellyfinClient';
 import { calculateSlotStyle, calculateMaximizedStyle } from '../utils/windowLayout';
 import { useExternalPlayer } from '../hooks/useExternalPlayer';
@@ -115,6 +115,13 @@ export default function FloatingVideoWindow({
   // 横屏：元素全屏 + 锁定横向（Android Chrome 支持 orientation.lock；桌面仅全屏）
   const [isLandscape, setIsLandscape] = useState(false);
   const handleLandscapeToggle = async () => {
+    if (isNativePlayerAvailable()) {
+      // WebView 里 requestFullscreen/orientation.lock 都不可用：走壳桥锁 Activity 方向
+      const next = !isLandscape;
+      nativePlayerBridge.setOrientation(next ? 'landscape' : 'portrait');
+      setIsLandscape(next);
+      return;
+    }
     try {
       if (!document.fullscreenElement) {
         const el = containerRef.current;
@@ -436,6 +443,19 @@ export default function FloatingVideoWindow({
     window.addEventListener('faraday:playback_defaults_changed', handleDefaultsChanged);
     return () => window.removeEventListener('faraday:playback_defaults_changed', handleDefaultsChanged);
   }, []);
+
+  // 原生侧会话提示（智能跳前奏等）：经桥转成窗内 toast（与旧原生覆盖层同观感）
+  useEffect(() => {
+    if (!isNativePlayerAvailable()) return undefined;
+    const onNote = (e) => {
+      if (e.detail?.itemId && e.detail.itemId !== currentPartId) return;
+      setSmoothToast(e.detail?.text || '');
+      const t = setTimeout(() => setSmoothToast(''), 2600);
+      return () => clearTimeout(t);
+    };
+    window.addEventListener('faraday:note', onNote);
+    return () => window.removeEventListener('faraday:note', onNote);
+  }, [currentPartId]);
 
   // Playback state（副窗一律暂停起播仅缓冲；晋升主窗时 App 置 startPaused=false 自动播）
   const [isPlaying, setIsPlaying] = useState(() => !windowData?.startPaused);
@@ -884,7 +904,8 @@ export default function FloatingVideoWindow({
     // 换片重置手动退出标记
     vrUserDisabledRef.current = false;
     const initialVr = detectVrVideo(currentPlayingPart, videoEl);
-    if (initialVr.isVr) {
+    // 壳内网页 VR 不挂载（无帧），VR 检测/进入由原生 VrDetector 处理
+    if (initialVr.isVr && !isNativePlayerAvailable()) {
       setIsVrActive(true);
       setDetectedVrMode(initialVr.mode);
       if (typeof setSmoothToast === 'function') {
@@ -914,7 +935,7 @@ export default function FloatingVideoWindow({
       }
       // Re-verify with decoded video dimensions
       const vrCheck = detectVrVideo(currentPlayingPart, videoEl);
-      if (vrCheck.isVr && !vrUserDisabledRef.current) {
+      if (vrCheck.isVr && !vrUserDisabledRef.current && !isNativePlayerAvailable()) {
         setIsVrActive(true);
         setDetectedVrMode(vrCheck.mode);
       }
@@ -933,11 +954,9 @@ export default function FloatingVideoWindow({
         nativeFloating: true,
         autoPlay: !startPausedRef.current
       })
-      .then(() => {
-        // 安卓壳：画面已交原生迷你窗，网页窗格自动收起（原生豁免 close，会话继续）
-        if (isNativePlayerAvailable() && onClose) onClose(id);
-      })
-      .catch(() => {});
+      .catch(() => {
+        // 壳内：loadStream 交原生即返回，无网页自关——网页窗就是窗口本体
+      });
 
     return () => {
       videoEl.removeEventListener('loadedmetadata', onLoadedMetadata);
@@ -1505,7 +1524,7 @@ export default function FloatingVideoWindow({
         userSelect: 'none',
         WebkitUserSelect: 'none'
       }}
-      className={`fixed rounded-2xl overflow-visible shadow-2xl border bg-[#0d1117] flex flex-col group select-none ${
+      className={`fixed rounded-2xl overflow-visible shadow-2xl border bg-[#0d1117] flex flex-col group select-none native-win-root ${
         slotIndex === 0
           ? 'border-cyan-400/70 shadow-cyan-500/25'
           : 'border-white/15 shadow-black/80'
@@ -1534,7 +1553,7 @@ export default function FloatingVideoWindow({
       {/* Video Viewport — 三屏取中时切换为竖屏面板比例；按住左键即可拖动窗口 (PotPlayer 式)，触摸手势由 useTouchGestures 接管 */}
       <div
         ref={videoViewportRef}
-        className={`relative w-full bg-black flex items-center justify-center overflow-hidden touch-none select-none cursor-move ${(isMaximized || cropFill) ? 'flex-1 min-h-0' : ''}`}
+        className={`relative w-full bg-black flex items-center justify-center overflow-hidden touch-none select-none cursor-move native-win-viewport ${(isMaximized || cropFill) ? 'flex-1 min-h-0' : ''}`}
         style={{
           aspectRatio: (isMaximized || cropFill) ? undefined : (cropThird ? (videoAspect > 0 ? videoAspect / 3 : 16 / 27) : 16 / 9),
           filter: `brightness(${brightness})`,
@@ -1556,7 +1575,7 @@ export default function FloatingVideoWindow({
           <img
             src={coverUrl}
             alt=""
-            className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-300 pointer-events-none ${
+            className={`native-win-cover absolute inset-0 w-full h-full object-cover transition-opacity duration-300 pointer-events-none ${
               isLoading ? 'opacity-60 blur-sm' : 'opacity-0'
             }`}
           />
@@ -1612,15 +1631,17 @@ export default function FloatingVideoWindow({
           selectedSubtitleIndex={selectedSubtitleIndex}
         />
 
-        {/* INLINE VR WEBGL CANVAS */}
-        <InlineVrCanvas
-          videoRef={videoRef}
-          isActive={isVrActive}
-          onClose={() => { vrUserDisabledRef.current = true; setIsVrActive(false); }}
-          initialMode={detectedVrMode}
-          gyroActive={(isVrActive || cropThird) && (playbackDefaults.gyroSweepDeg || 90) > 0}
-          recenterSignal={vrRecenterTick}
-        />
+        {/* INLINE VR WEBGL CANVAS（壳内不挂载：镜像元素无帧，VR 走原生 VrPlayerActivity） */}
+        {!isNativePlayerAvailable() && (
+          <InlineVrCanvas
+            videoRef={videoRef}
+            isActive={isVrActive}
+            onClose={() => { vrUserDisabledRef.current = true; setIsVrActive(false); }}
+            initialMode={detectedVrMode}
+            gyroActive={(isVrActive || cropThird) && (playbackDefaults.gyroSweepDeg || 90) > 0}
+            recenterSignal={vrRecenterTick}
+          />
+        )}
 
         {/* Mobile Touch Gesture HUD Overlay */}
         {gestureState.type && (
@@ -2103,6 +2124,12 @@ export default function FloatingVideoWindow({
                         {/* VR 全景 */}
                         <button
                           onClick={() => {
+                            if (isNativePlayerAvailable()) {
+                              // 壳内：移交原生 VrPlayerActivity（陀螺仪/球面渲染在原生）
+                              nativePlayerBridge.enterVr();
+                              setShowMoreMenu(false);
+                              return;
+                            }
                             setIsVrActive(prev => {
                               if (prev) vrUserDisabledRef.current = true;
                               return !prev;

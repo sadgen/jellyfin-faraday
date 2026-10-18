@@ -22,6 +22,7 @@ import VrPlayerModal from './components/VrPlayerModal';
 import ItemDetailModal from './components/ItemDetailModal';
 import StatsModal from './components/StatsModal';
 import ErrorBoundary from './components/ErrorBoundary';
+import { isNativePlayerAvailable } from './utils/nativePlayerBridge';
 import { AlertCircle, Loader2, CheckCircle2, XCircle } from 'lucide-react';
 
 const STORAGE_KEY_VIEW = 'jf_last_selected_view';
@@ -437,6 +438,16 @@ export default function App() {
       setVrPlayingItem(modalNavPool[nextIdx]);
     }
   }, [modalNavPool]);
+
+  // 安卓壳：网页 VR 弹窗拿不到帧（播放由原生接管），VR 入口一律改开
+  // 影院弹窗（原生自动检测 VR 内容进 VrPlayerActivity，⋮ 菜单可强制）
+  const handlePlayVr = useCallback((item) => {
+    if (isNativePlayerAvailable()) {
+      setModalPlayingItem(item);
+      return;
+    }
+    setVrPlayingItem(item);
+  }, []);
 
   // Single item playback handler (Direct floating window playback)
   const handlePlaySingleItem = useCallback(async (item, startSecond = null) => {
@@ -973,7 +984,7 @@ export default function App() {
             onPlaySingleItem={handlePlaySingleItem}
             onOpenFloatingWindow={handleOpenFloatingWindow}
             onPlayModal={handlePlayModal}
-            onPlayVr={(item) => setVrPlayingItem(item)}
+            onPlayVr={handlePlayVr}
             onUpdateItem={handleUpdateItem}
             onDeleteItem={handleDeleteItem}
             onOpenMetadataEditor={(item) => setEditingItem(item)}
@@ -1014,12 +1025,12 @@ export default function App() {
             onSwitchItem={handleSwitchTheaterItem}
             onUpdateItem={handleUpdateItem}
             onDeleteItem={handleDeleteItem}
-            onOpenVr={(item) => setVrPlayingItem(item)}
+            onOpenVr={handlePlayVr}
           />
         )}
 
-        {/* Three.js VR 180 / 360 SBS 3D Player Modal */}
-        {vrPlayingItem && (
+        {/* Three.js VR 180 / 360 SBS 3D Player Modal（壳内不挂载：播放由原生接管，无帧可渲染） */}
+        {vrPlayingItem && !isNativePlayerAvailable() && (
           <VrPlayerModal
             isOpen={true}
             item={vrPlayingItem}
@@ -1084,7 +1095,7 @@ export default function App() {
             onClose={() => setDetailItem(null)}
             onPlayTheater={(item) => { setDetailItem(null); setModalPlayingItem(item); }}
             onPlayFloating={(item) => { setDetailItem(null); handleOpenFloatingWindow(item); }}
-            onPlayVr={(item) => { setDetailItem(null); setVrPlayingItem(item); }}
+            onPlayVr={(item) => { setDetailItem(null); handlePlayVr(item); }}
             onUpdateItem={handleUpdateItem}
             onDeleteItem={handleDeleteItem}
             onOpenMetadataEditor={(item) => { setDetailItem(null); setEditingItem(item); }}

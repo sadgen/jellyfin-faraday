@@ -37,17 +37,23 @@ function getPlugin() {
 
 class NativePlayerBridge {
   constructor() {
-    /** itemId -> { videoEl, paused, positionSec, floating } */
+    /** itemId -> { videoEl, paused, positionSec, floating, durationSec, vw, vh } */
     this.mirrors = new Map();
     this.suppressSeek = new Map();
     this._handles = [];
     this._listening = false;
+    this._slotLoopActive = false;
+    this._lastSlotsJson = '';
+    // web UI 驱动形态标记：壳内 CSS 据此挖洞（视频槽位透明露出原生垫层）
+    if (typeof document !== 'undefined' && document.documentElement) {
+      document.documentElement.classList.add('native-player');
+    }
   }
 
   /**
    * 移交播放。controller 仅用于读取 jellyfin 凭据与 itemId；必须在
    * web 侧 armStartedReport/startHeartbeat 之前调用。
-   * floating=true 表示来源是网页浮窗（原生侧开迷你窗，不进全屏覆盖层）。
+   * floating=true 表示来源是网页浮窗（原生开会话，画面由垫层随网页槽位显示）。
    */
   async loadStream(controller, { itemId, mediaSourceId, playMethod, streamUrl, initialSeekTime, audioStreamIndex, subtitleStreamIndex, floating }) {
     const plugin = getPlugin();
@@ -58,11 +64,15 @@ class NativePlayerBridge {
       videoEl: controller.videoEl || null,
       paused: true,
       positionSec: Number.isFinite(initialSeekTime) ? initialSeekTime : 0,
-      floating: Boolean(floating)
+      floating: Boolean(floating),
+      durationSec: 0,
+      vw: 0,
+      vh: 0
     });
 
     this._attachElementMirror(controller.videoEl, itemId);
     this._ensureNativeListeners();
+    this._startSlotLoop();
 
     try {
       await plugin.play({
@@ -100,8 +110,9 @@ class NativePlayerBridge {
     const plugin = getPlugin();
     const closedId = itemId || this._anyItemId();
     if (!plugin || !closedId) return;
+    const floating = Boolean(this.mirrors.get(closedId)?.floating);
     this.detach(closedId);
-    plugin.close({ itemId: closedId }).catch(() => {});
+    plugin.close({ itemId: closedId, floating }).catch(() => {});
   }
 
   _anyItemId() {
@@ -127,6 +138,33 @@ class NativePlayerBridge {
         get() {
           const m = bridge.mirrors.get(itemId);
           return m ? m.paused : true;
+        }
+      });
+    } catch {}
+    // 时长/分辨率影子属性：镜像元素无媒体数据，进度条与窗口比例
+    // （videoAspect/竖屏适配）全靠原生回推（faradayState）
+    try {
+      Object.defineProperty(videoEl, 'duration', {
+        configurable: true,
+        get() {
+          const m = bridge.mirrors.get(itemId);
+          return m && m.durationSec > 0 ? m.durationSec : NaN;
+        }
+      });
+    } catch {}
+    try {
+      Object.defineProperty(videoEl, 'videoWidth', {
+        configurable: true,
+        get() {
+          const m = bridge.mirrors.get(itemId);
+          return m ? m.vw : 0;
+        }
+      });
+      Object.defineProperty(videoEl, 'videoHeight', {
+        configurable: true,
+        get() {
+          const m = bridge.mirrors.get(itemId);
+          return m ? m.vh : 0;
         }
       });
     } catch {}
@@ -164,8 +202,18 @@ class NativePlayerBridge {
       }));
       keep(plugin.addListener('faradayEnded', (payload) => {
         const m = payload && this.mirrors.get(payload.itemId);
+        // 先派发 ended（网页浮窗/弹窗自己的连播/换片逻辑用它），再 detach；
+        // 非浮窗补 Escape（VideoPlayerModal 监听后自行关闭）
+        if (m && m.videoEl) {
+          try { m.videoEl.dispatchEvent(new Event('ended')); } catch {}
+        }
         this.detach(payload && payload.itemId);
         if (m && !m.floating) this._dispatchEscape();
+      }));
+      keep(plugin.addListener('faradayNote', (payload) => {
+        if (payload && typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('faraday:note', { detail: payload }));
+        }
       }));
       // 原生切到浮窗/PiP：全屏播放弹窗自行关闭（会话继续）
       keep(plugin.addListener('faradayFloated', (payload) => {
@@ -197,7 +245,104 @@ class NativePlayerBridge {
           this.suppressSeek.set(state.itemId, false);
         }, 50);
       }
+      // 进度条/时间显示驱动：镜像元素没有真实解码 tick，靠回推节拍派发 timeupdate
+      if (el) {
+        try { el.dispatchEvent(new Event('timeupdate')); } catch {}
+      }
     }
+    // 时长回推 → durationchange（进度条比例）
+    if (Number.isFinite(state.durationSec) && state.durationSec > 0 && m.durationSec !== state.durationSec) {
+      m.durationSec = state.durationSec;
+      if (el) {
+        try { el.dispatchEvent(new Event('durationchange')); } catch {}
+      }
+    }
+    // 分辨率回推 → loadedmetadata/resize（videoAspect、竖屏窗口比例依赖它）
+    const w = Number(state.videoWidth) || 0;
+    const h = Number(state.videoHeight) || 0;
+    if (w > 0 && h > 0 && (m.vw !== w || m.vh !== h)) {
+      m.vw = w;
+      m.vh = h;
+      if (el) {
+        try {
+          el.dispatchEvent(new Event('loadedmetadata'));
+          el.dispatchEvent(new Event('resize'));
+        } catch {}
+      }
+    }
+  }
+
+  /**
+   * 槽位上报循环：rAF 逐帧收集全部镜像 video 元素的 rect + object-fit/平移/
+   * 镜像/亮度（computed style，含向上 6 层找 brightness filter），变化才发
+   * updateSlots。原生垫层（UnderlayVideoManager）据此定位画面。窗口拖拽/
+   * 转场动画期间 rect 每帧变化 → 垫层逐帧跟随。
+   */
+  _startSlotLoop() {
+    if (this._slotLoopActive) return;
+    this._slotLoopActive = true;
+    const tick = () => {
+      if (this.mirrors.size === 0) {
+        this._slotLoopActive = false;
+        this._lastSlotsJson = '';
+        return;
+      }
+      const slots = [];
+      for (const [itemId, m] of this.mirrors) {
+        const el = m.videoEl;
+        if (!el || !el.isConnected) continue;
+        const r = el.getBoundingClientRect();
+        if (r.width < 2 || r.height < 2) continue;
+        const cs = typeof getComputedStyle === 'function' ? getComputedStyle(el) : null;
+        if (!cs) continue;
+        let objectPosition = 50;
+        const op = parseFloat(cs.objectPosition);
+        if (Number.isFinite(op)) objectPosition = op;
+        const flipH = cs.transform && cs.transform !== 'none' ? /matrix\(-/.test(cs.transform) : false;
+        let brightness = 1;
+        let node = el;
+        for (let hops = 0; node && hops < 6; hops++) {
+          const f = getComputedStyle(node).filter;
+          const mb = f && f.match(/brightness\(([\d.]+)\)/);
+          if (mb) {
+            brightness = parseFloat(mb[1]);
+            break;
+          }
+          node = node.parentElement;
+        }
+        slots.push({
+          itemId,
+          x: r.left,
+          y: r.top,
+          w: r.width,
+          h: r.height,
+          fit: cs.objectFit || 'contain',
+          objectPosition,
+          flipH,
+          brightness
+        });
+      }
+      const json = JSON.stringify(slots);
+      if (json !== this._lastSlotsJson) {
+        this._lastSlotsJson = json;
+        const plugin = getPlugin();
+        if (plugin) plugin.updateSlots({ slots }).catch(() => {});
+      }
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }
+
+  /** 网页 ⋮ 菜单强制进入原生 VR（立体模式由原生检测） */
+  enterVr() {
+    const plugin = getPlugin();
+    if (plugin) plugin.enterVr({}).catch(() => {});
+  }
+
+  /** 横竖屏锁定（WebView 里 screen.orientation.lock 不可用） */
+  setOrientation(orientation) {
+    const plugin = getPlugin();
+    if (plugin) plugin.setOrientation({ orientation }).catch(() => {});
   }
 
   /** 原生关闭/浮窗化后让全屏播放弹窗自行关闭（VideoPlayerModal 监听 Escape） */

@@ -15,6 +15,7 @@ import VolumeControl from './VolumeControl';
 import SleepTimerButton from './SleepTimerButton';
 import QuickTagSelector from './QuickTagSelector';
 import { detectVrVideo } from '../utils/vrDetector';
+import { isNativePlayerAvailable, nativePlayerBridge } from '../utils/nativePlayerBridge';
 import { probeStreamStatus, describeVideoMediaError } from '../utils/playbackDiagnostics';
 import { QUALITY_OPTIONS, PLAYBACK_SPEED_OPTIONS } from '../utils/qualityPresets';
 import { SEEK_SPEED_OPTIONS, getStoredSeekSpeed, setStoredSeekSpeed, getSeekStepSeconds } from '../utils/seekSettings';
@@ -80,6 +81,18 @@ export default function VideoPlayerModal({
     window.addEventListener('faraday:playback_defaults_changed', handleDefaultsChanged);
     return () => window.removeEventListener('faraday:playback_defaults_changed', handleDefaultsChanged);
   }, []);
+
+  // 原生侧会话提示（智能跳前奏等）：经桥转成窗内 toast（与旧原生覆盖层同观感）
+  useEffect(() => {
+    if (!isNativePlayerAvailable()) return undefined;
+    const onNote = (e) => {
+      if (e.detail?.itemId && item?.Id && e.detail.itemId !== item.Id) return;
+      setSmoothToast(e.detail?.text || '');
+      setTimeout(() => setSmoothToast(''), 2600);
+    };
+    window.addEventListener('faraday:note', onNote);
+    return () => window.removeEventListener('faraday:note', onNote);
+  }, [item?.Id]);
 
   const [isPlaying, setIsPlaying] = useState(true);
   const [playbackSpeed, setPlaybackSpeed] = useState(() => playbackDefaults.speed || 1.0);
@@ -582,8 +595,9 @@ export default function VideoPlayerModal({
     controller.attachVideo(videoEl);
 
     // Auto-detect VR Video format (pure 2D vs 3D-to-2D vs true VR)
+    // 壳内网页 VR 不挂载（镜像元素无帧），VR 检测/进入由原生 VrDetector 处理
     const initialVr = detectVrVideo(item, videoEl);
-    if (initialVr.isVr) {
+    if (initialVr.isVr && !isNativePlayerAvailable()) {
       setIsVrActive(true);
       setDetectedVrMode(initialVr.mode);
     } else {
@@ -618,7 +632,7 @@ export default function VideoPlayerModal({
         setTimeout(() => setSmoothToast(''), 3000);
       }
       const vrCheck = detectVrVideo(item, videoEl);
-      if (vrCheck.isVr) {
+      if (vrCheck.isVr && !isNativePlayerAvailable()) {
         setIsVrActive(true);
         setDetectedVrMode(vrCheck.mode);
       }
@@ -920,13 +934,13 @@ export default function VideoPlayerModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 md:bg-black/90 backdrop-blur-md md:p-4 animate-in fade-in duration-200 overflow-hidden"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 md:bg-black/90 backdrop-blur-md md:p-4 animate-in fade-in duration-200 overflow-hidden native-modal-root"
       onClick={onClose}
     >
       <div
         ref={containerRef}
         onWheel={handleWheel}
-        className="relative w-full h-full md:h-auto md:max-w-5xl bg-[#0d1117] md:rounded-2xl overflow-hidden shadow-2xl border border-white/10 flex flex-col justify-between md:justify-start md:max-h-[92vh]"
+        className="relative w-full h-full md:h-auto md:max-w-5xl bg-[#0d1117] md:rounded-2xl overflow-hidden shadow-2xl border border-white/10 flex flex-col justify-between md:justify-start md:max-h-[92vh] native-modal-panel"
         style={{ filter: `brightness(${brightness})` }}
         onClick={(e) => e.stopPropagation()}
         {...touchHandlers}
@@ -954,7 +968,14 @@ export default function VideoPlayerModal({
             </button>
 
             <button
-              onClick={() => setIsVrActive(!isVrActive)}
+              onClick={() => {
+                if (isNativePlayerAvailable()) {
+                  // 壳内：移交原生 VrPlayerActivity（陀螺仪/球面渲染在原生）
+                  nativePlayerBridge.enterVr();
+                  return;
+                }
+                setIsVrActive(!isVrActive);
+              }}
               className={`px-2.5 py-1.5 rounded-lg border font-bold transition flex items-center gap-1.5 ${
                 isVrActive
                   ? 'bg-amber-500/40 border-amber-400 text-amber-300 animate-pulse'
@@ -1010,7 +1031,7 @@ export default function VideoPlayerModal({
           </div>
         </div>
 
-        <div className="relative w-full aspect-video bg-black flex items-center justify-center overflow-hidden flex-1 select-none">
+        <div className="relative w-full aspect-video bg-black flex items-center justify-center overflow-hidden flex-1 select-none native-modal-stage">
           {smoothToast && (
             <div className="absolute top-3 left-1/2 -translate-x-1/2 z-40 px-3.5 py-1.5 bg-black/85 backdrop-blur-md border border-cyan-400/60 rounded-full text-xs font-bold text-cyan-300 shadow-xl pointer-events-none animate-in fade-in duration-150">
               {smoothToast}
@@ -1021,7 +1042,7 @@ export default function VideoPlayerModal({
             <img
               src={posterUrl}
               alt=""
-              className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-300 pointer-events-none ${
+              className={`native-modal-poster absolute inset-0 w-full h-full object-cover transition-opacity duration-300 pointer-events-none ${
                 isLoading ? 'opacity-50 blur-md' : 'opacity-0'
               }`}
             />
@@ -1067,12 +1088,15 @@ export default function VideoPlayerModal({
             ))}
           </video>
 
-          <InlineVrCanvas
-            videoRef={videoRef}
-            isActive={isVrActive}
-            onClose={() => setIsVrActive(false)}
-            initialMode={detectedVrMode}
-          />
+          {/* INLINE VR（壳内不挂载：镜像元素无帧，VR 走原生 VrPlayerActivity） */}
+          {!isNativePlayerAvailable() && (
+            <InlineVrCanvas
+              videoRef={videoRef}
+              isActive={isVrActive}
+              onClose={() => setIsVrActive(false)}
+              initialMode={detectedVrMode}
+            />
+          )}
 
           {/* 自定义字幕渲染层：字号/颜色/描边/背景/延迟补偿（设置见字幕弹窗） */}
           {!isVrActive && (

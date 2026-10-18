@@ -1915,43 +1915,6 @@ export default function LibraryView({
     }
   }, [onDeleteItem]);
 
-  // 电视剧子页面：整屏接管（顶栏返回 + 季筛选 + 集网格）
-  if (seriesPageItem) {
-    return (
-      <SeriesPage
-        series={seriesPageItem}
-        viewLayout={viewLayout}
-        isMobileViewport={isMobileViewport}
-        onBack={() => setSeriesPageItem(null)}
-        onPlay={onPlaySingleItem}
-        onOpenDetail={onOpenDetail}
-        onToggleFavorite={handleToggleFavorite}
-        onTogglePlayed={handleTogglePlayed}
-        onRefreshMetadata={handleRefreshMetadata}
-        onDelete={handleDelete}
-        onUpdateItem={onUpdateItem}
-        onOpenActionSheet={(it) => setActionSheetItem(it)}
-        renderEpisodeCard={(ep) => (
-          <MediaCard
-            key={ep.Id}
-            item={ep.IndexNumber ? { ...ep, Name: `第${ep.IndexNumber}集 ${ep.Name || ''}` } : ep}
-            viewLayout={viewLayout}
-            isMobileViewport={isMobileViewport}
-            belowFloatingWindows={hasFloatingWindows}
-            onPlay={onPlaySingleItem}
-            onToggleFavorite={handleToggleFavorite}
-            onTogglePlayed={handleTogglePlayed}
-            onOpenDetail={onOpenDetail}
-            onRefreshMetadata={handleRefreshMetadata}
-            onDelete={handleDelete}
-            onUpdateItem={onUpdateItem}
-            onOpenActionSheet={(it) => setActionSheetItem(it)}
-          />
-        )}
-      />
-    );
-  }
-
   return (
     <div className="w-full h-full flex flex-col bg-[#080b11] text-gray-100 overflow-hidden">
       
@@ -2929,6 +2892,41 @@ export default function LibraryView({
         onScroll={handleScroll}
         className="flex-1 overflow-y-auto p-1.5 sm:p-2.5 pb-24 md:pb-20"
       >
+        {/* 电视剧子页面：保留顶部导航（一级/二级标签、布局切换），仅接管内容区 */}
+        {seriesPageItem ? (
+          <SeriesPage
+            series={seriesPageItem}
+            viewLayout={viewLayout}
+            isMobileViewport={isMobileViewport}
+            onBack={() => setSeriesPageItem(null)}
+            onPlay={onPlaySingleItem}
+            onOpenDetail={onOpenDetail}
+            onToggleFavorite={handleToggleFavorite}
+            onTogglePlayed={handleTogglePlayed}
+            onRefreshMetadata={handleRefreshMetadata}
+            onDelete={handleDelete}
+            onUpdateItem={onUpdateItem}
+            onOpenActionSheet={(it) => setActionSheetItem(it)}
+            renderEpisodeCard={(ep) => (
+              <MediaCard
+                key={ep.Id}
+                item={ep.IndexNumber ? { ...ep, Name: `第${ep.IndexNumber}集 ${ep.Name || ''}` } : ep}
+                viewLayout={viewLayout}
+                isMobileViewport={isMobileViewport}
+                belowFloatingWindows={hasFloatingWindows}
+                onPlay={onPlaySingleItem}
+                onToggleFavorite={handleToggleFavorite}
+                onTogglePlayed={handleTogglePlayed}
+                onOpenDetail={onOpenDetail}
+                onRefreshMetadata={handleRefreshMetadata}
+                onDelete={handleDelete}
+                onUpdateItem={onUpdateItem}
+                onOpenActionSheet={(it) => setActionSheetItem(it)}
+              />
+            )}
+          />
+        ) : (
+          <>
         {/* A-Z 字母索引（仅影片视图；手机版隐藏——用处不大还占屏） */}
         {activeSubTab === 'items' && !isPhoneLike && (
           <div className="flex items-center gap-0.5 flex-wrap mb-2.5 sm:mb-3 bg-black/30 border border-white/5 rounded-xl px-1.5 py-1">
@@ -3689,6 +3687,8 @@ export default function LibraryView({
               </div>
             )}
           </>
+        )}
+        </>
         )}
       </div>
 

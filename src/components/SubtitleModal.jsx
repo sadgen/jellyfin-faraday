@@ -9,6 +9,7 @@ import {
   SUBTITLE_COLORS, SUBTITLE_OUTLINES, SUBTITLE_BGS,
   outlineToShadow, bgToCss
 } from '../utils/subtitleStyle';
+import { detectChineseVariant } from '../utils/subtitleHelper';
 
 /**
  * 轮询 PlaybackInfo 直到出现新字幕流。
@@ -27,6 +28,57 @@ async function pollForNewSubtitle(itemId, findNewStream, { intervalMs = 500, tim
     }
   }
   return null;
+}
+
+// 下载记录：Jellyfin 对插件下载的字幕不保留来源与时间，只在本地记账。
+// 按字幕文件名关联（轨道重编号不错位），index 作为无 Path 时的兜底键。
+const SUBTITLE_DL_LOG_KEY = 'jf_subtitle_download_log';
+
+function loadSubtitleLog() {
+  try {
+    return JSON.parse(localStorage.getItem(SUBTITLE_DL_LOG_KEY)) || {};
+  } catch {
+    return {};
+  }
+}
+
+function recordSubtitleDownload(itemId, stream, remote) {
+  try {
+    const log = loadSubtitleLog();
+    const entry = {
+      ts: Date.now(),
+      name: remote?.Name || '',
+      provider: remote?.ProviderName || '',
+      index: stream.Index
+    };
+    const bucket = log[itemId] || {};
+    const file = (stream.Path || '').split('/').pop();
+    if (file) bucket[file] = entry;
+    bucket[`#${stream.Index}`] = entry;
+    log[itemId] = bucket;
+    localStorage.setItem(SUBTITLE_DL_LOG_KEY, JSON.stringify(log));
+  } catch {
+    // 记录失败不影响下载本身
+  }
+}
+
+function lookupSubtitleDownload(itemId, stream) {
+  if (!itemId) return null;
+  const bucket = loadSubtitleLog()[itemId];
+  if (!bucket) return null;
+  const file = (stream.Path || '').split('/').pop();
+  return (file && bucket[file]) || bucket[`#${stream.Index}`] || null;
+}
+
+function formatDownloadTime(ts) {
+  if (!ts) return '';
+  const d = new Date(ts);
+  const now = new Date();
+  const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  if (d.toDateString() === now.toDateString()) return `今天 ${hm}`;
+  const md = `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  if (d.getFullYear() === now.getFullYear()) return `${md} ${hm}`;
+  return `${d.getFullYear()}-${md} ${hm}`;
 }
 
 export default function SubtitleModal({
@@ -110,6 +162,7 @@ export default function SubtitleModal({
         const updatedPlayback = await pollForNewSubtitle(item.Id, findNewStream);
         const newStream = updatedPlayback ? findNewStream(updatedPlayback) : null;
         if (newStream) {
+          recordSubtitleDownload(item.Id, newStream, sub);
           setPlaybackData(updatedPlayback);
           setSuccessMsg(`字幕「${sub.Name || '在线字幕'}」已应用到当前播放`);
           if (onSelectSubtitle) onSelectSubtitle(newStream.Index);
@@ -236,6 +289,8 @@ export default function SubtitleModal({
               {localSubtitles.map((s, idx) => {
                 const isSelected = currentSubtitleIndex === s.Index;
                 const title = s.Title || s.DisplayTitle || `${s.Language || '字幕'} #${idx + 1}`;
+                const variant = detectChineseVariant(s);
+                const download = lookupSubtitleDownload(item?.Id, s);
                 return (
                   <button
                     key={s.Index}
@@ -244,16 +299,28 @@ export default function SubtitleModal({
                       onClose();
                     }}
                     className={`p-3 rounded-xl border flex items-center justify-between text-left transition ${
-                      isSelected 
-                        ? 'bg-cyan-500/20 border-cyan-400 text-cyan-300 font-bold' 
+                      isSelected
+                        ? 'bg-cyan-500/20 border-cyan-400 text-cyan-300 font-bold'
                         : 'bg-black/40 border-white/5 text-gray-300 hover:bg-white/5'
                     }`}
                   >
                     <div className="flex flex-col min-w-0 pr-2">
-                      <span className="truncate">{title}</span>
+                      <span className="truncate">
+                        {title}
+                        {variant && (
+                          <span className="ml-1.5 px-1 py-0.5 rounded bg-cyan-950/80 border border-cyan-500/40 text-cyan-300 text-[9px] font-bold align-middle">
+                            {variant}
+                          </span>
+                        )}
+                      </span>
                       <span className="text-[10px] text-gray-500 font-mono mt-0.5">
                         {s.Codec?.toUpperCase()} {s.Language && `• ${s.Language}`} {s.IsDefault && '• 默认'} {s.IsForced && '• 强制'}
                       </span>
+                      {download && (
+                        <span className="text-[10px] text-emerald-400/90 font-mono mt-0.5 truncate">
+                          ⬇ {formatDownloadTime(download.ts)}{download.provider ? ` · ${download.provider}` : ''}
+                        </span>
+                      )}
                     </div>
                     {isSelected && <Check size={16} className="text-cyan-400 flex-shrink-0" />}
                   </button>

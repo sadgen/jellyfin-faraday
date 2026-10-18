@@ -40,6 +40,18 @@ export function hasHardcodedChineseSubtitles(item) {
 }
 
 /**
+ * 从标题/文件名识别中文字幕的简繁（zho/chi 这类语言码本身不带简繁信息，判断不出返回 null）。
+ * 注意别用过于宽松的缩写：'gb' 会误中 release 名里的 GBR。
+ */
+export function detectChineseVariant(stream) {
+  if (!stream) return null;
+  const text = [stream.Title, stream.Path].filter(Boolean).join(' ');
+  if (/cht|zh-hant|zh-tw|big5|繁/i.test(text)) return '繁';
+  if (/chs|zh-hans|zh-cn|简/i.test(text)) return '简';
+  return null;
+}
+
+/**
  * Select the best default subtitle stream if hardcoded Chinese subtitles are not present.
  */
 export function getDefaultSubtitleIndex(item, subtitleStreams = []) {

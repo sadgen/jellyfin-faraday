@@ -646,10 +646,11 @@ export class JellyfinClient {
 
   /**
    * Trigger refresh metadata on a single item
+   * 注意：Jellyfin 12.2 起刷新模式值 Full 已改名 FullRefresh（传 Full 直接 400）
    */
   async refreshItemMetadata(itemId) {
     if (!this.auth.isConfigured || !itemId) return false;
-    const res = await fetch(`${this.auth.serverUrl}/Items/${itemId}/Refresh?Recursive=true&MetadataRefreshMode=Full&ImageRefreshMode=Full&ReplaceAllMetadata=true&ReplaceAllImages=false`, {
+    const res = await fetch(`${this.auth.serverUrl}/Items/${itemId}/Refresh?Recursive=true&MetadataRefreshMode=FullRefresh&ImageRefreshMode=FullRefresh&ReplaceAllMetadata=true&ReplaceAllImages=false`, {
       method: 'POST',
       headers: this.getAuthHeaders()
     });

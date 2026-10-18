@@ -10,6 +10,25 @@ import {
   outlineToShadow, bgToCss
 } from '../utils/subtitleStyle';
 
+/**
+ * 轮询 PlaybackInfo 直到出现新字幕流。
+ * 服务器端 /Items/{id}/Refresh 是异步队列（重新探测大文件需数秒），固定延时
+ * 会与它竞速输掉，导致「下载成功但当前窗口看不到新字幕」，故轮询确认后再应用。
+ */
+async function pollForNewSubtitle(itemId, findNewStream, { intervalMs = 500, timeoutMs = 15000 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, intervalMs));
+    try {
+      const playback = await jellyfin.getItemPlaybackInfo(itemId);
+      if (playback && findNewStream(playback)) return playback;
+    } catch {
+      // 单次拉取失败继续重试，直到超时
+    }
+  }
+  return null;
+}
+
 export default function SubtitleModal({
   isOpen,
   item,
@@ -76,32 +95,31 @@ export default function SubtitleModal({
     try {
       const ok = await jellyfin.downloadRemoteSubtitle(item.Id, sub.Id);
       if (ok) {
-        setSuccessMsg(`字幕「${sub.Name || '在线字幕'}」下载成功！正在检索并应用字幕...`);
-        // Wait 900ms for Jellyfin server disk scanner
-        await new Promise(r => setTimeout(r, 900));
-        const updatedPlayback = await jellyfin.getItemPlaybackInfo(item.Id);
-        if (updatedPlayback) {
+        setSuccessMsg(`字幕「${sub.Name || '在线字幕'}」下载成功，正在等待服务器加载字幕流...`);
+        // 只在可渲染的文本字幕流中挑选（排除 PGS/DVD/DVB 等图像字幕流），
+        // 必须等到本次新下载出现的流真正进入 MediaStreams 才应用，
+        // 拿不到就不动当前字幕（绝不能乱切到已有旧轨）
+        const isTextSub = (s) =>
+          s && s.Type === 'Subtitle' &&
+          !['pgssub', 'dvdsub', 'dvbsub'].includes(String(s.Codec || '').toLowerCase());
+        const previousIndexes = new Set(localSubtitles.map(s => s.Index));
+        const findNewStream = (playback) => {
+          const streams = playback?.MediaSources?.[0]?.MediaStreams || playback?.MediaStreams || [];
+          return streams.find(s => isTextSub(s) && !previousIndexes.has(s.Index)) || null;
+        };
+        const updatedPlayback = await pollForNewSubtitle(item.Id, findNewStream);
+        const newStream = updatedPlayback ? findNewStream(updatedPlayback) : null;
+        if (newStream) {
           setPlaybackData(updatedPlayback);
-          const streams = updatedPlayback?.MediaSources?.[0]?.MediaStreams || updatedPlayback?.MediaStreams || [];
-          // 只在可渲染的文本字幕流中挑选（排除 PGS/DVD/DVB 等图像字幕流），
-          // 并优先选择本次新下载出现的流，而不是盲目取"最后一个"
-          const previousIndexes = new Set(localSubtitles.map(s => s.Index));
-          const textSubs = streams.filter(s =>
-            s.Type === 'Subtitle' &&
-            !['pgssub', 'dvdsub', 'dvbsub'].includes(String(s.Codec || '').toLowerCase())
-          );
-          const newStreams = textSubs.filter(s => !previousIndexes.has(s.Index));
-          const targetSub = newStreams[0]
-            || textSubs.find(s => s.IsDefault)
-            || textSubs[textSubs.length - 1]
-            || null;
-          const subIdx = targetSub ? targetSub.Index : 0;
-          if (onSelectSubtitle) onSelectSubtitle(subIdx);
-          if (onSubtitleDownloaded) onSubtitleDownloaded(updatedPlayback, subIdx);
+          setSuccessMsg(`字幕「${sub.Name || '在线字幕'}」已应用到当前播放`);
+          if (onSelectSubtitle) onSelectSubtitle(newStream.Index);
+          if (onSubtitleDownloaded) onSubtitleDownloaded(updatedPlayback, newStream.Index);
+          setTimeout(() => {
+            onClose();
+          }, 1200);
+        } else {
+          setErrorMsg('字幕已保存到服务器，但后台刷新尚未完成，请稍后重新打开播放窗口加载字幕');
         }
-        setTimeout(() => {
-          onClose();
-        }, 1200);
       } else {
         setErrorMsg('字幕下载失败，请检查 Jellyfin 插件权限');
       }

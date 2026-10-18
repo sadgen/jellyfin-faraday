@@ -257,14 +257,9 @@ export function useTouchGestures({
         touchActionRef.current = 'seek';
         initialValueRef.current = videoRef.current ? videoRef.current.currentTime : currentTime;
       } else {
-        // Vertical -> Left: Brightness, Right: Speed stepping (SPEED_OPTIONS 档位)
-        if (start.isLeftHalf) {
-          touchActionRef.current = 'brightness';
-          initialValueRef.current = brightness;
-        } else {
-          touchActionRef.current = 'speed_step';
-          initialValueRef.current = normalSpeed;
-        }
+        // Vertical -> 左右半屏都是倍速步进（亮度已弃：壳内原生视频上 CSS 滤镜无效）
+        touchActionRef.current = 'speed_step';
+        initialValueRef.current = normalSpeed;
       }
     }
 

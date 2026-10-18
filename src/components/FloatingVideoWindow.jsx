@@ -1566,7 +1566,7 @@ export default function FloatingVideoWindow({
       >
         {/* Smooth Mode Notification Toast */}
         {smoothToast && (
-          <div className="absolute top-2 left-1/2 -translate-x-1/2 z-40 px-3 py-1 bg-black/85 backdrop-blur-md border border-cyan-400/60 rounded-full text-[11px] font-bold text-cyan-300 shadow-xl pointer-events-none animate-in fade-in duration-150">
+          <div data-toast="1" className="absolute top-2 left-1/2 -translate-x-1/2 z-40 px-3 py-1 bg-black/85 backdrop-blur-md border border-cyan-400/60 rounded-full text-[11px] font-bold text-cyan-300 shadow-xl pointer-events-none animate-in fade-in duration-150">
             {smoothToast}
           </div>
         )}
@@ -1645,7 +1645,7 @@ export default function FloatingVideoWindow({
 
         {/* Mobile Touch Gesture HUD Overlay */}
         {gestureState.type && (
-          <div className={`absolute inset-0 z-30 flex items-center justify-center pointer-events-none animate-in fade-in zoom-in-95 duration-100 transition-opacity ${gestureState.fading ? 'opacity-0 duration-500' : 'opacity-100'}`}>
+          <div data-hud="1" className={`absolute inset-0 z-30 flex items-center justify-center pointer-events-none animate-in fade-in zoom-in-95 duration-100 transition-opacity ${gestureState.fading ? 'opacity-0 duration-500' : 'opacity-100'}`}>
             <div className="flex flex-col items-center gap-1.5 bg-black/80 backdrop-blur-md px-3.5 py-2.5 rounded-2xl border border-white/10 shadow-2xl text-white">
               {gestureState.type === 'seek' && <FastForward size={20} className="text-cyan-400 animate-pulse" />}
               {gestureState.type === 'brightness' && <Sun size={20} className="text-amber-400" />}

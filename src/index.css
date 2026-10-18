@@ -10,8 +10,23 @@
 /* ----------------------------------------------------------------
  * 安卓壳（web UI 驱动）：视频走原生 SurfaceView 浮层（在 WebView 之上，
  * 只有槽位矩形有内容），网页照常渲染完整 UI——库页在浮窗后可见、
- * 窗口/弹窗自带背景。此模式唯一 CSS 需求是历史保留位（无规则）。
+ * 窗口/弹窗自带背景。
  * ---------------------------------------------------------------- */
+/* 原生视频浮层会盖住槽位矩形内的网页元素：手势 HUD 与提示 toast 挪到
+ * 视频矩形外（屏幕底部、控制条上方），壳内专属 */
+.native-player [data-hud] {
+  position: fixed !important;
+  inset: auto 0 110px 0 !important;
+  height: auto !important;
+  align-items: center !important;
+}
+.native-player [data-toast] {
+  position: fixed !important;
+  inset: auto 0 150px 0 !important;
+  width: fit-content !important;
+  margin: 0 auto !important;
+  transform: none !important;
+}
 
 html {
   height: 100%;

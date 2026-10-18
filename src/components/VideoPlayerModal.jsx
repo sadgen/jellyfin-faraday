@@ -1033,7 +1033,7 @@ export default function VideoPlayerModal({
 
         <div className="relative w-full aspect-video bg-black flex items-center justify-center overflow-hidden flex-1 select-none native-modal-stage">
           {smoothToast && (
-            <div className="absolute top-3 left-1/2 -translate-x-1/2 z-40 px-3.5 py-1.5 bg-black/85 backdrop-blur-md border border-cyan-400/60 rounded-full text-xs font-bold text-cyan-300 shadow-xl pointer-events-none animate-in fade-in duration-150">
+            <div data-toast="1" className="absolute top-3 left-1/2 -translate-x-1/2 z-40 px-3.5 py-1.5 bg-black/85 backdrop-blur-md border border-cyan-400/60 rounded-full text-xs font-bold text-cyan-300 shadow-xl pointer-events-none animate-in fade-in duration-150">
               {smoothToast}
             </div>
           )}
@@ -1167,7 +1167,7 @@ export default function VideoPlayerModal({
           )}
 
           {gestureState.type && (
-            <div className={`absolute inset-0 z-30 flex items-center justify-center pointer-events-none animate-in fade-in zoom-in-95 duration-100 transition-opacity ${gestureState.fading ? 'opacity-0 duration-500' : 'opacity-100'}`}>
+            <div data-hud="1" className={`absolute inset-0 z-30 flex items-center justify-center pointer-events-none animate-in fade-in zoom-in-95 duration-100 transition-opacity ${gestureState.fading ? 'opacity-0 duration-500' : 'opacity-100'}`}>
               <div className="flex flex-col items-center gap-2 bg-black/80 backdrop-blur-md px-5 py-3.5 rounded-2xl border border-white/10 shadow-2xl text-white">
                 {gestureState.type === 'seek' && <FastForward size={28} className="text-cyan-400 animate-pulse" />}
                 {gestureState.type === 'brightness' && <Sun size={28} className="text-amber-400" />}

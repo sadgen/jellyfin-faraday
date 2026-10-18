@@ -8,50 +8,10 @@
 }
 
 /* ----------------------------------------------------------------
- * 安卓壳（web UI 驱动形态）：html 挂 native-player 类后，网页把播放器
- * 视频槽位区域挖成透明，露出 WebView 之下原生垫层（ExoPlayer TextureView；
- * 全屏遮罩暗幕也由垫层画）。仅壳内生效，浏览器/桌面端零影响。
+ * 安卓壳（web UI 驱动）：视频走原生 SurfaceView 浮层（在 WebView 之上，
+ * 只有槽位矩形有内容），网页照常渲染完整 UI——库页在浮窗后可见、
+ * 窗口/弹窗自带背景。此模式唯一 CSS 需求是历史保留位（无规则）。
  * ---------------------------------------------------------------- */
-.native-player .native-modal-root {
-  background: transparent !important;
-  backdrop-filter: none !important;
-}
-.native-player .native-modal-panel {
-  background: transparent !important;
-  filter: none !important;
-}
-.native-player .native-modal-stage {
-  background: transparent !important;
-}
-/* 加载期海报图会盖住垫层画面，原生首帧即封面 */
-.native-player .native-modal-poster,
-.native-player .native-win-cover {
-  display: none !important;
-}
-/* 浮窗根透明（页面内容从窗后透出，与浏览器端浮窗观感一致），标题栏/底栏
-   自带底色防文字叠在页面内容上 */
-.native-player .native-win-root {
-  background: transparent !important;
-}
-.native-player .native-win-viewport {
-  background: transparent !important;
-  filter: none !important;
-}
-.native-player .native-win-header,
-.native-player .native-win-footer {
-  background: rgba(13, 17, 23, 0.94) !important;
-}
-/* 有活动会话：页面内容层让位（visibility 不渲染），根层/body 背景透明，
-   让原生暗幕（DimCanvas）与垫层视频成为洞区的唯一事实源 */
-.native-player .native-has-playback .app-page-layer {
-  visibility: hidden;
-}
-.native-player .native-has-playback #root > div {
-  background: transparent !important;
-}
-.native-player:has(.native-has-playback) body {
-  background: transparent !important;
-}
 
 html {
   height: 100%;

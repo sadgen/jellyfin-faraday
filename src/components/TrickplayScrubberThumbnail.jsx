@@ -108,6 +108,7 @@ export default function TrickplayScrubberThumbnail({
 
   return (
     <div
+      data-native-overlap={isWindowMode ? undefined : '1'}
       className={`absolute z-[99999] flex flex-col items-center pointer-events-none -translate-x-1/2 ${positionClass}${leftClass}`}
       style={leftStyle}
     >

@@ -313,12 +313,28 @@ class NativePlayerBridge {
           }
           node = node.parentElement;
         }
+        // 铺满/取中铺满的 scrubber 预览锚在进度条上方、落进视频矩形——
+        // 原生视频浮层会盖住它。上报 bottomInset 让原生把视频底部收缩
+        // 让出预览区（window 模式预览挂窗口外沿，无重叠，恒 0）
+        let bottomInset = 0;
+        const pv = document.querySelector('[data-native-overlap]');
+        if (pv) {
+          const pr = pv.getBoundingClientRect();
+          const hOverlap = pr.left < r.right && pr.right > r.left;
+          if (hOverlap && pr.top < r.bottom) {
+            bottomInset = Math.min(
+              Math.max(0, r.bottom - pr.top + 8),
+              r.height * 0.45
+            );
+          }
+        }
         slots.push({
           itemId,
           x: r.left,
           y: r.top,
           w: r.width,
           h: r.height,
+          bottomInset,
           fit: cs.objectFit || 'contain',
           objectPosition,
           flipH,

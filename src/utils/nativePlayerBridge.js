@@ -44,9 +44,12 @@ class NativePlayerBridge {
     this._listening = false;
     this._slotLoopActive = false;
     this._lastSlotsJson = '';
-    // web UI 驱动形态标记：壳内 CSS 据此挖洞（视频槽位透明露出原生垫层）
-    if (typeof document !== 'undefined' && document.documentElement) {
+    // web UI 驱动形态标记：壳内 CSS 据此挖洞（视频槽位透明露出原生垫层）。
+    // 仅安卓壳内才加——浏览器/desktop-faraday 下加了会让浮窗留边、加载占位全透明（镂空）。
+    if (isNativePlayerAvailable() && typeof document !== 'undefined' && document.documentElement) {
       document.documentElement.classList.add('native-player');
+    } else if (typeof document !== 'undefined' && document.documentElement) {
+      document.documentElement.classList.remove('native-player');
     }
   }
 

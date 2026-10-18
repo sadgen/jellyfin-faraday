@@ -1934,7 +1934,7 @@ export default function LibraryView({
         renderEpisodeCard={(ep) => (
           <MediaCard
             key={ep.Id}
-            item={ep}
+            item={ep.IndexNumber ? { ...ep, Name: `第${ep.IndexNumber}集 ${ep.Name || ''}` } : ep}
             viewLayout={viewLayout}
             isMobileViewport={isMobileViewport}
             belowFloatingWindows={hasFloatingWindows}

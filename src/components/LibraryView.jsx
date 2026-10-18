@@ -1929,7 +1929,7 @@ export default function LibraryView({
         onTogglePlayed={handleTogglePlayed}
         onRefreshMetadata={handleRefreshMetadata}
         onDelete={handleDelete}
-        onUpdateItem={handleUpdateItem}
+        onUpdateItem={onUpdateItem}
         onOpenActionSheet={(it) => setActionSheetItem(it)}
         renderEpisodeCard={(ep) => (
           <MediaCard
@@ -1944,7 +1944,7 @@ export default function LibraryView({
             onOpenDetail={onOpenDetail}
             onRefreshMetadata={handleRefreshMetadata}
             onDelete={handleDelete}
-            onUpdateItem={handleUpdateItem}
+            onUpdateItem={onUpdateItem}
             onOpenActionSheet={(it) => setActionSheetItem(it)}
           />
         )}

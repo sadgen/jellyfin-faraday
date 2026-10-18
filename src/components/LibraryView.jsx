@@ -16,6 +16,7 @@ import MobileActionSheet from './MobileActionSheet';
 import DeleteConfirmModal from './DeleteConfirmModal';
 import CardContextMenu from './CardContextMenu';
 import ServerSwitchMenu from './ServerSwitchMenu';
+import SeriesPage from './SeriesPage';
 import {
   Play, Star, Eye, Search,
   Trash2, Folder, Film,
@@ -113,6 +114,7 @@ const MediaCard = memo(function MediaCard({
   onRefreshMetadata,
   onDelete,
   onUpdateItem,
+  onOpenSeries,
   onOpenActionSheet
 }) {
   const [isHovered, setIsHovered] = useState(false);
@@ -249,7 +251,7 @@ const MediaCard = memo(function MediaCard({
       return;
     }
     if (isSeries) {
-      if (onOpenDetail) onOpenDetail(item);
+      (onOpenSeries || onOpenDetail)?.(item);
       return;
     }
     setAutoPlaying(false); // 起播正片后停掉卡片上的自动预览
@@ -773,7 +775,7 @@ const MediaCard = memo(function MediaCard({
       {/* Title & Metadata Footer */}
       <div className="p-2.5 flex flex-col gap-0.5 min-w-0">
         <div 
-          onClick={() => isSeries ? (onOpenDetail && onOpenDetail(item)) : onPlay(item)}
+          onClick={() => isSeries ? ((onOpenSeries || onOpenDetail)?.(item)) : onPlay(item)}
           className="text-xs font-semibold text-white truncate group-hover:text-cyan-300 transition cursor-pointer" 
           title={item.Name}
         >
@@ -813,6 +815,7 @@ const MediaListRow = memo(function MediaListRow({
   onToggleFavorite,
   onTogglePlayed: _onTogglePlayed,
   onOpenDetail,
+  onOpenSeries,
   onOpenMetadataEditor,
   onOpenIdentify,
   onRefreshMetadata,
@@ -898,11 +901,11 @@ const MediaListRow = memo(function MediaListRow({
       return;
     }
     if (isSeries) {
-      if (onOpenDetail) onOpenDetail(item);
+      (onOpenSeries || onOpenDetail)?.(item);
       return;
     }
     onPlay(item);
-  }, [isSelecting, isSeries, item, onOpenDetail, onPlay, onToggleSelect]);
+  }, [isSelecting, isSeries, item, onOpenDetail, onOpenSeries, onPlay, onToggleSelect]);
 
   // 中键点击：从头开始播放（同海报卡片）
   const handleRowAuxClick = useCallback((e) => {
@@ -1321,6 +1324,21 @@ export default function LibraryView({
   // 原始目录树结构（文件夹浏览）状态
   const [folderItems, setFolderItems] = useState([]);
   const [folderPathStack, setFolderPathStack] = useState([]); // [{ id, name }]
+
+  // 电视剧「进入子页面」：点剧卡片切入 SeriesPage（季筛选 + 集网格），不再弹详情浮层
+  const [seriesPageItem, setSeriesPageItem] = useState(null);
+  const handleOpenSeries = useCallback((it) => setSeriesPageItem(it), []);
+  const seriesPageActive = !!seriesPageItem;
+  useEffect(() => {
+    // 浏览器/手势返回逐层关闭（复用全局返回哨兵，与多选层同一套协调）
+    const prev = window.__faradayLayerActive;
+    window.__faradayLayerActive = seriesPageActive;
+    if (seriesPageActive && !prev && sentinelDepth() === 0) {
+      pushSentinel(() => setSeriesPageItem(null));
+    } else if (!seriesPageActive && prev) {
+      consumeSentinel();
+    }
+  }, [seriesPageActive]);
   const [isFolderLoading, setIsFolderLoading] = useState(false);
 
   // 文件夹视图的随机候选池：当前文件夹（含全部子文件夹）内的视频。
@@ -1896,6 +1914,43 @@ export default function LibraryView({
       alert(`删除完成：成功 ${succeededItems.length} 项，失败 ${failedItems.length} 项（${failedNames}${suffix}）。失败项目仍保持选中，可重试。`);
     }
   }, [onDeleteItem]);
+
+  // 电视剧子页面：整屏接管（顶栏返回 + 季筛选 + 集网格）
+  if (seriesPageItem) {
+    return (
+      <SeriesPage
+        series={seriesPageItem}
+        viewLayout={viewLayout}
+        isMobileViewport={isMobileViewport}
+        onBack={() => setSeriesPageItem(null)}
+        onPlay={onPlaySingleItem}
+        onOpenDetail={onOpenDetail}
+        onToggleFavorite={handleToggleFavorite}
+        onTogglePlayed={handleTogglePlayed}
+        onRefreshMetadata={handleRefreshMetadata}
+        onDelete={handleDelete}
+        onUpdateItem={handleUpdateItem}
+        onOpenActionSheet={(it) => setActionSheetItem(it)}
+        renderEpisodeCard={(ep) => (
+          <MediaCard
+            key={ep.Id}
+            item={ep}
+            viewLayout={viewLayout}
+            isMobileViewport={isMobileViewport}
+            belowFloatingWindows={hasFloatingWindows}
+            onPlay={onPlaySingleItem}
+            onToggleFavorite={handleToggleFavorite}
+            onTogglePlayed={handleTogglePlayed}
+            onOpenDetail={onOpenDetail}
+            onRefreshMetadata={handleRefreshMetadata}
+            onDelete={handleDelete}
+            onUpdateItem={handleUpdateItem}
+            onOpenActionSheet={(it) => setActionSheetItem(it)}
+          />
+        )}
+      />
+    );
+  }
 
   return (
     <div className="w-full h-full flex flex-col bg-[#080b11] text-gray-100 overflow-hidden">
@@ -3047,6 +3102,8 @@ export default function LibraryView({
                               onToggleFavorite={handleToggleFavorite}
                               onTogglePlayed={handleTogglePlayed}
                               onOpenDetail={onOpenDetail}
+                    onOpenSeries={handleOpenSeries}
+                              onOpenSeries={handleOpenSeries}
                               onOpenMetadataEditor={onOpenMetadataEditor}
                               onOpenIdentify={onOpenIdentify}
                               onRefreshMetadata={handleRefreshMetadata}
@@ -3079,6 +3136,8 @@ export default function LibraryView({
                               onToggleFavorite={handleToggleFavorite}
                               onTogglePlayed={handleTogglePlayed}
                               onOpenDetail={onOpenDetail}
+                    onOpenSeries={handleOpenSeries}
+                              onOpenSeries={handleOpenSeries}
                               onOpenMetadataEditor={onOpenMetadataEditor}
                               onOpenIdentify={onOpenIdentify}
                               onRefreshMetadata={handleRefreshMetadata}
@@ -3584,6 +3643,7 @@ export default function LibraryView({
                     onToggleFavorite={handleToggleFavorite}
                     onTogglePlayed={handleTogglePlayed}
                     onOpenDetail={onOpenDetail}
+                    onOpenSeries={handleOpenSeries}
                     onOpenMetadataEditor={onOpenMetadataEditor}
                     onOpenIdentify={onOpenIdentify}
                     onRefreshMetadata={handleRefreshMetadata}
@@ -3617,6 +3677,7 @@ export default function LibraryView({
                     onToggleFavorite={handleToggleFavorite}
                     onTogglePlayed={handleTogglePlayed}
                     onOpenDetail={onOpenDetail}
+                    onOpenSeries={handleOpenSeries}
                     onOpenMetadataEditor={onOpenMetadataEditor}
                     onOpenIdentify={onOpenIdentify}
                     onRefreshMetadata={handleRefreshMetadata}

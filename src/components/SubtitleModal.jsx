@@ -1,15 +1,15 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { jellyfin } from '../api/jellyfinClient';
 import {
   Subtitles, Download, Check, Search,
-  X, RefreshCw, Sparkles, FileText, AlertCircle, Palette, Clock
+  X, RefreshCw, Sparkles, FileText, AlertCircle, Palette, Clock, Crosshair
 } from 'lucide-react';
 import {
   getSubtitleStyle, saveSubtitleStyle,
   SUBTITLE_COLORS, SUBTITLE_OUTLINES, SUBTITLE_BGS,
   outlineToShadow, bgToCss
 } from '../utils/subtitleStyle';
-import { detectChineseVariant } from '../utils/subtitleHelper';
+import { detectChineseVariant, rankRemoteSubtitles } from '../utils/subtitleHelper';
 
 /**
  * 轮询 PlaybackInfo 直到出现新字幕流。
@@ -107,9 +107,10 @@ export default function SubtitleModal({
   onClose
 }) {
   const [activeTab, setActiveTab] = useState('local'); // 'local' | 'remote' | 'style'
-  const [selectedLanguage, setSelectedLanguage] = useState('chi'); // 'chi' | 'eng' | 'jpn' | 'all'
+  const [selectedLanguage, setSelectedLanguage] = useState('chi'); // 'chi' | 'eng'
   const [remoteSubtitles, setRemoteSubtitles] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
+  const [showAllRelated, setShowAllRelated] = useState(false);
   const [downloadingId, setDownloadingId] = useState(null);
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
@@ -160,11 +161,14 @@ export default function SubtitleModal({
     setIsSearching(true);
     setErrorMsg('');
     setSuccessMsg('');
+    setShowAllRelated(false);
     try {
       const results = await jellyfin.searchRemoteSubtitles(item.Id, lang);
       setRemoteSubtitles(results || []);
       if (!results || results.length === 0) {
-        setErrorMsg('未找到匹配的在线字幕 (请确认服务器已安装 MeiamSub.Thunder 或 OpenSubtitles 插件)');
+        setErrorMsg(lang === 'eng'
+          ? '未找到英语在线字幕：迅雷仅支持中文；射手按文件哈希匹配（重编码的文件搜不到）；OpenSubtitles 依赖条目元数据。'
+          : '未找到匹配的在线字幕：迅雷按名称检索（改过名的文件可能搜不到）、射手按文件哈希检索（重编码必不命中）。请确认服务器已安装 MeiamSub 插件，或稍后刷新重试。');
       }
     } catch (err) {
       setErrorMsg(err.message || '搜索远程字幕失败');
@@ -178,6 +182,16 @@ export default function SubtitleModal({
       handleSearchRemote(selectedLanguage);
     }
   }, [isOpen, activeTab, remoteSubtitles.length, handleSearchRemote, selectedLanguage]);
+
+  // 番号相关度排序：精确番号匹配置顶（audit 2026-10：迅雷模糊搜索顶部常混入其他番号的字幕）
+  const rankedRemote = useMemo(
+    () => rankRemoteSubtitles(remoteSubtitles, item),
+    [remoteSubtitles, item]
+  );
+  const RELATED_PAGE = 24;
+  const visibleRelated = showAllRelated
+    ? rankedRemote.related
+    : rankedRemote.related.slice(0, RELATED_PAGE);
 
   const handleDownload = async (sub) => {
     if (!item?.Id || !sub?.Id) return;
@@ -226,6 +240,49 @@ export default function SubtitleModal({
       setDownloadingId(null);
     }
   };
+
+  const renderRemoteResult = (sub, isExact) => (
+    <div
+      key={sub.Id}
+      className={`p-3 rounded-xl flex items-center justify-between gap-3 transition ${
+        isExact
+          ? 'bg-emerald-950/30 border border-emerald-500/30 hover:border-emerald-400/60'
+          : 'bg-black/40 border border-white/5 hover:border-cyan-500/40'
+      }`}
+    >
+      <div className="flex flex-col min-w-0 flex-1">
+        <span className="font-bold text-white truncate" title={sub.Name}>{sub.Name}</span>
+        <div className="flex items-center gap-2 text-[10px] text-gray-400 mt-0.5">
+          {sub.ProviderName && (
+            <span className="px-1.5 py-0.2 rounded bg-cyan-950/80 border border-cyan-500/40 text-cyan-300 font-medium">
+              {sub.ProviderName}
+            </span>
+          )}
+          {isExact && (
+            <span className="px-1.5 py-0.2 rounded bg-emerald-950/80 border border-emerald-500/40 text-emerald-300 font-bold">
+              番号匹配
+            </span>
+          )}
+          {sub.Format && <span className="font-mono text-gray-400">.{sub.Format}</span>}
+          {sub.Language && <span className="font-mono text-gray-400">{sub.Language}</span>}
+          {sub.CommunityRating !== undefined && <span className="text-amber-400">★ {sub.CommunityRating}</span>}
+        </div>
+      </div>
+
+      <button
+        onClick={() => handleDownload(sub)}
+        disabled={downloadingId === sub.Id}
+        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold flex items-center gap-1 transition flex-shrink-0 disabled:opacity-50 shadow"
+      >
+        {downloadingId === sub.Id ? (
+          <RefreshCw size={13} className="animate-spin" />
+        ) : (
+          <Download size={13} />
+        )}
+        <span>{downloadingId === sub.Id ? '下载中...' : '下载并应用'}</span>
+      </button>
+    </div>
+  );
 
   if (!isOpen || !item) return null;
 
@@ -403,10 +460,8 @@ export default function SubtitleModal({
                   }}
                   className="bg-black/60 px-3 py-2 rounded-xl border border-white/10 text-cyan-300 font-bold focus:outline-none cursor-pointer"
                 >
-                  <option value="chi">中文 (Chinese / chi)</option>
-                  <option value="zho">中文 (zho)</option>
+                  <option value="chi">中文 (chi)</option>
                   <option value="eng">English (eng)</option>
-                  <option value="jpn">日本語 (jpn)</option>
                 </select>
 
                 <button
@@ -418,43 +473,46 @@ export default function SubtitleModal({
                   <span>{isSearching ? '正在检索插件字幕...' : '刷新搜索在线字幕'}</span>
                 </button>
               </div>
-
-              {/* Remote Results List */}
-              <div className="flex flex-col gap-2">
-                {remoteSubtitles.map(sub => (
-                  <div
-                    key={sub.Id}
-                    className="p-3 rounded-xl bg-black/40 border border-white/5 hover:border-cyan-500/40 flex items-center justify-between gap-3 transition"
-                  >
-                    <div className="flex flex-col min-w-0 flex-1">
-                      <span className="font-bold text-white truncate" title={sub.Name}>{sub.Name}</span>
-                      <div className="flex items-center gap-2 text-[10px] text-gray-400 mt-0.5">
-                        {sub.ProviderName && (
-                          <span className="px-1.5 py-0.2 rounded bg-cyan-950/80 border border-cyan-500/40 text-cyan-300 font-medium">
-                            {sub.ProviderName}
-                          </span>
-                        )}
-                        {sub.Format && <span className="font-mono text-gray-400">.{sub.Format}</span>}
-                        {sub.Language && <span className="font-mono text-gray-400">{sub.Language}</span>}
-                        {sub.CommunityRating !== undefined && <span className="text-amber-400">★ {sub.CommunityRating}</span>}
-                      </div>
-                    </div>
-
-                    <button
-                      onClick={() => handleDownload(sub)}
-                      disabled={downloadingId === sub.Id}
-                      className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold flex items-center gap-1 transition flex-shrink-0 disabled:opacity-50 shadow"
-                    >
-                      {downloadingId === sub.Id ? (
-                        <RefreshCw size={13} className="animate-spin" />
-                      ) : (
-                        <Download size={13} />
-                      )}
-                      <span>{downloadingId === sub.Id ? '下载中...' : '下载并应用'}</span>
-                    </button>
-                  </div>
-                ))}
+              <div className="text-[10px] text-gray-500 -mt-1">
+                迅雷：仅中文，按名称模糊检索 · 射手：中/英，按文件哈希（重编码搜不到） · OpenSubtitles：依赖元数据
               </div>
+
+              {/* Remote Results List：番号精确匹配置顶，其余按原始顺序 */}
+              {rankedRemote.exact.length > 0 && (
+                <div className="flex flex-col gap-2">
+                  <div className="flex items-center gap-1.5 text-[11px] font-bold text-emerald-400">
+                    <Crosshair size={12} />
+                    <span>番号精确匹配 ({rankedRemote.exact.length})</span>
+                  </div>
+                  {rankedRemote.exact.map(sub => renderRemoteResult(sub, true))}
+                </div>
+              )}
+
+              {visibleRelated.length > 0 && (
+                <div className="flex flex-col gap-2">
+                  {rankedRemote.exact.length > 0 && (
+                    <div className="text-[11px] font-bold text-gray-400 pt-1">
+                      其他相关结果 ({rankedRemote.related.length})
+                    </div>
+                  )}
+                  {visibleRelated.map(sub => renderRemoteResult(sub, false))}
+                  {rankedRemote.related.length > visibleRelated.length && (
+                    <button
+                      onClick={() => setShowAllRelated(true)}
+                      className="py-2 rounded-xl bg-black/40 border border-white/10 text-gray-400 hover:text-cyan-300 hover:border-cyan-500/40 text-[11px] font-bold transition"
+                    >
+                      显示其余 {rankedRemote.related.length - visibleRelated.length} 条模糊结果
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {rankedRemote.exact.length === 0 && rankedRemote.related.length === 0 && !isSearching && (
+                <div className="flex flex-col items-center justify-center text-gray-500 py-6 gap-1.5">
+                  <FileText size={28} className="text-gray-600" />
+                  <span>没有可显示的在线字幕结果</span>
+                </div>
+              )}
             </div>
           )}
 

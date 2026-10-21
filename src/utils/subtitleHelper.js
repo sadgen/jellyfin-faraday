@@ -52,6 +52,68 @@ export function detectChineseVariant(stream) {
 }
 
 /**
+ * Extract video codes (e.g. ABP-123 / kavr495) from a video item's file name / title.
+ * Returns an array of [letters, digits] pairs with letters uppercased, e.g. [['KAVR', '495']].
+ */
+export function extractVideoCodes(item) {
+  const candidates = [item?.Path, item?.Name, item?.OriginalTitle].filter(Boolean);
+  const codes = [];
+  const seen = new Set();
+  for (const text of candidates) {
+    // 只取路径末段文件名，避免目录名里的杂词
+    const base = String(text).split(/[\\/]/).pop();
+    const re = /\b([A-Za-z]{2,6})-?(\d{2,6})\b/g;
+    let m;
+    while ((m = re.exec(base)) !== null) {
+      const key = `${m[1].toUpperCase()}${m[2]}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        codes.push([m[1].toUpperCase(), m[2]]);
+      }
+    }
+  }
+  return codes;
+}
+
+/**
+ * Rank remote subtitle search results by relevance to the item's video code.
+ * MeiamSub.Thunder (迅雷) returns name-based fuzzy matches with arbitrary ordering —
+ * audit (2026-10) showed top results are frequently subs of DIFFERENT codes
+ * (e.g. kavr409/KAVR-429 subs for KAVR-495), so we float exact-code matches to the top.
+ * Returns { exact, related, hasCode } — original order preserved within groups,
+ * duplicates (same name+format) dropped.
+ */
+export function rankRemoteSubtitles(results = [], item = {}) {
+  const codes = extractVideoCodes(item);
+  const seen = new Set();
+  const scored = [];
+  (results || []).forEach((sub, i) => {
+    const name = String(sub?.Name || '');
+    const dedupKey = `${name.trim().toLowerCase()}|${sub?.Format || ''}`;
+    if (seen.has(dedupKey)) return;
+    seen.add(dedupKey);
+    let rank = 1;
+    if (codes.length > 0) {
+      rank = 2;
+      for (const [letters, digits] of codes) {
+        // 兼容 KAVR-495 / kavr495 / kavr_495 等写法
+        if (new RegExp(`${letters}[\\s._-]?${digits}`, 'i').test(name)) {
+          rank = 0;
+          break;
+        }
+      }
+    }
+    scored.push({ sub, rank, i });
+  });
+  scored.sort((a, b) => a.rank - b.rank || a.i - b.i);
+  return {
+    exact: scored.filter(s => s.rank === 0).map(s => s.sub),
+    related: scored.filter(s => s.rank !== 0).map(s => s.sub),
+    hasCode: codes.length > 0
+  };
+}
+
+/**
  * Select the best default subtitle stream if hardcoded Chinese subtitles are not present.
  */
 export function getDefaultSubtitleIndex(item, subtitleStreams = []) {

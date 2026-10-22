@@ -114,6 +114,8 @@ export default function App() {
   const [editingItem, setEditingItem] = useState(null);
   const [identifyingItem, setIdentifyingItem] = useState(null);
   const [modalPlayingItem, setModalPlayingItem] = useState(null);
+  const modalPlayingItemRef = useRef(null);
+  modalPlayingItemRef.current = modalPlayingItem;
   const [vrPlayingItem, setVrPlayingItem] = useState(null);
   const [detailItem, setDetailItem] = useState(null);
   const [showStatsModal, setShowStatsModal] = useState(false);
@@ -689,6 +691,31 @@ export default function App() {
   const winHistoryPushedRef = useRef(0);
   const ignoreWinPopRef = useRef(false);
   const closingViaPopRef = useRef(false);
+
+  // 安卓壳返回手势/按键的网页侧处理器：原生 dispatcher 调它，返回 'exit'
+  // 时原生才退出 app。语义与手机浏览器后退一致——关最新浮窗 > 关影院弹窗
+  // > 关多选层（触发其自身 popstate 流程）> 退出。浏览器端无人调用，零影响。
+  useEffect(() => {
+    window.__faradayHandleBack = () => {
+      if (window.__faradayLayerActive) {
+        window.history.back(); // 多选层的 pushState 条目走其自身 popstate 关闭流程
+        return 'consumed';
+      }
+      const wins = floatingWindowsRef.current;
+      if (wins.length > 0) {
+        const newest = [...wins].sort((a, b) => b.timestamp - a.timestamp)[0];
+        closingViaPopRef.current = true;
+        handleCloseFloatingWindow(newest.id);
+        return 'consumed';
+      }
+      if (modalPlayingItemRef.current) {
+        setModalPlayingItem(null);
+        return 'consumed';
+      }
+      return 'exit';
+    };
+    return () => { delete window.__faradayHandleBack; };
+  }, [handleCloseFloatingWindow]);
 
   useEffect(() => {
     const onPopState = () => {

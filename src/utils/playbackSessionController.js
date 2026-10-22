@@ -66,7 +66,8 @@ export class PlaybackSessionController {
     jellyfinClient = jellyfin,
     onStateChange = null,
     onError = null,
-    onAutoDirectFallback = null
+    onAutoDirectFallback = null,
+    onTranscodeSeekRestart = null
   } = {}) {
     // Each controller owns the credentials of the account that created it.
     this.jellyfin = jellyfinClient.auth
@@ -75,6 +76,8 @@ export class PlaybackSessionController {
     this.onStateChange = onStateChange;
     this.onError = onError;
     this.onAutoDirectFallback = onAutoDirectFallback;
+    // 跨缓冲转码 seek 重启流之前、video 尚未清空时同步触发（UI 可抓最后一帧做加载底图）
+    this.onTranscodeSeekRestart = onTranscodeSeekRestart;
 
     this.videoEl = null;
     this.itemId = null;
@@ -355,6 +358,11 @@ export class PlaybackSessionController {
     }
 
     // 跨缓冲区转码 Seek：需要让 Jellyfin 从目标点重新切片
+    if (this.onTranscodeSeekRestart) {
+      try {
+        this.onTranscodeSeekRestart();
+      } catch {}
+    }
     const currentSpeed = videoEl.playbackRate || 1;
     const isMuted = videoEl.muted || false;
     const volume = videoEl.volume || 1;

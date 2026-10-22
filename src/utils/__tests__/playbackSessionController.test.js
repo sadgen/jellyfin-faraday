@@ -271,6 +271,36 @@ describe('PlaybackSessionController', () => {
     expect(controller.hlsInstance?.config?.startPosition).toBe(1200);
   });
 
+  it('fires onTranscodeSeekRestart only before a cross-buffer transcode restart', async () => {
+    const onTranscodeSeekRestart = vi.fn();
+    controller.onTranscodeSeekRestart = onTranscodeSeekRestart;
+    controller.streamQuality = '4000000';
+    controller.playMethod = 'Transcode';
+    controller.itemId = 'item_400';
+    controller.playSessionId = 'sess_frame';
+
+    // 缓冲区内：原生定位，不重启流、不抓帧
+    mockVideo.buffered = createTimeRanges([[0, 50]]);
+    await controller.seek(25);
+    expect(onTranscodeSeekRestart).not.toHaveBeenCalled();
+    expect(mockVideo.currentTime).toBe(25);
+
+    // 原画直推：原生 seek，不抓帧
+    controller.streamQuality = 'direct';
+    controller.playMethod = 'DirectPlay';
+    mockVideo.buffered = createTimeRanges([[0, 20]]);
+    await controller.seek(9999);
+    expect(onTranscodeSeekRestart).not.toHaveBeenCalled();
+
+    // 跨缓冲区转码 seek：重启前抓最后一帧
+    controller.streamQuality = '4000000';
+    controller.playMethod = 'Transcode';
+    await controller.seek(1200);
+    vi.advanceTimersByTime(SESSION_STOP_DRAIN_MS + 1);
+    expect(onTranscodeSeekRestart).toHaveBeenCalledTimes(1);
+    expect(onTranscodeSeekRestart).toHaveBeenCalledWith();
+  });
+
   it('switches quality and stops previous transcode session', async () => {
     await controller.loadStream({
       itemId: 'item_300',

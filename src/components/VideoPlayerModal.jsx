@@ -97,6 +97,8 @@ export default function VideoPlayerModal({
   const [isPlaying, setIsPlaying] = useState(true);
   const [playbackSpeed, setPlaybackSpeed] = useState(() => playbackDefaults.speed || 1.0);
   const [isLoading, setIsLoading] = useState(true);
+  // 转码跨缓冲 seek 重启期间展示的最后一帧快照：替代海报底图，消除"像重新进片"的观感
+  const [seekFrameSnapshot, setSeekFrameSnapshot] = useState(null);
   const [hasError, setHasError] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [errorDetails, setErrorDetails] = useState('');
@@ -163,12 +165,34 @@ export default function VideoPlayerModal({
 
   // 统一播放会话控制器
   const sessionControllerRef = useRef(null);
+  // seek 重启前抓帧（回调在 controller 构造时注册，用 ref 转发避免闭包过期）
+  const captureSeekFrameRef = useRef(null);
+  const captureSeekFrame = useCallback(() => {
+    const videoEl = videoRef.current;
+    try {
+      if (!videoEl || !videoEl.videoWidth || !videoEl.videoHeight || videoEl.readyState < 2) {
+        setSeekFrameSnapshot(null);
+        return;
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = videoEl.videoWidth;
+      canvas.height = videoEl.videoHeight;
+      canvas.getContext('2d').drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+      setSeekFrameSnapshot(canvas.toDataURL('image/jpeg', 0.82));
+    } catch {
+      // 画布被跨域污染等场景抓帧失败：退回原海报遮罩
+      setSeekFrameSnapshot(null);
+    }
+  }, []);
+  captureSeekFrameRef.current = captureSeekFrame;
   if (!sessionControllerRef.current) {
     sessionControllerRef.current = new PlaybackSessionController({
       jellyfinClient: jellyfin,
+      onTranscodeSeekRestart: () => captureSeekFrameRef.current?.(),
       onError: (data) => {
         setHasError(true);
         setErrorMessage('视频加载失败，请重试');
+        setSeekFrameSnapshot(null);
         const parts = [];
         if (directDiagRef.current) parts.push(directDiagRef.current);
         parts.push(`HLS: ${data?.type || 'Error'}/${data?.details || 'Unknown'}${data?.response?.code ? ` (HTTP ${data.response.code})` : ''}`);
@@ -584,6 +608,7 @@ export default function VideoPlayerModal({
     setHasError(false);
     setErrorMessage('');
     setErrorDetails('');
+    setSeekFrameSnapshot(null);
     directDiagRef.current = '';
     setProgress(0);
     seekLockRef.current.release();
@@ -1038,7 +1063,20 @@ export default function VideoPlayerModal({
             </div>
           )}
 
-          {posterUrl && (
+          {seekFrameSnapshot ? (
+            <img
+              src={seekFrameSnapshot}
+              alt=""
+              data-seek-snapshot="1"
+              className={`absolute inset-0 w-full h-full pointer-events-none transition-opacity duration-150 ${
+                aspectMode === 'cover'
+                  ? 'object-cover'
+                  : aspectMode === 'fill'
+                    ? '[object-fit:fill]'
+                    : 'object-contain'
+              } ${flipH ? '-scale-x-100' : ''} ${isLoading ? 'opacity-100' : 'opacity-0'}`}
+            />
+          ) : posterUrl ? (
             <img
               src={posterUrl}
               alt=""
@@ -1046,7 +1084,7 @@ export default function VideoPlayerModal({
                 isLoading ? 'opacity-50 blur-md' : 'opacity-0'
               }`}
             />
-          )}
+          ) : null}
 
           <video
             ref={videoRef}
@@ -1069,6 +1107,7 @@ export default function VideoPlayerModal({
             onPlaying={() => {
               setIsLoading(false);
               setIsPlaying(true);
+              setSeekFrameSnapshot(null);
               syncSubtitleModes();
             }}
             onLoadedData={syncSubtitleModes}

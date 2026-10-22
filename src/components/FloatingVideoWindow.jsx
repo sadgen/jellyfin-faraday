@@ -478,6 +478,8 @@ export default function FloatingVideoWindow({
 
   const [playbackSpeed, setPlaybackSpeed] = useState(() => playbackDefaults.speed || 1.0);
   const [isLoading, setIsLoading] = useState(true);
+  // 转码跨缓冲 seek 重启期间展示的最后一帧快照：替代模糊封面，消除"像重新进片"的观感（与主播放窗同款）
+  const [seekFrameSnapshot, setSeekFrameSnapshot] = useState(null);
   const [hasError, setHasError] = useState(false);
   const [errorDetails, setErrorDetails] = useState('');
   const [smartStartToast, setSmartStartToast] = useState('');
@@ -598,11 +600,30 @@ export default function FloatingVideoWindow({
 
   // 统一播放会话控制器
   const sessionControllerRef = useRef(null);
+  // seek 重启前抓帧（回调在 controller 构造时注册，用 ref 转发避免闭包过期）
+  const captureSeekFrameRef = useRef(null);
+  const captureSeekFrame = useCallback(() => {
+    const videoEl = videoRef.current;
+    try {
+      // 视频无可绘帧（加载中被再次 seek / 连环快进）：保留上一次成功抓取的快照继续展示
+      if (!videoEl || !videoEl.videoWidth || !videoEl.videoHeight || videoEl.readyState < 2) return;
+      const canvas = document.createElement('canvas');
+      canvas.width = videoEl.videoWidth;
+      canvas.height = videoEl.videoHeight;
+      canvas.getContext('2d').drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+      setSeekFrameSnapshot(canvas.toDataURL('image/jpeg', 0.82));
+    } catch {
+      // 画布被跨域污染等场景抓帧失败：保留现有快照
+    }
+  }, []);
+  captureSeekFrameRef.current = captureSeekFrame;
   if (!sessionControllerRef.current) {
     sessionControllerRef.current = new PlaybackSessionController({
       jellyfinClient: jellyfin,
+      onTranscodeSeekRestart: () => captureSeekFrameRef.current?.(),
       onError: (data) => {
         setHasError(true);
+        setSeekFrameSnapshot(null);
         const parts = [];
         if (directDiagRef.current) parts.push(directDiagRef.current);
         parts.push(`HLS: ${data?.type || 'Error'}/${data?.details || 'Unknown'}${data?.response?.code ? ` (HTTP ${data.response.code})` : ''}`);
@@ -871,6 +892,7 @@ export default function FloatingVideoWindow({
     setIsLoading(true);
     setHasError(false);
     setErrorDetails('');
+    setSeekFrameSnapshot(null);
     directDiagRef.current = '';
     setProgress(0);
     setHoverScrubberTime(null);
@@ -1571,7 +1593,14 @@ export default function FloatingVideoWindow({
           </div>
         )}
 
-        {coverUrl && (
+        {seekFrameSnapshot ? (
+          <img
+            src={seekFrameSnapshot}
+            alt=""
+            data-seek-snapshot="1"
+            className={`absolute inset-0 w-full h-full pointer-events-none transition-opacity duration-150 object-contain ${flipH ? '-scale-x-100' : ''} ${isLoading ? 'opacity-100' : 'opacity-0'}`}
+          />
+        ) : coverUrl && !everPlayed ? (
           <img
             src={coverUrl}
             alt=""
@@ -1579,7 +1608,7 @@ export default function FloatingVideoWindow({
               isLoading ? 'opacity-60 blur-sm' : 'opacity-0'
             }`}
           />
-        )}
+        ) : null}
 
         <video
           ref={videoRef}
@@ -1605,6 +1634,7 @@ export default function FloatingVideoWindow({
             setIsLoading(false);
             setIsPlaying(true);
             setEverPlayed(true);
+            setSeekFrameSnapshot(null);
             syncSubtitleModes();
           }}
           onLoadedData={syncSubtitleModes}

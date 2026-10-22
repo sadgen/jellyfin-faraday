@@ -99,6 +99,8 @@ export default function VideoPlayerModal({
   const [isLoading, setIsLoading] = useState(true);
   // 转码跨缓冲 seek 重启期间展示的最后一帧快照：替代海报底图，消除"像重新进片"的观感
   const [seekFrameSnapshot, setSeekFrameSnapshot] = useState(null);
+  // seek 重启过的会话内压制海报（含抓帧失败场景：宁可黑底转圈也不闪"进片海报"），换片时才解除
+  const [posterSuppressed, setPosterSuppressed] = useState(false);
   const [hasError, setHasError] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [errorDetails, setErrorDetails] = useState('');
@@ -170,25 +172,26 @@ export default function VideoPlayerModal({
   const captureSeekFrame = useCallback(() => {
     const videoEl = videoRef.current;
     try {
-      if (!videoEl || !videoEl.videoWidth || !videoEl.videoHeight || videoEl.readyState < 2) {
-        setSeekFrameSnapshot(null);
-        return;
-      }
+      // 视频无可绘帧（加载中被再次 seek / 连环快进）：保留上一次成功抓取的快照继续展示，
+      // 不清空也不回退海报（海报已由 posterSuppressed 压制）
+      if (!videoEl || !videoEl.videoWidth || !videoEl.videoHeight || videoEl.readyState < 2) return;
       const canvas = document.createElement('canvas');
       canvas.width = videoEl.videoWidth;
       canvas.height = videoEl.videoHeight;
       canvas.getContext('2d').drawImage(videoEl, 0, 0, canvas.width, canvas.height);
       setSeekFrameSnapshot(canvas.toDataURL('image/jpeg', 0.82));
     } catch {
-      // 画布被跨域污染等场景抓帧失败：退回原海报遮罩
-      setSeekFrameSnapshot(null);
+      // 画布被跨域污染等场景抓帧失败：同上，保留现有快照
     }
   }, []);
   captureSeekFrameRef.current = captureSeekFrame;
   if (!sessionControllerRef.current) {
     sessionControllerRef.current = new PlaybackSessionController({
       jellyfinClient: jellyfin,
-      onTranscodeSeekRestart: () => captureSeekFrameRef.current?.(),
+      onTranscodeSeekRestart: () => {
+        setPosterSuppressed(true);
+        captureSeekFrameRef.current?.();
+      },
       onError: (data) => {
         setHasError(true);
         setErrorMessage('视频加载失败，请重试');
@@ -609,6 +612,7 @@ export default function VideoPlayerModal({
     setErrorMessage('');
     setErrorDetails('');
     setSeekFrameSnapshot(null);
+    setPosterSuppressed(false);
     directDiagRef.current = '';
     setProgress(0);
     seekLockRef.current.release();
@@ -1076,7 +1080,7 @@ export default function VideoPlayerModal({
                     : 'object-contain'
               } ${flipH ? '-scale-x-100' : ''} ${isLoading ? 'opacity-100' : 'opacity-0'}`}
             />
-          ) : posterUrl ? (
+          ) : posterUrl && !posterSuppressed ? (
             <img
               src={posterUrl}
               alt=""

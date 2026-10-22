@@ -19,7 +19,11 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [react()],
     define: {
-      __APP_VERSION__: JSON.stringify(pkg.version)
+      __APP_VERSION__: JSON.stringify(pkg.version),
+      // 每次构建唯一的构建号（YYYYMMDDHHMMSS）：线上排障时在控制台读
+      // window.__FARADAY_BUILD__ 即可判定浏览器实际加载的是哪份构建
+      // （生产 preview 无热刷新，防"改了没生效"误判）
+      __APP_BUILD_ID__: JSON.stringify(new Date().toISOString().replace(/\D/g, '').slice(0, 14))
     },
     server: {
       port: 5173,

@@ -101,6 +101,9 @@ export default function VideoPlayerModal({
   const [seekFrameSnapshot, setSeekFrameSnapshot] = useState(null);
   // seek 重启过的会话内压制海报（含抓帧失败场景：宁可黑底转圈也不闪"进片海报"），换片时才解除
   const [posterSuppressed, setPosterSuppressed] = useState(false);
+  // 真正播放过一次后，本会话任何加载状态都不再显示海报——
+  // 原画直推的快进走 onWaiting→isLoading，letterbox 黑边会透出模糊海报（"虚化的海报页面"），与是否转码无关
+  const [hasPlayedOnce, setHasPlayedOnce] = useState(false);
   const [hasError, setHasError] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [errorDetails, setErrorDetails] = useState('');
@@ -613,6 +616,7 @@ export default function VideoPlayerModal({
     setErrorDetails('');
     setSeekFrameSnapshot(null);
     setPosterSuppressed(false);
+    setHasPlayedOnce(false);
     directDiagRef.current = '';
     setProgress(0);
     seekLockRef.current.release();
@@ -1080,7 +1084,7 @@ export default function VideoPlayerModal({
                     : 'object-contain'
               } ${flipH ? '-scale-x-100' : ''} ${isLoading ? 'opacity-100' : 'opacity-0'}`}
             />
-          ) : posterUrl && !posterSuppressed ? (
+          ) : posterUrl && !posterSuppressed && !hasPlayedOnce ? (
             <img
               src={posterUrl}
               alt=""
@@ -1112,6 +1116,7 @@ export default function VideoPlayerModal({
               setIsLoading(false);
               setIsPlaying(true);
               setSeekFrameSnapshot(null);
+              setHasPlayedOnce(true);
               syncSubtitleModes();
             }}
             onLoadedData={syncSubtitleModes}

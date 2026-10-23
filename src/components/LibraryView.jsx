@@ -3313,7 +3313,6 @@ export default function LibraryView({
                               onToggleFavorite={handleToggleFavorite}
                               onTogglePlayed={handleTogglePlayed}
                               onOpenDetail={onOpenDetail}
-                    onOpenSeries={handleOpenSeries}
                               onOpenSeries={handleOpenSeries}
                               onOpenMetadataEditor={onOpenMetadataEditor}
                               onOpenIdentify={onOpenIdentify}

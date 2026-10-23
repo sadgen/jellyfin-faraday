@@ -12,7 +12,8 @@ export default function FloatingWindowsContainer({
   onBringToFront,
   onUpdateItem,
   onDeleteItem,
-  onSwitchItem
+  onSwitchItem,
+  onPlayingChange
 }) {
   if (!windows || windows.length === 0) return null;
 
@@ -33,6 +34,7 @@ export default function FloatingWindowsContainer({
             onUpdateItem={onUpdateItem}
             onDeleteItem={onDeleteItem}
             onSwitchItem={onSwitchItem}
+            onPlayingChange={onPlayingChange}
           />
         </div>
       ))}

@@ -133,3 +133,33 @@ export function calculateMaximizedStyle(videoAspect, chromeHeight) {
     height: availH
   };
 }
+
+/**
+ * 海报卡迷你浮窗：约与 trickplay 预览相仿的尺寸，锚定被点海报卡旁——
+ * 优先右侧，放不下翻左侧，再不行贴屏幕右缘；纵向钳制在页面可用区内。
+ * @param {{left:number,top:number,width:number,height:number}} anchorRect 海报卡矩形（视口坐标）
+ */
+export function calculateMiniStyle(anchorRect) {
+  if (typeof window === 'undefined' || !anchorRect) {
+    return { left: 12, top: 64, width: 380, height: 380 * 9 / 16 + 72 };
+  }
+  const padding = 12;
+  const gap = 10;
+  const headerOffset = 64;
+  const bottomOffset = 12;
+  const width = Math.min(420, Math.max(280, Math.round(window.innerWidth * 0.26)));
+  const height = Math.round(width * 9 / 16) + 72; // 视频区 + 头部/底栏 chrome
+  // 横向：优先卡片右侧（gap 间距），溢出屏幕翻左侧，再钳制进屏幕
+  let left = anchorRect.left + anchorRect.width + gap;
+  if (left + width > window.innerWidth - padding) {
+    left = anchorRect.left - gap - width;
+  }
+  if (left < padding) left = window.innerWidth - padding - width;
+  if (left < padding) left = padding;
+  // 纵向：与卡片顶对齐后钳制进可用区
+  let top = anchorRect.top - 8;
+  const maxTop = window.innerHeight - bottomOffset - height;
+  if (top > maxTop) top = maxTop;
+  if (top < headerOffset) top = headerOffset;
+  return { left: Math.round(left), top: Math.round(top), width, height };
+}

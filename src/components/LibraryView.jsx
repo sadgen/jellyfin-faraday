@@ -18,12 +18,13 @@ import CardContextMenu from './CardContextMenu';
 import ServerSwitchMenu from './ServerSwitchMenu';
 import SeriesPage from './SeriesPage';
 import {
-  Play, Star, Eye, Search,
+  Play, Pause, Images, Star, Eye, Search,
   Trash2, Folder, Film,
   ArrowUpDown, X, RefreshCw, Layers, LayoutGrid,
   Grid, List, MoreVertical, Calendar,
   Users, Tag, Check, ChevronRight, ChevronDown,
   SlidersHorizontal, Info, RotateCcw, History, Zap, ShieldAlert, Sparkles, Wand2, Shuffle, Settings } from 'lucide-react';
+import { nativePlayerBridge, isNativePlayerAvailable } from '../utils/nativePlayerBridge';
 
 const SUB_TABS = [
   { id: 'items', label: '影片', icon: Film },
@@ -115,7 +116,11 @@ const MediaCard = memo(function MediaCard({
   onDelete,
   onUpdateItem,
   onOpenSeries,
-  onOpenActionSheet
+  onOpenActionSheet,
+  onOpenMiniWindow,
+  onCloseMiniWindow,
+  onToggleMiniPause,
+  miniState
 }) {
   const [isHovered, setIsHovered] = useState(false);
   const [menuAnchor, setMenuAnchor] = useState(null);
@@ -237,6 +242,78 @@ const MediaCard = memo(function MediaCard({
     setAutoPlaying(true);
   }, [durationSec]);
 
+  // ============ 右下角三按钮：框内播放视频 / 框内 trickplay / 恢复 ============
+  // inlineState：背板（缩略图）卡的框内视频状态。桌面浏览器直接播直连流；
+  // 安卓壳走原生会话（镜像 rect 驱动 SurfaceView 变换到卡片矩形，零原生改动）
+  const [inlineState, setInlineState] = useState(null); // null | 'playing' | 'paused'
+  const inlineVideoRef = useRef(null);
+  const inlineStateRef = useRef(null);
+  inlineStateRef.current = inlineState;
+
+  const startInlineVideo = useCallback(() => {
+    if (isNativePlayerAvailable()) {
+      const mirrorEl = inlineVideoRef.current;
+      if (!mirrorEl) return;
+      setInlineState('playing');
+      nativePlayerBridge.loadStream(
+        { jellyfin, videoEl: mirrorEl },
+        {
+          itemId: item.Id,
+          mediaSourceId: item.Id,
+          playMethod: 'DirectPlay',
+          streamUrl: jellyfin.getStreamUrl(item.Id),
+          initialSeekTime: 0,
+          floating: true
+        }
+      );
+    } else {
+      setInlineState('playing'); // <video autoPlay> 由 JSX 渲染驱动
+    }
+  }, [item]);
+
+  const toggleInlinePause = useCallback(() => {
+    if (isNativePlayerAvailable()) {
+      const pause = inlineStateRef.current === 'playing';
+      nativePlayerBridge.setPaused(item.Id, pause);
+      setInlineState(pause ? 'paused' : 'playing');
+    } else {
+      const v = inlineVideoRef.current;
+      if (!v) return;
+      if (v.paused) { v.play().catch(() => {}); setInlineState('playing'); }
+      else { v.pause(); setInlineState('paused'); }
+    }
+  }, [item.Id]);
+
+  const stopInlineVideo = useCallback(() => {
+    if (isNativePlayerAvailable()) {
+      nativePlayerBridge.notifyClosed(item.Id); // close(floating) → 原生会话结束
+    } else {
+      const v = inlineVideoRef.current;
+      if (v) {
+        try { v.pause(); } catch {}
+        v.removeAttribute('src');
+        try { v.load(); } catch {}
+      }
+    }
+    setInlineState(null);
+  }, [item.Id]);
+
+  // 浏览器模式起播兜底：无手势上下文时 autoplay 可能被策略拦下 → 先试静音重播，
+  // 仍失败则标记暂停态（用户点 ▶ 时有真实手势即可播）
+  useEffect(() => {
+    if (inlineState !== 'playing' || isNativePlayerAvailable()) return;
+    const v = inlineVideoRef.current;
+    if (!v) return;
+    const t = setTimeout(() => {
+      if (!v.paused) return;
+      v.muted = true;
+      v.play().catch(() => setInlineState('paused'));
+    }, 250);
+    return () => clearTimeout(t);
+  }, [inlineState]);
+
+  // 框内 trickplay 播放/暂停（复用右键自动预览状态机；暂停=冻结当前帧）
+
   const handleCardClick = useCallback((e) => {
     if (isLongPressActiveRef.current) {
       isLongPressActiveRef.current = false;
@@ -254,9 +331,14 @@ const MediaCard = memo(function MediaCard({
       (onOpenSeries || onOpenDetail)?.(item);
       return;
     }
+    // 框内视频播放中：点卡片 = 暂停/恢复（避免同条目再开浮窗引发会话搬家）
+    if (inlineStateRef.current) {
+      toggleInlinePause();
+      return;
+    }
     setAutoPlaying(false); // 起播正片后停掉卡片上的自动预览
     onPlay(item, trickplayTime);
-  }, [isSelecting, isSeries, item, onOpenDetail, onPlay, onToggleSelect, trickplayTime]);
+  }, [isSelecting, isSeries, item, onOpenDetail, onPlay, onToggleSelect, trickplayTime, toggleInlinePause]);
 
   // 中键点击海报：从头开始播放（startSecond=0 为显式起播点，忽略续播/智能跳过；
   // 剧集由上层解析为 NextUp/第一集后同样从 0 起播）
@@ -404,6 +486,51 @@ const MediaCard = memo(function MediaCard({
     io.observe(cardRef.current);
     return () => io.disconnect();
   }, []);
+
+  const toggleCardTrickplay = useCallback(() => {
+    if (autoPlayingRef.current) {
+      setAutoPlaying(false);
+    } else {
+      setTrickplayTime((t) => (t === null ? 0 : t));
+      setAutoPlaying(true);
+    }
+  }, []);
+
+  // 恢复静态：停视频 / 停 trickplay / 关迷你窗
+  const restoreCardStatic = useCallback(() => {
+    if (inlineStateRef.current) stopInlineVideo();
+    setAutoPlaying(false);
+    setTrickplayTime(null);
+    if (miniState?.open && onCloseMiniWindow) onCloseMiniWindow(item.Id);
+  }, [item.Id, miniState, onCloseMiniWindow, stopInlineVideo]);
+
+  // 海报卡①：开迷你浮窗（桌面锚定卡片旁）；手机直接走普通浮窗
+  // 背板卡①：框内视频播放/暂停
+  const handlePlayButton = useCallback((e) => {
+    e.stopPropagation();
+    if (inlineStateRef.current) {
+      toggleInlinePause();
+      return;
+    }
+    if (isBackdrop) {
+      startInlineVideo();
+      return;
+    }
+    if (miniState?.open) {
+      if (onToggleMiniPause) onToggleMiniPause(item.Id);
+      return;
+    }
+    if (isMobileViewport || !onOpenMiniWindow) {
+      setAutoPlaying(false);
+      onPlay(item, trickplayTime);
+      return;
+    }
+    const rect = cardRef.current?.getBoundingClientRect();
+    if (rect && onOpenMiniWindow) onOpenMiniWindow(item, rect, trickplayTime);
+  }, [isBackdrop, isMobileViewport, item, miniState, onOpenMiniWindow, onToggleMiniPause, onPlay, startInlineVideo, toggleInlinePause, trickplayTime]);
+
+  // 框内播放时点卡片 = 暂停/恢复（避免同条目再开浮窗引发会话搬家）
+
 
   // Trickplay 兜底封面：仅当条目元数据完全没有封面图 tag（Primary/Thumb/Backdrop 均无，
   // 典型如 ScreenGrabber 失败的自制视频）时才用 Trickplay 第 0 帧垫底；
@@ -585,8 +712,8 @@ const MediaCard = memo(function MediaCard({
           />
         )}
 
-        {/* BACKDROP MODE: Inline inside 16:9 Card */}
-        {isBackdrop && tpStyle && (
+        {/* BACKDROP MODE: Inline inside 16:9 Card（框内视频播放时隐藏雪碧图覆盖层） */}
+        {isBackdrop && tpStyle && !inlineState && (
           <div className="absolute inset-0 bg-black flex items-center justify-center overflow-hidden pointer-events-none">
             <div
               className={`relative shadow-2xl bg-center bg-no-repeat ${
@@ -607,10 +734,84 @@ const MediaCard = memo(function MediaCard({
         {/* Bottom Timeline Progress Line on Hover */}
         {tpStyle && (
           <div className="absolute bottom-0 inset-x-0 h-1.5 bg-white/20 z-20 pointer-events-none">
-            <div 
+            <div
               className="h-full bg-cyan-400 shadow-sm shadow-cyan-400 transition-all duration-75"
               style={{ width: `${hoverPercent * 100}%` }}
             />
+          </div>
+        )}
+
+        {/* 框内视频（背板卡）：桌面浏览器=直连流直接播；安卓壳=镜像元素，
+            原生槽位系统把 SurfaceView 变换到本矩形（零原生改动）。
+            空闲时 display:none（rect=0，原生槽位循环自动跳过） */}
+        {isBackdrop && (
+          <video
+            ref={inlineVideoRef}
+            src={!isNativePlayerAvailable() ? jellyfin.getStreamUrl(item.Id) : undefined}
+            autoPlay={inlineState === 'playing' && !isNativePlayerAvailable()}
+            playsInline
+            controls={false}
+            onEnded={stopInlineVideo}
+            className={`absolute inset-0 w-full h-full object-contain bg-black z-10 ${inlineState ? '' : 'hidden'}`}
+          />
+        )}
+
+        {/* 右下角三按钮：框内播放视频 / 框内 trickplay / 恢复。
+            桌面 hover 显示、移动端常显；激活态恒显。容器拦截全部冒泡
+            （防连带长按多选 / 触摸擦洗 / 起播正片 / 右键预览） */}
+        {!isSeries && (
+          <div
+            className={`absolute bottom-2 right-2 z-40 flex items-center gap-1 transition-opacity duration-200 opacity-100 md:opacity-0 md:group-hover:opacity-100 ${
+              (inlineState || autoPlaying || trickplayTime !== null || miniState?.open) ? '!opacity-100' : ''
+            }`}
+            onClick={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
+            onPointerUp={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
+            onTouchEnd={(e) => e.stopPropagation()}
+            onContextMenu={(e) => e.stopPropagation()}
+            onMouseMove={(e) => e.stopPropagation()}
+          >
+            {/* ① 框内视频：背板卡=框内播放；海报卡=迷你浮窗（手机=普通浮窗）；播放中=暂停/恢复 */}
+            <button
+              onClick={handlePlayButton}
+              className={`p-1.5 rounded-lg backdrop-blur-md border transition ${
+                (inlineState || miniState?.open)
+                  ? 'bg-cyan-500/90 border-cyan-300 text-slate-950 shadow-lg'
+                  : 'bg-black/70 border-white/10 text-gray-300 hover:text-cyan-300'
+              }`}
+              title={
+                isBackdrop
+                  ? (inlineState === 'playing' ? '暂停框内视频' : inlineState === 'paused' ? '继续框内视频' : '在框内播放视频')
+                  : (miniState?.open ? (miniState.paused ? '继续播放' : '暂停') : '弹窗播放视频')
+              }
+            >
+              {(inlineState === 'playing' || (miniState?.open && !miniState.paused)) ? <Pause size={14} /> : <Play size={14} />}
+            </button>
+
+            {/* ② 框内 trickplay（无清单/框内视频播放中禁用；播放中变暂停） */}
+            <button
+              onClick={(e) => { e.stopPropagation(); toggleCardTrickplay(); }}
+              disabled={!tpInfo.hasTrickplay || !!inlineState}
+              className={`p-1.5 rounded-lg backdrop-blur-md border transition ${
+                autoPlaying ? 'bg-cyan-500/90 border-cyan-300 text-slate-950 shadow-lg' : 'bg-black/70 border-white/10 text-gray-300 hover:text-cyan-300'
+              } ${(!tpInfo.hasTrickplay || inlineState) ? 'opacity-40 cursor-not-allowed' : ''}`}
+              title={autoPlaying ? '暂停 trickplay' : '框内播放 trickplay'}
+            >
+              {autoPlaying ? <Pause size={14} /> : <Images size={14} />}
+            </button>
+
+            {/* ③ 恢复静态海报/缩略图（仅在播放/预览/迷你窗时出现） */}
+            {(inlineState || autoPlaying || trickplayTime !== null || miniState?.open) && (
+              <button
+                onClick={(e) => { e.stopPropagation(); restoreCardStatic(); }}
+                className="p-1.5 rounded-lg bg-black/70 border border-white/10 text-gray-300 hover:text-cyan-300 backdrop-blur-md transition"
+                title="恢复海报 / 缩略图"
+              >
+                <RotateCcw size={14} />
+              </button>
+            )}
           </div>
         )}
 
@@ -732,29 +933,30 @@ const MediaCard = memo(function MediaCard({
                 <RefreshCw size={14} />
               </button>
             )}
-          </div>
 
-          <div className="relative">
-            <button
-              data-contextmenu-trigger
-              onClick={(e) => {
-                e.stopPropagation();
-                if (menuAnchor) {
-                  setMenuAnchor(null); // 再次点击触发按钮 = 关闭菜单
-                  return;
-                }
-                if (isMobileViewport && onOpenActionSheet) {
-                  onOpenActionSheet(item);
-                } else {
-                  const rect = e.currentTarget.getBoundingClientRect();
-                  setMenuAnchor({ left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom });
-                }
-              }}
-              className="p-1.5 rounded-lg bg-black/70 hover:bg-black/90 border border-white/10 text-gray-300 hover:text-white backdrop-blur-md transition"
-              title="更多操作"
-            >
-              <MoreVertical size={14} />
-            </button>
+            {/* 更多操作（原右下角，为三播放按钮腾位并入左侧组） */}
+            <div className="relative">
+              <button
+                data-contextmenu-trigger
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (menuAnchor) {
+                    setMenuAnchor(null); // 再次点击触发按钮 = 关闭菜单
+                    return;
+                  }
+                  if (isMobileViewport && onOpenActionSheet) {
+                    onOpenActionSheet(item);
+                  } else {
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    setMenuAnchor({ left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom });
+                  }
+                }}
+                className="p-1.5 rounded-lg bg-black/70 hover:bg-black/90 border border-white/10 text-gray-300 hover:text-white backdrop-blur-md transition"
+                title="更多操作"
+              >
+                <MoreVertical size={14} />
+              </button>
+            </div>
           </div>
         </div>
 
@@ -1118,7 +1320,11 @@ export default function LibraryView({
   onLogout,
   onFilteredItemsChange,
   isRefreshing,
-  hasFloatingWindows = false
+  hasFloatingWindows = false,
+  onOpenMiniWindow,
+  onCloseMiniWindow,
+  onToggleMiniPause,
+  miniWindows = []
 }) {
   // 子标签页全局记忆（切换媒体库时保持不变），默认影片视图
   const [activeSubTab, setActiveSubTab] = useState(() => {
@@ -2917,6 +3123,10 @@ export default function LibraryView({
                 viewLayout={viewLayout}
                 isMobileViewport={isMobileViewport}
                 belowFloatingWindows={hasFloatingWindows}
+                miniState={(miniWindows || []).find(w => w.item.Id === item.Id) ? { open: true, paused: !!miniWindows.find(w => w.item.Id === item.Id).cardPaused } : null}
+                onOpenMiniWindow={onOpenMiniWindow}
+                onCloseMiniWindow={onCloseMiniWindow}
+                onToggleMiniPause={onToggleMiniPause}
                 onPlay={onPlaySingleItem}
                 onToggleFavorite={handleToggleFavorite}
                 onTogglePlayed={handleTogglePlayed}
@@ -3130,6 +3340,10 @@ export default function LibraryView({
                               isSelecting={isSelecting}
                               isMobileViewport={isMobileViewport}
                               belowFloatingWindows={hasFloatingWindows}
+                miniState={(miniWindows || []).find(w => w.item.Id === item.Id) ? { open: true, paused: !!miniWindows.find(w => w.item.Id === item.Id).cardPaused } : null}
+                onOpenMiniWindow={onOpenMiniWindow}
+                onCloseMiniWindow={onCloseMiniWindow}
+                onToggleMiniPause={onToggleMiniPause}
                               onToggleSelect={handleToggleSelect}
                               onPlay={onPlaySingleItem}
                               onPlayModal={onPlayModal}
@@ -3671,6 +3885,10 @@ export default function LibraryView({
                     isSelecting={isSelecting}
                     isMobileViewport={isMobileViewport}
                     belowFloatingWindows={hasFloatingWindows}
+                miniState={(miniWindows || []).find(w => w.item.Id === item.Id) ? { open: true, paused: !!miniWindows.find(w => w.item.Id === item.Id).cardPaused } : null}
+                onOpenMiniWindow={onOpenMiniWindow}
+                onCloseMiniWindow={onCloseMiniWindow}
+                onToggleMiniPause={onToggleMiniPause}
                     onToggleSelect={handleToggleSelect}
                     onPlay={onPlaySingleItem}
                     onPlayModal={onPlayModal}

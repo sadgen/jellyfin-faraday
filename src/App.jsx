@@ -11,6 +11,7 @@ import { sortMediaItems } from './utils/mediaSorter';
 import { getPlaybackDefaults, setPlaybackDefaults } from './utils/playbackDefaults';
 import { saveAccount } from './utils/accountStore';
 import { suppressPopOnce } from './utils/backSentinel';
+import { calculateMiniStyle } from './utils/windowLayout';
 import LibraryView from './components/LibraryView';
 import FloatingWindowsContainer from './components/FloatingWindowsContainer';
 import LoginModal from './components/LoginModal';
@@ -401,6 +402,55 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mediaItems]);
 
+  // ==================== 海报卡迷你浮窗（媒体库卡片右下角播放按钮） ====================
+  // 独立于常规三窗系统（slotIndex 100+ 序列，customLayout 定尺寸锚海报卡旁），
+  // 互不挤占槽位；最多 2 个，超出逐出最旧。
+  const [miniWindows, setMiniWindows] = useState([]);
+  const miniSeqRef = useRef(0);
+
+  const handleOpenMiniWindow = useCallback((item, anchorRect, startSecond = null) => {
+    if (!item?.Id) return;
+    // 该条目已在常规浮窗播放：不另开迷你窗（同条目双会话会被原生互斥顶掉），
+    // 重定位到既有浮窗
+    if (floatingWindowsRef.current.some(w => w.item.Id === item.Id)) {
+      handleOpenFloatingWindow(item, startSecond);
+      return;
+    }
+    setMiniWindows(prev => {
+      if (prev.some(w => w.item.Id === item.Id)) return prev; // 已开不重复
+      const win = {
+        id: `mini-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        slotIndex: 100 + (miniSeqRef.current++),
+        item,
+        startSecond,
+        timestamp: Date.now(),
+        mini: true,
+        customLayout: calculateMiniStyle(anchorRect)
+      };
+      const next = [...prev, win];
+      return next.length > 2 ? next.slice(1) : next; // 逐出最旧
+    });
+  }, []);
+
+  const handleCloseMiniWindowByItem = useCallback((itemId) => {
+    setMiniWindows(prev => prev.filter(w => w.item.Id !== itemId));
+  }, []);
+
+  const handleCloseMiniWindowById = useCallback((winId) => {
+    setMiniWindows(prev => prev.filter(w => w.id !== winId));
+  }, []);
+
+  // 卡片按钮①的暂停/恢复：翻窗口记录的 cardPaused，FloatingVideoWindow
+  // 监听该字段驱动播放；窗内 ⏯ 的实际播放状态经 onPlayingChange 回写保持同步
+  const handleToggleMiniPause = useCallback((itemId) => {
+    setMiniWindows(prev => prev.map(w => w.item.Id === itemId ? { ...w, cardPaused: !(w.cardPaused === true) } : w));
+  }, []);
+
+  const handleMiniPlayingChange = useCallback((itemId, playing) => {
+    setMiniWindows(prev => prev.map(w => w.item.Id === itemId ? { ...w, cardPaused: !playing } : w));
+  }, []);
+
+
   // 影院/VR Modal 上一个·下一个：合并查找域（mediaItems ∪ floatingWindows），
   // 悬浮窗来源的条目不在 mediaItems 时也能定位相邻条目
   const modalNavPool = useMemo(() => {
@@ -691,10 +741,12 @@ export default function App() {
   const winHistoryPushedRef = useRef(0);
   const ignoreWinPopRef = useRef(false);
   const closingViaPopRef = useRef(false);
+  const miniWindowsRef = useRef([]);
+  useEffect(() => { miniWindowsRef.current = miniWindows; }, [miniWindows]);
 
   // 安卓壳返回手势/按键的网页侧处理器：原生 dispatcher 调它，返回 'exit'
-  // 时原生才退出 app。语义与手机浏览器后退一致——关最新浮窗 > 关影院弹窗
-  // > 关多选层（触发其自身 popstate 流程）> 退出。浏览器端无人调用，零影响。
+  // 时原生才退出 app。语义与手机浏览器后退一致——关最新浮窗 > 关迷你窗 >
+  // 关影院弹窗 > 关多选层（触发其自身 popstate 流程）> 退出。浏览器端无人调用，零影响。
   useEffect(() => {
     window.__faradayHandleBack = () => {
       if (window.__faradayLayerActive) {
@@ -706,6 +758,12 @@ export default function App() {
         const newest = [...wins].sort((a, b) => b.timestamp - a.timestamp)[0];
         closingViaPopRef.current = true;
         handleCloseFloatingWindow(newest.id);
+        return 'consumed';
+      }
+      const minis = miniWindowsRef.current;
+      if (minis.length > 0) {
+        const newestMini = [...minis].sort((a, b) => b.timestamp - a.timestamp)[0];
+        handleCloseMiniWindowById(newestMini.id);
         return 'consumed';
       }
       if (modalPlayingItemRef.current) {
@@ -1021,6 +1079,10 @@ export default function App() {
             onLogout={handleLogout}
             isRefreshing={isLoading}
             hasFloatingWindows={floatingWindows.length > 0}
+            onOpenMiniWindow={handleOpenMiniWindow}
+            onCloseMiniWindow={handleCloseMiniWindowByItem}
+            onToggleMiniPause={handleToggleMiniPause}
+            miniWindows={miniWindows}
           />
         </div>
 
@@ -1038,6 +1100,23 @@ export default function App() {
           onUpdateItem={handleUpdateItem}
           onDeleteItem={handleDeleteItem}
           onSwitchItem={handleSwitchWindowItem}
+        />
+
+        {/* 海报卡迷你浮窗（媒体库卡片播放按钮；独立于常规三窗系统） */}
+        <FloatingWindowsContainer
+          windows={miniWindows}
+          frontWindowId={null}
+          onCloseWindow={handleCloseMiniWindowById}
+          onSkipWindow={handleCloseMiniWindowById}
+          onExpandWindow={(item) => setModalPlayingItem(item)}
+          onMaximizeWindow={() => {}}
+          onExclusiveWindow={() => {}}
+          onCropChangeWindow={() => {}}
+          onBringToFront={() => {}}
+          onUpdateItem={handleUpdateItem}
+          onDeleteItem={handleDeleteItem}
+          onSwitchItem={() => {}}
+          onPlayingChange={handleMiniPlayingChange}
         />
 
 

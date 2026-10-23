@@ -71,7 +71,8 @@ export default function FloatingVideoWindow({
   onBringToFront,
   onUpdateItem,
   onDeleteItem,
-  onSwitchItem
+  onSwitchItem,
+  onPlayingChange
 }) {
   const { id, slotIndex, item } = windowData;
   // 铺满模式：本窗放大到页面可用区域最大（点击窗内铺满按钮触发，同时关闭其他浮窗）
@@ -92,7 +93,7 @@ export default function FloatingVideoWindow({
   const footerRef = useRef(null);
 
   // Initialize position and size using exact Tampermonkey slot formula
-  const [layout, setLayout] = useState(() => isMaximized ? calculateMaximizedStyle(16 / 9, windowData.chromeH) : calculateSlotStyle(slotIndex));
+  const [layout, setLayout] = useState(() => windowData.customLayout || (isMaximized ? calculateMaximizedStyle(16 / 9, windowData.chromeH) : calculateSlotStyle(slotIndex)));
   const [isDragging, setIsDragging] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
   const isCustomPositionRef = useRef(false);
@@ -337,6 +338,8 @@ export default function FloatingVideoWindow({
 
   // Update layout when slotIndex changes (window promotion / shifting)
   useEffect(() => {
+    // 迷你窗：几何唯一事实源是 customLayout（锚定海报卡），槽位变化不参与
+    if (windowData.mini) return;
     if (isMaximized) {
       // chromeH 在点击铺满时已实测传入，几何一次性同步算出
       isCustomPositionRef.current = false;
@@ -360,6 +363,7 @@ export default function FloatingVideoWindow({
 
   useEffect(() => {
     const handleResize = () => {
+      if (windowData.mini) return;
       if (isMaximized) {
         setLayout(calculateMaximizedStyle(videoAspectRef.current, windowData.chromeH));
       } else if (cropFillRef.current) {
@@ -381,6 +385,7 @@ export default function FloatingVideoWindow({
 
   // 三屏取中开启期间视频比例变化（HLS 渐进加载/切档/换片）：按最新比例重算竖屏几何
   useEffect(() => {
+    if (windowData.mini) return;
     if (!cropThirdRef.current || isMaximized || isCustomPositionRef.current) return;
     if (cropFillRef.current) {
       setLayout(computeCropFillLayout());
@@ -466,7 +471,7 @@ export default function FloatingVideoWindow({
   // 晋升主窗：slotIndex 变为 0 时画面若处于暂停则自动起播（无论是暂停起播还是用户手动暂停的副窗，
   // 规则：主窗无论怎么打开——晋升或点击——都是播放；已在播的主窗不受影响）
   useEffect(() => {
-    if (slotIndex === 0) {
+    if (slotIndex === 0 && !windowData.mini) {
       const v = videoRef.current;
       if (v && v.paused) {
         startPausedRef.current = false;
@@ -475,6 +480,19 @@ export default function FloatingVideoWindow({
       }
     }
   }, [slotIndex]);
+
+  // 海报卡迷你窗：卡片按钮的暂停/恢复经 App 侧 cardPaused 字段下发（⏯ 亦可反向经
+  // onPlayingChange 回写卡片按钮图标）
+  useEffect(() => {
+    if (typeof windowData.cardPaused !== 'boolean') return;
+    if (windowData.cardPaused === isPlaying) togglePlay();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [windowData.cardPaused]);
+
+  // 播放状态上报（卡片按钮图标）：isPlaying 变化即回写
+  useEffect(() => {
+    onPlayingChange?.(item?.Id, isPlaying);
+  }, [isPlaying, item?.Id, onPlayingChange]);
 
   const [playbackSpeed, setPlaybackSpeed] = useState(() => playbackDefaults.speed || 1.0);
   const [isLoading, setIsLoading] = useState(true);
@@ -1529,6 +1547,7 @@ export default function FloatingVideoWindow({
   return (
     <div
       ref={containerRef}
+      data-floating-item={item?.Id}
       onMouseDown={handleContainerMouseDown}
       onWheel={handleWheel}
       onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}

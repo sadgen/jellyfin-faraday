@@ -313,21 +313,18 @@ class NativePlayerBridge {
           }
           node = node.parentElement;
         }
-        // 铺满/取中铺满的 scrubber 预览锚在进度条上方、落进视频矩形——
-        // 原生视频浮层会盖住它。上报 bottomInset 让原生把视频底部收缩
-        // 让出预览区（window 模式预览挂窗口外沿，无重叠，恒 0）。
-        // 注意：此机制只服务播放器内的擦洗预览；媒体库卡片框内视频
-        // 不许接入（缩视频让位的方案已被用户否决）
-        let bottomInset = 0;
-        const pv = document.querySelector('[data-native-overlap]');
-        if (pv) {
+        // 擦洗预览（播放器 scrubber / 卡片框内预览）在网页层、位于视频
+        // surface 之下，被原生画面盖住。预览元素打 data-native-overlap，
+        // 槽位循环检测到与视频矩形相交时上报 dim<1——原生把视频调半透明，
+        // 预览透出=「预览覆盖在视频上」（旧 bottomInset 缩视频方案已否决废弃）
+        let dim = 1;
+        for (const pv of document.querySelectorAll('[data-native-overlap]')) {
           const pr = pv.getBoundingClientRect();
           const hOverlap = pr.left < r.right && pr.right > r.left;
-          if (hOverlap && pr.top < r.bottom) {
-            bottomInset = Math.min(
-              Math.max(0, r.bottom - pr.top + 8),
-              r.height * 0.45
-            );
+          const vOverlap = pr.top < r.bottom && pr.bottom > r.top;
+          if (hOverlap && vOverlap) {
+            dim = 0.3;
+            break;
           }
         }
         slots.push({
@@ -336,7 +333,7 @@ class NativePlayerBridge {
           y: r.top,
           w: r.width,
           h: r.height,
-          bottomInset,
+          dim,
           fit: cs.objectFit || 'contain',
           objectPosition,
           flipH,

@@ -247,6 +247,9 @@ const MediaCard = memo(function MediaCard({
   const inlineVideoRef = useRef(null);
   const inlineStateRef = useRef(null);
   inlineStateRef.current = inlineState;
+  // 框内视频擦洗松手 seek 要读「此刻」的预览时间（useCallback 闭包会陈旧）
+  const trickplayTimeRef = useRef(null);
+  trickplayTimeRef.current = trickplayTime;
 
   const startInlineVideo = useCallback(() => {
     if (isNativePlayerAvailable()) {
@@ -354,6 +357,8 @@ const MediaCard = memo(function MediaCard({
   }, []);
 
   const handleCoverMouseMove = useCallback((e) => {
+    // 框内视频播放中不弹悬停预览（滑动擦洗预览仍可用，见 touch handlers）
+    if (inlineStateRef.current) return;
     // 自动播放中鼠标移动 = 直接跳转定位，定时器从新位置继续逐帧前进
     const target = e.currentTarget;    if (!target) return;
     const rect = target.getBoundingClientRect();
@@ -389,10 +394,13 @@ const MediaCard = memo(function MediaCard({
       const dx = touch.clientX - g.startX;
       const dy = touch.clientY - g.startY;
       if (Math.hypot(dx, dy) < 10) {
-        // 点按：维持原行为（预览落在触点，供点击按位置起播）
-        setHoverPercent(rawPercent);
-        setTrickplayTime(durationSec * rawPercent);
-        setIsNearTop(rect.top < 240);
+        // 点按：维持原行为（预览落在触点，供点击按位置起播）；
+        // 框内视频播放中不弹预览（点按=暂停/恢复）
+        if (!inlineStateRef.current) {
+          setHoverPercent(rawPercent);
+          setTrickplayTime(durationSec * rawPercent);
+          setIsNearTop(rect.top < 240);
+        }
         return;
       }
       if (Math.abs(dy) > Math.abs(dx)) {
@@ -427,14 +435,27 @@ const MediaCard = memo(function MediaCard({
   }, [durationSec, item]);
 
   const handleCoverTouchEnd = useCallback(() => {
+    const wasScrubbing = touchScrubRef.current.scrubbing;
     touchScrubRef.current = { started: false, scrubbing: false, canceled: false, startX: 0, startY: 0, startPercent: 0 };
     // 自动播放中松手：保留擦洗到位的时间，逐帧前进从该处继续
     // （清空会让自动播放下一拍从 0 重来 = 擦洗后跳回开头）
     if (autoPlayingRef.current) return;
+    // 框内视频播放中擦洗松手 = 把视频 seek 到擦洗位置（对齐浮窗「松手才 seek」）
+    if (inlineStateRef.current && wasScrubbing && trickplayTimeRef.current != null) {
+      const t = trickplayTimeRef.current;
+      if (Number.isFinite(t) && t > 0) {
+        if (isNativePlayerAvailable()) {
+          nativePlayerBridge.seek(item.Id, t);
+        } else {
+          const v = inlineVideoRef.current;
+          if (v) { try { v.currentTime = t; } catch {} }
+        }
+      }
+    }
     // 松手立即收起预览（无延迟）
     setTrickplayTime(null);
     setHoverPercent(0);
-  }, []);
+  }, [item.Id]);
 
   const handleCoverMouseLeave = useCallback(() => {
     if (rafIdRef.current) {
@@ -717,9 +738,14 @@ const MediaCard = memo(function MediaCard({
           />
         )}
 
-        {/* BACKDROP MODE: Inline inside 16:9 Card（框内视频播放时隐藏雪碧图覆盖层） */}
-        {isBackdrop && tpStyle && !inlineState && (
-          <div className="absolute inset-0 bg-black flex items-center justify-center overflow-hidden pointer-events-none">
+        {/* BACKDROP MODE: Inline inside 16:9 Card。框内视频播放中同样渲染
+            （=擦洗预览：滑动驱动 trickplayTime；data-native-overlap 让原生
+            视频半透明透出本层，松手 seek 后 trickplayTime 清空、本层卸载） */}
+        {isBackdrop && tpStyle && (
+          <div
+            data-native-overlap={inlineState ? '1' : undefined}
+            className="absolute inset-0 bg-black flex items-center justify-center overflow-hidden pointer-events-none z-20"
+          >
             <div
               className={`relative shadow-2xl bg-center bg-no-repeat ${
                 tpInfo.isVertical ? 'h-full' : 'w-full aspect-video'

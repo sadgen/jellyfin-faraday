@@ -173,10 +173,33 @@ export function preloadTrickplaySprite(imageUrl) {
   img.src = imageUrl;
 }
 
+// 整片预载走低并发队列：同源 HTTP/1.1 连接池只有 6 条，不限流时新片
+// MISS 风暴会占满连接池，把视频流/API/已缓存图的请求全部堵在队列里
+// （表现为：滑到未缓存帧后，连已缓存帧也显示不出来，直到整批下完）。
+// 2 并发在慢链路上总吞吐不变（带宽才是瓶颈），但随时留出余量通道。
+const PRELOAD_CONCURRENCY = 2;
+const preloadQueue = [];
+let preloadActive = 0;
+
+function pumpPreloadQueue() {
+  while (preloadActive < PRELOAD_CONCURRENCY && preloadQueue.length) {
+    const url = preloadQueue.shift();
+    if (spriteCache.has(url)) continue;
+    spriteCache.add(url);
+    preloadActive++;
+    const img = new Image();
+    const done = () => { preloadActive--; pumpPreloadQueue(); };
+    img.onload = done;
+    img.onerror = done;
+    img.src = url;
+  }
+}
+
 /**
  * 整片雪碧图预热（jellow「缩略图全部预切到内存」的 web 等价）：
  * 开窗时把当前条目的全部 Trickplay 分块图用 Image 预载进浏览器缓存，
  * 滑动 seek 时缩略图零网络等待。上限 40 张防超长片刷爆缓存。
+ * 经 2 并发队列逐张下载；换条目时放弃旧条目尚未开始的预载。
  */
 export function preloadAllTrickplaySprites(item) {
   if (!item || typeof Image === 'undefined' || !jellyfin.auth.serverUrl) return;
@@ -190,9 +213,12 @@ export function preloadAllTrickplaySprites(item) {
   const tilesPerSheet = Math.max(1, tp.cols * tp.rows);
   const sheetCount = isSprite ? Math.ceil(totalTiles / tilesPerSheet) : totalTiles + 1;
   const count = Math.min(sheetCount, 40);
+  preloadQueue.length = 0; // 换片：旧条目剩余预载不再排队（在途/已缓存照常生效）
   for (let i = 0; i < count; i++) {
-    preloadTrickplaySprite(`${jellyfin.auth.serverUrl}/Videos/${targetId}/Trickplay/${tp.width}/${i}.jpg?ApiKey=${jellyfin.auth.token}&MediaSourceId=${targetId}`);
+    const url = `${jellyfin.auth.serverUrl}/Videos/${targetId}/Trickplay/${tp.width}/${i}.jpg?ApiKey=${jellyfin.auth.token}&MediaSourceId=${targetId}`;
+    if (!spriteCache.has(url)) preloadQueue.push(url);
   }
+  pumpPreloadQueue();
 }
 
 /**

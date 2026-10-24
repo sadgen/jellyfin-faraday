@@ -72,6 +72,9 @@ class NativePlayerBridge {
       vw: 0,
       vh: 0
     });
+    // 新会话强制下拍重发全量槽位（同条目同位置重开时 JSON 可能与上次相同，
+    // 而原生侧 bind/槽位谁先到都有兜底，双保险）
+    this._lastSlotsJson = '';
 
     this._attachElementMirror(controller.videoEl, itemId);
     this._ensureNativeListeners();

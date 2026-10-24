@@ -291,11 +291,6 @@ class NativePlayerBridge {
         return;
       }
       const slots = [];
-      // 视频矩形内会被原生浮层盖住的网页控件（全屏擦洗预览 / 媒体库卡片
-      // 三按钮）都打 data-native-overlap：逐槽与全部标记元素求交，取最大
-      // bottomInset 让原生收缩视频底部让位。只看第一个标记元素时，
-      // 多卡并存的卡片按钮会被 DOM 顺序更早的其他标记元素吃掉
-      const overlaps = document.querySelectorAll('[data-native-overlap]');
       for (const [itemId, m] of this.mirrors) {
         const el = m.videoEl;
         if (!el || !el.isConnected) continue;
@@ -320,19 +315,18 @@ class NativePlayerBridge {
         }
         // 铺满/取中铺满的 scrubber 预览锚在进度条上方、落进视频矩形——
         // 原生视频浮层会盖住它。上报 bottomInset 让原生把视频底部收缩
-        // 让出预览区（window 模式预览挂窗口外沿，无重叠，恒 0）
+        // 让出预览区（window 模式预览挂窗口外沿，无重叠，恒 0）。
+        // 注意：此机制只服务播放器内的擦洗预览；媒体库卡片框内视频
+        // 不许接入（缩视频让位的方案已被用户否决）
         let bottomInset = 0;
-        for (const pv of overlaps) {
+        const pv = document.querySelector('[data-native-overlap]');
+        if (pv) {
           const pr = pv.getBoundingClientRect();
           const hOverlap = pr.left < r.right && pr.right > r.left;
-          const vOverlap = pr.top < r.bottom && pr.bottom > r.top;
-          if (hOverlap && vOverlap) {
-            bottomInset = Math.max(
-              bottomInset,
-              Math.min(
-                Math.max(0, r.bottom - pr.top + 8),
-                r.height * 0.45
-              )
+          if (hOverlap && pr.top < r.bottom) {
+            bottomInset = Math.min(
+              Math.max(0, r.bottom - pr.top + 8),
+              r.height * 0.45
             );
           }
         }

@@ -764,12 +764,13 @@ const MediaCard = memo(function MediaCard({
         {/* 右下角三按钮：框内播放视频 / 框内 trickplay / 恢复。
             桌面 hover 显示、移动端常显；激活态恒显。容器拦截全部冒泡
             （防连带长按多选 / 触摸擦洗 / 起播正片 / 右键预览）。
-            框内视频播放中打 data-native-overlap：安卓壳原生视频浮层盖在
-            WebView 之上，槽位循环据此上报 bottomInset 让原生收缩视频底部，
-            露出按钮行（仅本卡视频激活时标记，避免他窗视频被无关按钮收缩） */}
+            注意：安卓壳内框内视频播放时本行被原生画面盖住（视觉不可见，
+            但触摸穿透原生 SurfaceView 落回 WebView，按钮仍可盲点：
+            点卡片本体=暂停/恢复，行内①②③照常工作）——用户已确认接受
+            覆盖，勿再尝试让位收缩视频（曾用 bottomInset 缩掉底部 44px
+            被否决，视频必须保持原卡片尺寸） */}
         {!isSeries && (
           <div
-            data-native-overlap={inlineState ? '1' : undefined}
             className={`absolute bottom-2 right-2 z-40 flex items-center gap-1 transition-opacity duration-200 opacity-100 md:opacity-0 md:group-hover:opacity-100 ${
               (inlineState || autoPlaying || trickplayTime !== null || miniState?.open) ? '!opacity-100' : ''
             }`}

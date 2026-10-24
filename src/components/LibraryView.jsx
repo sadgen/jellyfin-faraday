@@ -396,10 +396,14 @@ const MediaCard = memo(function MediaCard({
         return;
       }
       if (Math.abs(dy) > Math.abs(dx)) {
-        // 垂直位移占优 = 滚动网格，收起预览并放弃本次触点的擦洗
+        // 垂直位移占优 = 滚动网格，收起预览并放弃本次触点的擦洗。
+        // 卡片 trickplay 自动播放中不收——收了会把预览时间清空，
+        // 自动播放下一拍从头重来（滚动网格也会把预览打回开头）
         g.canceled = true;
-        setTrickplayTime(null);
-        setHoverPercent(0);
+        if (!autoPlayingRef.current) {
+          setTrickplayTime(null);
+          setHoverPercent(0);
+        }
         return;
       }
       g.scrubbing = true;
@@ -424,6 +428,9 @@ const MediaCard = memo(function MediaCard({
 
   const handleCoverTouchEnd = useCallback(() => {
     touchScrubRef.current = { started: false, scrubbing: false, canceled: false, startX: 0, startY: 0, startPercent: 0 };
+    // 自动播放中松手：保留擦洗到位的时间，逐帧前进从该处继续
+    // （清空会让自动播放下一拍从 0 重来 = 擦洗后跳回开头）
+    if (autoPlayingRef.current) return;
     // 松手立即收起预览（无延迟）
     setTrickplayTime(null);
     setHoverPercent(0);
@@ -756,9 +763,13 @@ const MediaCard = memo(function MediaCard({
 
         {/* 右下角三按钮：框内播放视频 / 框内 trickplay / 恢复。
             桌面 hover 显示、移动端常显；激活态恒显。容器拦截全部冒泡
-            （防连带长按多选 / 触摸擦洗 / 起播正片 / 右键预览） */}
+            （防连带长按多选 / 触摸擦洗 / 起播正片 / 右键预览）。
+            框内视频播放中打 data-native-overlap：安卓壳原生视频浮层盖在
+            WebView 之上，槽位循环据此上报 bottomInset 让原生收缩视频底部，
+            露出按钮行（仅本卡视频激活时标记，避免他窗视频被无关按钮收缩） */}
         {!isSeries && (
           <div
+            data-native-overlap={inlineState ? '1' : undefined}
             className={`absolute bottom-2 right-2 z-40 flex items-center gap-1 transition-opacity duration-200 opacity-100 md:opacity-0 md:group-hover:opacity-100 ${
               (inlineState || autoPlaying || trickplayTime !== null || miniState?.open) ? '!opacity-100' : ''
             }`}

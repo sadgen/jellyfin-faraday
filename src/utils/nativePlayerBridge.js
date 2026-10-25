@@ -316,18 +316,22 @@ class NativePlayerBridge {
           }
           node = node.parentElement;
         }
-        // 擦洗预览（播放器 scrubber / 卡片框内预览）在网页层、位于视频
-        // surface 之下，被原生画面盖住。预览元素打 data-native-overlap，
-        // 槽位循环检测到与视频矩形相交时上报 dim<1——原生把视频调半透明，
-        // 预览透出=「预览覆盖在视频上」（旧 bottomInset 缩视频方案已否决废弃）
+        // 网页覆盖层与视频 surface 的遮挡协议：元素打 data-native-overlap，
+        // 槽位循环检测到与视频矩形相交时上报 dim<1——原生把视频 surface 调至
+        // 该透明度，网页层透出=「覆盖在视频上」。标记值分级："modal"=弹窗类
+        // （选集/字幕/菜单等，0.15 近隐藏保可读性）；"solid"=实体覆盖（框内/
+        // scrubber 擦洗预览，0=视频完全让位，对齐网页版预览实心盖视频）；
+        // "1"/其他=0.3 半透（兼容遗留标记）
         let dim = 1;
         for (const pv of document.querySelectorAll('[data-native-overlap]')) {
           const pr = pv.getBoundingClientRect();
           const hOverlap = pr.left < r.right && pr.right > r.left;
           const vOverlap = pr.top < r.bottom && pr.bottom > r.top;
           if (hOverlap && vOverlap) {
-            dim = 0.3;
-            break;
+            const tag = pv.getAttribute('data-native-overlap');
+            const target = tag === 'modal' ? 0.15 : tag === 'solid' ? 0 : 0.3;
+            if (target < dim) dim = target;
+            if (dim <= 0.15) break;
           }
         }
         slots.push({

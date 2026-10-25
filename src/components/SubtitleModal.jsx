@@ -287,7 +287,8 @@ export default function SubtitleModal({
   if (!isOpen || !item) return null;
 
   return (
-    <div 
+    <div
+      data-native-overlap="modal"
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4 animate-in fade-in duration-150"
       onClick={onClose}
     >

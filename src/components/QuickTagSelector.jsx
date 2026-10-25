@@ -52,6 +52,7 @@ export default function QuickTagSelector({ item, onUpdateItem, onClose }) {
 
   return (
     <div
+      data-native-overlap="modal"
       className="p-3 bg-[#0d131f] border border-cyan-500/40 rounded-2xl shadow-2xl flex flex-col gap-2.5 text-xs text-gray-200 min-w-[240px]"
       onClick={(e) => e.stopPropagation()}
     >

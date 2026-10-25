@@ -1962,6 +1962,7 @@ export default function FloatingVideoWindow({
         <>
           <div className="fixed inset-0 z-40" onClick={() => setShowMoreMenu(false)} />
           <div
+            data-native-overlap="modal"
             className="fixed w-60 bg-[#0d131f] border-2 border-cyan-400/70 rounded-2xl p-2.5 shadow-[0_20px_60px_rgba(0,0,0,0.95)] flex flex-col gap-2 z-50 text-xs animate-in fade-in zoom-in-95 duration-100 overflow-y-auto"
             style={{
               right: moreMenuPos?.right,
@@ -2306,6 +2307,7 @@ export default function FloatingVideoWindow({
       {/* Full Poster Lightbox */}
       {showPosterModal && coverUrl && (
         <div
+          data-native-overlap="modal"
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4 animate-in fade-in duration-150"
           onClick={() => setShowPosterModal(false)}
         >

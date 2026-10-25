@@ -12,7 +12,8 @@ export default function DeleteConfirmModal({
   const isMultiple = targetItems.length > 1;
 
   return (
-    <div 
+    <div
+      data-native-overlap="modal"
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in duration-150"
       onClick={onClose}
     >

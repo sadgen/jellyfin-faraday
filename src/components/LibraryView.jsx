@@ -739,11 +739,12 @@ const MediaCard = memo(function MediaCard({
         )}
 
         {/* BACKDROP MODE: Inline inside 16:9 Card。框内视频播放中同样渲染
-            （=擦洗预览：滑动驱动 trickplayTime；data-native-overlap 让原生
-            视频半透明透出本层，松手 seek 后 trickplayTime 清空、本层卸载） */}
+            （=擦洗预览：滑动驱动 trickplayTime；data-native-overlap="solid" 让
+            原生视频完全让位（实体覆盖，对齐网页版），松手 seek 后
+            trickplayTime 清空、本层卸载、视频恢复） */}
         {isBackdrop && tpStyle && (
           <div
-            data-native-overlap={inlineState ? '1' : undefined}
+            data-native-overlap={inlineState ? 'solid' : undefined}
             className="absolute inset-0 bg-black flex items-center justify-center overflow-hidden pointer-events-none z-20"
           >
             <div

@@ -1029,7 +1029,7 @@ export default function VideoPlayerModal({
               </button>
 
               {showPlayerMenu && (
-                <div className="absolute right-0 top-9 w-36 glass-panel rounded-xl shadow-2xl py-1 z-50 text-xs text-gray-200 divide-y divide-white/5">
+                <div data-native-overlap="modal" className="absolute right-0 top-9 w-36 glass-panel rounded-xl shadow-2xl py-1 z-50 text-xs text-gray-200 divide-y divide-white/5">
                   <button
                     onClick={() => { launchPlayer('mpv', item); setShowPlayerMenu(false); }}
                     className="w-full px-3 py-1.5 text-left hover:bg-white/10 flex items-center justify-between"
@@ -1254,7 +1254,7 @@ export default function VideoPlayerModal({
 
           {/* 选集抽屉（右侧滑出，不中断当前播放） */}
           {showEpisodeDrawer && (
-            <div className="absolute inset-y-0 right-0 z-50 w-72 sm:w-80 max-w-[85vw] bg-slate-950/95 backdrop-blur-md border-l border-white/10 shadow-2xl flex flex-col animate-in slide-in-from-right-4 fade-in duration-200">
+            <div data-native-overlap="modal" className="absolute inset-y-0 right-0 z-50 w-72 sm:w-80 max-w-[85vw] bg-slate-950/95 backdrop-blur-md border-l border-white/10 shadow-2xl flex flex-col animate-in slide-in-from-right-4 fade-in duration-200">
               <div className="flex items-center justify-between gap-2 p-3 border-b border-white/10 flex-shrink-0">
                 <div className="min-w-0">
                   <div className="text-xs font-bold text-white truncate">{item?.SeriesName || '选集'}</div>
@@ -1480,6 +1480,7 @@ export default function VideoPlayerModal({
 
                   {showAudioMenu && (
                     <div
+                      data-native-overlap="modal"
                       className="absolute right-0 bottom-10 w-60 max-h-64 overflow-y-auto glass-panel rounded-xl shadow-2xl py-1 z-50 text-xs text-gray-200 divide-y divide-white/5 animate-in fade-in zoom-in-95 duration-100"
                       onClick={(e) => e.stopPropagation()}
                     >
@@ -1556,6 +1557,7 @@ export default function VideoPlayerModal({
 
                 {showAspectMenu && (
                   <div
+                    data-native-overlap="modal"
                     className="absolute right-0 bottom-10 w-36 glass-panel rounded-xl shadow-2xl py-1 z-50 text-xs text-gray-200 divide-y divide-white/5 animate-in fade-in zoom-in-95 duration-100"
                     onClick={(e) => e.stopPropagation()}
                   >
@@ -1634,6 +1636,7 @@ export default function VideoPlayerModal({
 
                 {showSeekSpeedMenu && (
                   <div
+                    data-native-overlap="modal"
                     className="absolute right-0 bottom-10 w-36 glass-panel rounded-xl shadow-2xl py-1 z-50 text-xs text-gray-200 divide-y divide-white/5 animate-in fade-in zoom-in-95 duration-100"
                     onClick={(e) => e.stopPropagation()}
                   >
@@ -1678,6 +1681,7 @@ export default function VideoPlayerModal({
 
                 {showQualityMenu && (
                   <div
+                    data-native-overlap="modal"
                     className="absolute right-0 bottom-10 w-44 glass-panel rounded-xl shadow-2xl py-1 z-50 text-xs text-gray-200 divide-y divide-white/5 animate-in fade-in zoom-in-95 duration-100"
                     onClick={(e) => e.stopPropagation()}
                   >
@@ -1747,6 +1751,7 @@ export default function VideoPlayerModal({
                   </button>
                   {showChapterMenu && (
                     <div
+                      data-native-overlap="modal"
                       className="absolute right-0 bottom-10 w-56 max-h-72 overflow-y-auto glass-panel rounded-xl shadow-2xl py-1 z-50 text-xs text-gray-200 divide-y divide-white/5 animate-in fade-in zoom-in-95 duration-100"
                       onClick={(e) => e.stopPropagation()}
                     >

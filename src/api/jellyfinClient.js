@@ -3,6 +3,8 @@
  * High-performance, supports indexed library views, genres, persons, collections, server-side and bulk queries.
  */
 
+import { shellImageBase } from '../utils/shellOrigin';
+
 const STORAGE_KEY = 'jellyfin_faraday_auth';
 
 // 字幕下载记录的 DisplayPreferences id（服务器按 userId+client 存，同账号跨设备共享）
@@ -828,7 +830,9 @@ export class JellyfinClient {
    */
   getImageUrl(itemId, tag = null, type = 'Primary', maxWidth = 360, quality = 80) {
     if (!this.auth.serverUrl || !itemId) return '';
-    let url = `${this.auth.serverUrl}/Items/${itemId}/Images/${type}?maxWidth=${maxWidth}&quality=${quality}`;
+    // 壳内图片走 localhost 第二 origin（独立连接池），视频流占满 127.0.0.1 池时海报不被饿死
+    const base = shellImageBase() || this.auth.serverUrl;
+    let url = `${base}/Items/${itemId}/Images/${type}?maxWidth=${maxWidth}&quality=${quality}`;
     if (tag) {
       url += `&tag=${tag}`;
     }

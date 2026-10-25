@@ -4,6 +4,12 @@
  */
 
 import { jellyfin } from '../api/jellyfinClient';
+import { shellImageBase } from './shellOrigin';
+
+// 图片统一走壳第二 origin（视频流不与缩略图抢连接池）；非壳环境为 '' 原样回退
+function imageBase() {
+  return shellImageBase() || jellyfin.auth.serverUrl;
+}
 
 /**
  * Parse Trickplay info from item details or MediaSources
@@ -146,7 +152,7 @@ export function prefetchTrickplayFirstSheet(item) {
   const tp = getTrickplayInfo(item);
   if (!tp.hasTrickplay) return;
   const targetId = tp.id || item.Id;
-  preloadTrickplaySprite(`${jellyfin.auth.serverUrl}/Videos/${targetId}/Trickplay/${tp.width}/0.jpg?ApiKey=${jellyfin.auth.token}&MediaSourceId=${targetId}`);
+  preloadTrickplaySprite(`${imageBase()}/Videos/${targetId}/Trickplay/${tp.width}/0.jpg?ApiKey=${jellyfin.auth.token}&MediaSourceId=${targetId}`);
 }
 
 export function observePosterPrefetch(el, item) {
@@ -215,7 +221,7 @@ export function preloadAllTrickplaySprites(item) {
   const count = Math.min(sheetCount, 40);
   preloadQueue.length = 0; // 换片：旧条目剩余预载不再排队（在途/已缓存照常生效）
   for (let i = 0; i < count; i++) {
-    const url = `${jellyfin.auth.serverUrl}/Videos/${targetId}/Trickplay/${tp.width}/${i}.jpg?ApiKey=${jellyfin.auth.token}&MediaSourceId=${targetId}`;
+    const url = `${imageBase()}/Videos/${targetId}/Trickplay/${tp.width}/${i}.jpg?ApiKey=${jellyfin.auth.token}&MediaSourceId=${targetId}`;
     if (!spriteCache.has(url)) preloadQueue.push(url);
   }
   pumpPreloadQueue();
@@ -240,7 +246,7 @@ export function getTrickplayStyle(item, timeInSeconds, options = {}) {
   const tilesPerSheet = tp.cols * tp.rows;
   const spriteIdx = isSprite ? Math.floor(totalTiles / tilesPerSheet) : totalTiles;
 
-  const imageUrl = `${jellyfin.auth.serverUrl}/Videos/${targetId}/Trickplay/${tp.width}/${spriteIdx}.jpg?ApiKey=${jellyfin.auth.token}&MediaSourceId=${targetId}`;
+  const imageUrl = `${imageBase()}/Videos/${targetId}/Trickplay/${tp.width}/${spriteIdx}.jpg?ApiKey=${jellyfin.auth.token}&MediaSourceId=${targetId}`;
 
   preloadTrickplaySprite(imageUrl);
 

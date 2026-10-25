@@ -1023,10 +1023,57 @@ export class JellyfinClient {
   }
 
   /**
-   * Search Remote Subtitles from plugins (MeiamSub.Thunder, Shooter, OpenSubtitles, etc.)
+   * 获取 Faraday 独立双源字幕微服务地址（优先本地持久化，其次同源，兜底 .237:8097）
    */
-  async searchRemoteSubtitles(itemId, language = 'chi') {
-    if (!this.auth.isConfigured || !itemId) return [];
+  getSubtitleServiceUrl() {
+    const custom = localStorage.getItem('jf_subtitle_service_url');
+    if (custom) return custom.replace(/\/$/, '');
+    if (typeof window !== 'undefined' && window.location?.hostname) {
+      const h = window.location.hostname;
+      if (h.startsWith('192.168.')) {
+        return `http://${h}:8097`;
+      }
+    }
+    return 'http://192.168.5.237:8097';
+  }
+
+  /**
+   * Search Remote Subtitles
+   * 优先通过 Faraday 双源字幕服务（SubtitleCat + 迅雷直连，带人工精校/AI分级），不可达时回退 Jellyfin 插件。
+   */
+  async searchRemoteSubtitles(itemId, language = 'chi', code = '') {
+    if (!itemId) return [];
+
+    // 1. 优先调用 Faraday 独立双源微服务
+    const serviceUrl = this.getSubtitleServiceUrl();
+    try {
+      const q = new URLSearchParams({ itemId, code: code || '' });
+      const res = await fetch(`${serviceUrl}/api/subtitles/search?${q.toString()}`, {
+        headers: { 'Accept': 'application/json' },
+        signal: globalThis.AbortSignal?.timeout ? globalThis.AbortSignal.timeout(25000) : undefined
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.results && data.results.length > 0) {
+          return data.results.map(r => ({
+            Id: r.downloadUrl || r.id,
+            Name: r.name,
+            ProviderName: r.provider || r.source,
+            Format: r.format || 'srt',
+            tier: r.tier,
+            score: r.score,
+            source: r.source,
+            downloadUrl: r.downloadUrl,
+            isNewEngine: true
+          }));
+        }
+      }
+    } catch (err) {
+      console.warn('Faraday subtitle service not reachable, falling back to Jellyfin:', err);
+    }
+
+    // 2. 回退到 Jellyfin 传统插件
+    if (!this.auth.isConfigured) return [];
     try {
       const res = await fetch(`${this.auth.serverUrl}/Items/${itemId}/RemoteSearch/Subtitles/${language}`, {
         headers: this.getAuthHeaders()
@@ -1034,7 +1081,7 @@ export class JellyfinClient {
       if (!res.ok) return [];
       return await res.json();
     } catch (err) {
-      console.warn('Failed to search remote subtitles:', err);
+      console.warn('Failed to search remote subtitles via Jellyfin plugin:', err);
       return [];
     }
   }
@@ -1042,10 +1089,43 @@ export class JellyfinClient {
   /**
    * Download and attach Remote Subtitle to media item, then refresh item metadata
    */
-  async downloadRemoteSubtitle(itemId, subtitleId) {
-    if (!this.auth.isConfigured || !itemId || !subtitleId) return false;
+  async downloadRemoteSubtitle(itemId, subtitleItem) {
+    if (!itemId || !subtitleItem) return false;
+
+    // 1. 如果来自 Faraday 新微服务，直接请求微服务代下并 Base64 上传至 Jellyfin
+    if (subtitleItem.isNewEngine && subtitleItem.downloadUrl) {
+      const serviceUrl = this.getSubtitleServiceUrl();
+      try {
+        const res = await fetch(`${serviceUrl}/api/subtitles/apply`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            itemId,
+            sub: {
+              name: subtitleItem.Name,
+              source: subtitleItem.source,
+              tier: subtitleItem.tier,
+              downloadUrl: subtitleItem.downloadUrl,
+              format: subtitleItem.Format || 'srt'
+            }
+          }),
+          signal: globalThis.AbortSignal?.timeout ? globalThis.AbortSignal.timeout(20000) : undefined
+        });
+        if (res.ok) {
+          const data = await res.json();
+          await this.refreshItemMetadata(itemId).catch(() => {});
+          return Boolean(data.success);
+        }
+      } catch (err) {
+        console.warn('Failed to apply subtitle via service, fallback to legacy download:', err);
+      }
+    }
+
+    // 2. 传统 Jellyfin 插件通道回退
+    const subtitleId = subtitleItem.Id || subtitleItem;
+    if (!this.auth.isConfigured || !subtitleId) return false;
     try {
-      const res = await fetch(`${this.auth.serverUrl}/Items/${itemId}/RemoteSearch/Subtitles/${subtitleId}`, {
+      const res = await fetch(`${this.auth.serverUrl}/Items/${itemId}/RemoteSearch/Subtitles/${encodeURIComponent(subtitleId)}`, {
         method: 'POST',
         headers: this.getAuthHeaders()
       });

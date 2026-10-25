@@ -93,7 +93,9 @@ export function rankRemoteSubtitles(results = [], item = {}) {
     if (seen.has(dedupKey)) return;
     seen.add(dedupKey);
     let rank = 1;
-    if (codes.length > 0) {
+    if (sub.isNewEngine) {
+      rank = 0; // 新引擎返回的已通过精准番号与有效性门禁
+    } else if (codes.length > 0) {
       rank = 2;
       for (const [letters, digits] of codes) {
         // 兼容 KAVR-495 / kavr495 / kavr_495 等写法
@@ -105,11 +107,18 @@ export function rankRemoteSubtitles(results = [], item = {}) {
     }
     scored.push({ sub, rank, i });
   });
-  scored.sort((a, b) => a.rank - b.rank || a.i - b.i);
+
+  scored.sort((a, b) => {
+    if (a.sub.isNewEngine && b.sub.isNewEngine) {
+      return (b.sub.score || 0) - (a.sub.score || 0) || a.i - b.i;
+    }
+    return a.rank - b.rank || a.i - b.i;
+  });
+
   return {
     exact: scored.filter(s => s.rank === 0).map(s => s.sub),
     related: scored.filter(s => s.rank !== 0).map(s => s.sub),
-    hasCode: codes.length > 0
+    hasCode: codes.length > 0 || Boolean(results?.[0]?.isNewEngine)
   };
 }
 

@@ -163,19 +163,19 @@ export default function SubtitleModal({
     setSuccessMsg('');
     setShowAllRelated(false);
     try {
-      const results = await jellyfin.searchRemoteSubtitles(item.Id, lang);
+      const results = await jellyfin.searchRemoteSubtitles(item.Id, lang, item.Name || '');
       setRemoteSubtitles(results || []);
       if (!results || results.length === 0) {
         setErrorMsg(lang === 'eng'
-          ? '未找到英语在线字幕：迅雷仅支持中文；射手按文件哈希匹配（重编码的文件搜不到）；OpenSubtitles 依赖条目元数据。'
-          : '未找到匹配的在线字幕：迅雷按名称检索（改过名的文件可能搜不到）、射手按文件哈希检索（重编码必不命中）。请确认服务器已安装 MeiamSub 插件，或稍后刷新重试。');
+          ? '未找到英语在线字幕：迅雷仅支持中文；射手按文件哈希匹配；OpenSubtitles 依赖元数据。'
+          : '双源（SubtitleCat + 迅雷）未检索到精确匹配的中文字幕，或上游均为损坏假响应。');
       }
     } catch (err) {
       setErrorMsg(err.message || '搜索远程字幕失败');
     } finally {
       setIsSearching(false);
     }
-  }, [item?.Id, selectedLanguage]);
+  }, [item?.Id, item?.Name, selectedLanguage]);
 
   useEffect(() => {
     if (isOpen && activeTab === 'remote' && remoteSubtitles.length === 0) {
@@ -199,7 +199,7 @@ export default function SubtitleModal({
     setErrorMsg('');
     setSuccessMsg('');
     try {
-      const ok = await jellyfin.downloadRemoteSubtitle(item.Id, sub.Id);
+      const ok = await jellyfin.downloadRemoteSubtitle(item.Id, sub);
       if (ok) {
         setSuccessMsg(`字幕「${sub.Name || '在线字幕'}」下载成功，正在等待服务器加载字幕流...`);
         // 只在可渲染的文本字幕流中挑选（排除 PGS/DVD/DVB 等图像字幕流），
@@ -232,7 +232,7 @@ export default function SubtitleModal({
           setErrorMsg('字幕已保存到服务器，但后台刷新尚未完成，请稍后重新打开播放窗口加载字幕');
         }
       } else {
-        setErrorMsg('字幕下载失败，请检查 Jellyfin 插件权限');
+        setErrorMsg('字幕下载失败，请检查服务连接');
       }
     } catch (err) {
       setErrorMsg(err.message || '下载出错');
@@ -241,48 +241,80 @@ export default function SubtitleModal({
     }
   };
 
-  const renderRemoteResult = (sub, isExact) => (
-    <div
-      key={sub.Id}
-      className={`p-3 rounded-xl flex items-center justify-between gap-3 transition ${
-        isExact
-          ? 'bg-emerald-950/30 border border-emerald-500/30 hover:border-emerald-400/60'
-          : 'bg-black/40 border border-white/5 hover:border-cyan-500/40'
-      }`}
-    >
-      <div className="flex flex-col min-w-0 flex-1">
-        <span className="font-bold text-white truncate" title={sub.Name}>{sub.Name}</span>
-        <div className="flex items-center gap-2 text-[10px] text-gray-400 mt-0.5">
-          {sub.ProviderName && (
-            <span className="px-1.5 py-0.2 rounded bg-cyan-950/80 border border-cyan-500/40 text-cyan-300 font-medium">
-              {sub.ProviderName}
-            </span>
-          )}
-          {isExact && (
-            <span className="px-1.5 py-0.2 rounded bg-emerald-950/80 border border-emerald-500/40 text-emerald-300 font-bold">
-              番号匹配
-            </span>
-          )}
-          {sub.Format && <span className="font-mono text-gray-400">.{sub.Format}</span>}
-          {sub.Language && <span className="font-mono text-gray-400">{sub.Language}</span>}
-          {sub.CommunityRating !== undefined && <span className="text-amber-400">★ {sub.CommunityRating}</span>}
-        </div>
-      </div>
+  const renderRemoteResult = (sub, isExact) => {
+    const isHumanTier = sub.tier === '人工精校' || sub.tier === '字幕组熟肉';
+    const cardBorder = isHumanTier
+      ? 'bg-emerald-950/20 border border-emerald-500/40 hover:border-emerald-400/80 shadow-[0_0_15px_rgba(16,185,129,0.1)]'
+      : (isExact
+          ? 'bg-cyan-950/20 border border-cyan-500/30 hover:border-cyan-400/60'
+          : 'bg-black/40 border border-white/5 hover:border-cyan-500/40');
 
-      <button
-        onClick={() => handleDownload(sub)}
-        disabled={downloadingId === sub.Id}
-        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold flex items-center gap-1 transition flex-shrink-0 disabled:opacity-50 shadow"
+    return (
+      <div
+        key={sub.Id}
+        className={`p-3 rounded-xl flex items-center justify-between gap-3 transition ${cardBorder}`}
       >
-        {downloadingId === sub.Id ? (
-          <RefreshCw size={13} className="animate-spin" />
-        ) : (
-          <Download size={13} />
-        )}
-        <span>{downloadingId === sub.Id ? '下载中...' : '下载并应用'}</span>
-      </button>
-    </div>
-  );
+        <div className="flex flex-col min-w-0 flex-1">
+          <span className="font-bold text-white truncate" title={sub.Name}>{sub.Name}</span>
+          <div className="flex items-center gap-1.5 text-[10px] text-gray-400 mt-1 flex-wrap">
+            {/* 质量分级徽标 */}
+            {sub.tier === '人工精校' && (
+              <span className="px-1.5 py-0.5 rounded bg-emerald-950/90 border border-emerald-400/60 text-emerald-300 font-bold flex items-center gap-0.5">
+                <Sparkles size={10} className="text-emerald-400" /> 人工精校
+              </span>
+            )}
+            {sub.tier === '字幕组熟肉' && (
+              <span className="px-1.5 py-0.5 rounded bg-blue-950/90 border border-blue-400/60 text-blue-300 font-bold">
+                字幕组熟肉
+              </span>
+            )}
+            {sub.tier === '普通中文' && (
+              <span className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-600 text-slate-300 font-medium">
+                中文
+              </span>
+            )}
+            {sub.tier === 'AI机翻' && (
+              <span className="px-1.5 py-0.5 rounded bg-amber-950/80 border border-amber-500/40 text-amber-300 font-medium">
+                AI机翻
+              </span>
+            )}
+
+            {/* 来源提供商 */}
+            {sub.ProviderName && (
+              <span className="px-1.5 py-0.5 rounded bg-cyan-950/80 border border-cyan-500/40 text-cyan-300 font-medium">
+                {sub.ProviderName}
+              </span>
+            )}
+
+            {/* 精确匹配标记（旧插件回退时展示） */}
+            {!sub.isNewEngine && isExact && (
+              <span className="px-1.5 py-0.5 rounded bg-emerald-950/80 border border-emerald-500/40 text-emerald-300 font-bold">
+                番号匹配
+              </span>
+            )}
+
+            {sub.Format && <span className="font-mono text-gray-400">.{sub.Format}</span>}
+            {sub.Language && <span className="font-mono text-gray-400">{sub.Language}</span>}
+          </div>
+        </div>
+
+        <button
+          onClick={() => handleDownload(sub)}
+          disabled={downloadingId === sub.Id}
+          className={`px-3 py-1.5 rounded-xl font-bold flex items-center gap-1 transition flex-shrink-0 disabled:opacity-50 shadow ${
+            isHumanTier ? 'bg-emerald-600 hover:bg-emerald-500 text-white' : 'bg-cyan-700 hover:bg-cyan-600 text-white'
+          }`}
+        >
+          {downloadingId === sub.Id ? (
+            <RefreshCw size={13} className="animate-spin" />
+          ) : (
+            <Download size={13} />
+          )}
+          <span>{downloadingId === sub.Id ? '应用中...' : '下载并应用'}</span>
+        </button>
+      </div>
+    );
+  };
 
   if (!isOpen || !item) return null;
 

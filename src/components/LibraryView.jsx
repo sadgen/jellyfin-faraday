@@ -933,8 +933,10 @@ const MediaCard = memo(function MediaCard({
           )}
         </div>
 
-        {/* Hover Action Buttons */}
-        <div className="absolute inset-x-2 bottom-2 z-30 flex items-center justify-between opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+        {/* Hover Action Buttons（收藏/详情/刷新/更多）——放海报顶部：底部已被
+            右下角三播放按钮 + 时间徽章 + 进度线占满，窄屏放不下两排按钮。
+            顶部仅在触摸/悬停显示时与角标短暂重叠（z-30 > z-20），可接受 */}
+        <div className="absolute inset-x-2 top-2 z-30 flex items-center justify-between opacity-0 group-hover:opacity-100 transition-opacity duration-200">
           <div className="flex items-center gap-1">
             <button
               onClick={(e) => { e.stopPropagation(); onToggleFavorite(item); }}

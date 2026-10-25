@@ -3094,6 +3094,17 @@ export default function LibraryView({
             </div>
           )}
 
+          {/* Refresh Library（手机端图标按钮，桌面带文字——此前 hidden md:flex
+              把手机/安卓壳整个藏掉了） */}
+          <button
+            onClick={onRefreshLibrary}
+            disabled={isRefreshing}
+            className="flex px-2 md:px-2.5 py-1.5 rounded-xl bg-black/40 hover:bg-white/10 border border-white/5 text-gray-300 hover:text-cyan-300 transition disabled:opacity-50 items-center gap-1.5 text-xs font-medium flex-shrink-0"
+            title="扫描媒体库 & 刷新元数据"
+          >
+            <RefreshCw size={12} className={isRefreshing ? 'animate-spin text-cyan-400' : 'text-cyan-400'} />
+            <span className="hidden md:inline">{isRefreshing ? '扫描中...' : '刷新'}</span>
+          </button>
           {/* Filtered Total Count Badge */}
           <div 
             className="flex items-center gap-1 px-2 py-1 rounded-xl bg-cyan-950/40 border border-cyan-500/30 text-cyan-300 text-xs font-mono font-bold flex-shrink-0"
@@ -3119,16 +3130,6 @@ export default function LibraryView({
             </select>
           </div>
 
-          {/* Desktop Only: Refresh Library */}
-          <button
-            onClick={onRefreshLibrary}
-            disabled={isRefreshing}
-            className="hidden md:flex px-2.5 py-1.5 rounded-xl bg-black/40 hover:bg-white/10 border border-white/5 text-gray-300 hover:text-cyan-300 transition disabled:opacity-50 items-center gap-1.5 text-xs font-medium flex-shrink-0"
-            title="扫描媒体库 & 刷新元数据"
-          >
-            <RefreshCw size={12} className={isRefreshing ? 'animate-spin text-cyan-400' : 'text-cyan-400'} />
-            <span>{isRefreshing ? '扫描中...' : '刷新'}</span>
-          </button>
         </div>
       </div>
 

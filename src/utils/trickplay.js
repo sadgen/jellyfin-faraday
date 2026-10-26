@@ -6,9 +6,9 @@
 import { jellyfin } from '../api/jellyfinClient';
 import { shellImageBase } from './shellOrigin';
 
-// 图片统一走壳第二 origin（视频流不与缩略图抢连接池）；非壳环境为 '' 原样回退
+// 图片统一走壳内 faraday-img 缓存通道（不与视频流抢连接池）；非壳环境为 '' 原样回退
 function imageBase() {
-  return shellImageBase() || jellyfin.auth.serverUrl;
+  return shellImageBase(jellyfin.auth.serverUrl) || jellyfin.auth.serverUrl;
 }
 
 /**

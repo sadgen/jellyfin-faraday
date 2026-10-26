@@ -21,7 +21,7 @@ export function hasHardcodedChineseSubtitles(item) {
     const cleanText = text.replace(/\.[a-z0-9]{2,5}$/i, '').trim();
 
     // 1. Check explicit Chinese subtitle keywords
-    if (/中文字幕|中字|内嵌|硬字幕|无码破解/i.test(cleanText)) {
+    if (/中文字幕|中字|内嵌|硬字幕/i.test(cleanText)) {
       return true;
     }
 

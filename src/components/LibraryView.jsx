@@ -858,6 +858,30 @@ const MediaCard = memo(function MediaCard({
 
         {/* Top-Right: Played Checkmark / Unplayed Episode Badge */}
         <div className="absolute top-2 right-2 flex items-center gap-1 z-20">
+          {/* 移动端更多入口：顶部操作行在触摸端隐藏（其粘性 hover 露出所需的
+              点按同时就是起播点按、还会撞滑动擦洗），只常显一个 ⋮ 直达
+              Action Sheet。容器拦截冒泡防连带长按多选 / 点按预览 / 起播 */}
+          <button
+            className="md:hidden p-1.5 rounded-lg bg-black/70 border border-white/10 text-gray-300 active:bg-black/90 backdrop-blur-md transition"
+            title="更多操作"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (onOpenActionSheet) {
+                onOpenActionSheet(item);
+                return;
+              }
+              const rect = e.currentTarget.getBoundingClientRect();
+              setMenuAnchor({ left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom });
+            }}
+            onMouseDown={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
+            onPointerUp={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
+            onTouchEnd={(e) => e.stopPropagation()}
+            onContextMenu={(e) => e.stopPropagation()}
+          >
+            <MoreVertical size={14} />
+          </button>
           {isSeries ? (
             unplayedCount > 0 ? (
               <div 
@@ -940,8 +964,10 @@ const MediaCard = memo(function MediaCard({
 
         {/* Hover Action Buttons（收藏/详情/刷新/更多）——放海报顶部：底部已被
             右下角三播放按钮 + 时间徽章 + 进度线占满，窄屏放不下两排按钮。
-            顶部仅在触摸/悬停显示时与角标短暂重叠（z-30 > z-20），可接受 */}
-        <div className="absolute inset-x-2 top-2 z-30 flex items-center justify-between opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+            桌面专属（hidden md:flex）：触摸端没有 hover，靠粘性 hover 露出
+            的那一下点按就是起播点按，永远抢不到；移动端改走右上角常显 ⋮。
+            顶部仅在悬停显示时与角标短暂重叠（z-30 > z-20），可接受 */}
+        <div className="hidden md:flex absolute inset-x-2 top-2 z-30 items-center justify-between opacity-0 group-hover:opacity-100 transition-opacity duration-200">
           <div className="flex items-center gap-1">
             <button
               onClick={(e) => { e.stopPropagation(); onToggleFavorite(item); }}

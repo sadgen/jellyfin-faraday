@@ -7,6 +7,7 @@ import { useExternalPlayer } from '../hooks/useExternalPlayer';
 import { cleanMediaTitle } from '../utils/titleCleaner';
 import { jellyfin } from '../api/jellyfinClient';
 import QuickTagSelector from './QuickTagSelector';
+import ItemFilePath from './ItemFilePath';
 
 /**
  * 媒体卡片操作菜单（Portal 渲染到 body，fixed 定位）
@@ -233,6 +234,11 @@ export default function CardContextMenu({
             <span>刷新媒体信息</span>
           </button>
         )}
+      </div>
+
+      <div className="py-1.5 px-3">
+        {/* 原始文件路径（点击复制；无路径的聚合条目自动隐藏） */}
+        <ItemFilePath item={item} />
       </div>
 
       <div className="py-1">

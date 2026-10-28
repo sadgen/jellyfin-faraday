@@ -3,6 +3,7 @@ import { jellyfin } from '../api/jellyfinClient';
 import { useExternalPlayer } from '../hooks/useExternalPlayer';
 import { cleanMediaTitle } from '../utils/titleCleaner';
 import QuickTagSelector from './QuickTagSelector';
+import ItemFilePath from './ItemFilePath';
 import {
   Play, Star, Eye, EyeOff, Edit3, Sparkles,
   Trash2, RefreshCw, ExternalLink, X, Film,
@@ -99,6 +100,9 @@ export default function MobileActionSheet({
             <X size={18} />
           </button>
         </div>
+
+        {/* 原始文件路径（点击复制；无路径的聚合条目自动隐藏） */}
+        <ItemFilePath item={item} />
 
         {/* Action Buttons Grid */}
         <div className="grid grid-cols-2 gap-2 text-gray-200 font-medium">

@@ -775,11 +775,15 @@ const MediaCard = memo(function MediaCard({
 
         {/* 框内视频（背板卡）：桌面浏览器=直连流直接播；安卓壳=镜像元素，
             原生槽位系统把 SurfaceView 变换到本矩形（零原生改动）。
-            空闲时 display:none（rect=0，原生槽位循环自动跳过） */}
+            空闲时 display:none（rect=0，原生槽位循环自动跳过）。
+            src 只在起播（inlineState）后才挂：display:none 不阻止浏览器
+            预加载带 src 的 video，空闲挂 src 会让整网格同时拉视频流
+            （连接池占满→海报/缩略图全排队），曾致剧照布局整页卡顿 */}
         {isBackdrop && (
           <video
             ref={inlineVideoRef}
-            src={!isNativePlayerAvailable() ? jellyfin.getStreamUrl(item.Id) : undefined}
+            src={inlineState && !isNativePlayerAvailable() ? jellyfin.getStreamUrl(item.Id) : undefined}
+            preload="none"
             autoPlay={inlineState === 'playing' && !isNativePlayerAvailable()}
             playsInline
             controls={false}

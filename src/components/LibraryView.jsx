@@ -2471,6 +2471,28 @@ export default function LibraryView({
                     </button>
                   </div>
 
+                  {/* 5.5 原画直推失败自动回退转码（关闭后直推失败停在错误诊断面板，不静默跳档） */}
+                  <div className="flex items-center justify-between pt-2 border-t border-white/10">
+                    <div className="flex flex-col">
+                      <span className="text-[11px] text-gray-200 font-medium">⚠️ 原画直推失败自动回退转码</span>
+                      <span className="text-[9px] text-gray-400">浏览器解不动源编码（如 HEVC/DTS）时自动跳 4M 转码并弹提示；关闭则停在错误面板由你手动选档</span>
+                    </div>
+                    <button
+                      onClick={() => {
+                        const nextVal = playbackDefaults.autoDirectFallback === false;
+                        const updated = setPlaybackDefaults({ autoDirectFallback: nextVal });
+                        setPlaybackDefaultsState(updated);
+                      }}
+                      className={`px-3 py-1 rounded-lg text-[11px] font-bold transition ${
+                        playbackDefaults.autoDirectFallback === false
+                          ? 'bg-slate-800 hover:bg-slate-700 text-gray-400 hover:text-white border border-white/15'
+                          : 'bg-cyan-400 text-slate-950 font-extrabold shadow-md shadow-cyan-400/40'
+                      }`}
+                    >
+                      {playbackDefaults.autoDirectFallback === false ? '已关闭' : '已开启'}
+                    </button>
+                  </div>
+
                   {/* 6. Smart Start (智能正片起播) */}
                   <div className="flex items-center justify-between pt-1 border-t border-white/10">
                     <div className="flex flex-col">

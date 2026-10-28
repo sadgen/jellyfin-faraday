@@ -227,14 +227,21 @@ export class PlaybackSessionController {
 
         this.startHeartbeat();
 
-        videoEl.play().catch(() => {
+        videoEl.play().catch((firstErr) => {
           if (this.generationId !== currentGeneration) return;
           videoEl.muted = true;
-          videoEl.play().catch(() => {
+          videoEl.play().catch((secondErr) => {
             if (this.generationId !== currentGeneration) return;
-            // 直连完全失败（如浏览器无该编码硬解），通知上层回退到转码
+            const err = secondErr || firstErr;
+            // 自动播放策略被拒（NotAllowedError）：流本身没有问题，转码也救不了，
+            // 保持暂停等用户手势即可，绝不触发回退（曾经的"意外跳 4M"来源之一）
+            if (err && err.name === 'NotAllowedError') return;
+            // 直连完全失败（如浏览器无该编码硬解），通知上层回退到转码，携带失败原因
             if (this.onAutoDirectFallback) {
-              this.onAutoDirectFallback();
+              this.onAutoDirectFallback({
+                errorName: (err && err.name) || 'UnknownError',
+                message: (err && err.message) || ''
+              });
             }
           });
         });

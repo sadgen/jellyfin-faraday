@@ -210,10 +210,24 @@ export default function VideoPlayerModal({
           setErrorDetails(prev => `${prev} | 直连探测: ${status}`);
         }).catch(() => {});
       },
-      onAutoDirectFallback: () => {
-        directDiagRef.current = '直连流: 加载失败，已自动回退到转码流';
+      onAutoDirectFallback: (reason) => {
+        // 直推失败原因映射：编码不支持最常见（HEVC 视频 / DTS 音轨，浏览器无解码）
+        const reasonText = reason?.errorName === 'NotSupportedError'
+          ? '浏览器不支持该源编码（如 HEVC/DTS）'
+          : `直连播放失败（${reason?.errorName || '未知错误'}${reason?.message ? `: ${reason.message.slice(0, 80)}` : ''}）`;
+        // 用户关闭了"自动回退"：不静默跳档，停在错误诊断面板，由用户手动选转码档
+        if (playbackDefaultsRef.current.autoDirectFallback === false) {
+          directDiagRef.current = `直连流: ${reasonText}（未自动回退——默认播放偏好中已关闭自动回退）`;
+          setHasError(true);
+          setErrorDetails(directDiagRef.current);
+          return;
+        }
+        directDiagRef.current = `直连流: ${reasonText}，已自动回退到转码流`;
         const defaultQuality = streamQualityRef.current !== 'direct' ? streamQualityRef.current : '4000000';
         setStreamQuality(defaultQuality);
+        const tierLabel = defaultQuality === '4000000' ? '4M' : `${Math.round(parseInt(defaultQuality, 10) / 1000000)}M`;
+        setSmoothToast(`⚠️ 原画直推失败：${reasonText}，已回退 ${tierLabel} 转码`);
+        setTimeout(() => setSmoothToast(''), 4500);
         sessionControllerRef.current?.loadStream({
           itemId: itemRef.current?.Id,
           mediaSourceId: mediaSourceId,

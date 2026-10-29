@@ -8,6 +8,7 @@ import { useExternalPlayer } from '../hooks/useExternalPlayer';
 import { cleanMediaTitle } from '../utils/titleCleaner';
 import { isRomanizedJunkRole } from '../utils/actorAggregator';
 import DeleteConfirmModal from './DeleteConfirmModal';
+import SubtitleBadgeChip from './SubtitleBadgeChip';
 import QuickTagSelector from './QuickTagSelector';
 
 function formatRuntime(ticks) {
@@ -292,7 +293,8 @@ export default function ItemDetailModal({
                 />
               )}
             </div>
-            <div className="min-w-0 flex-1 pb-0.5">
+            <div className="min-w-0 flex-1 pb-0.5 flex items-center gap-1.5">
+              <SubtitleBadgeChip item={current} />
               <h2 className="text-base sm:text-lg font-bold text-white truncate">{current?.Name}</h2>
               {current?.OriginalTitle && current.OriginalTitle !== current.Name && (
                 <div className="text-[11px] text-gray-400 truncate mt-0.5">{current.OriginalTitle}</div>

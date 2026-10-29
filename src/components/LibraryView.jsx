@@ -15,6 +15,7 @@ import { pushSentinel, consumeSentinel, sentinelDepth } from '../utils/backSenti
 import MobileActionSheet from './MobileActionSheet';
 import DeleteConfirmModal from './DeleteConfirmModal';
 import CardContextMenu from './CardContextMenu';
+import SubtitleBadgeChip from './SubtitleBadgeChip';
 import ServerSwitchMenu from './ServerSwitchMenu';
 import SeriesPage from './SeriesPage';
 import {
@@ -920,6 +921,8 @@ const MediaCard = memo(function MediaCard({
 
         {/* Top-Left: Duplicate Badge / Stacked / Health Issue or Play Count */}
         <div className="absolute top-2 left-2 flex items-center gap-1.5 z-20 pointer-events-none flex-wrap max-w-[85%]">
+          {/* JAV 字幕/版本角标（L/U/C 组合，非番号条目不渲染）——放行首保证可见 */}
+          <SubtitleBadgeChip item={item} />
           {isSeries && (
             <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-500/90 backdrop-blur-md text-[10px] font-mono font-black text-slate-950 shadow-md">
               <span>剧集</span>
@@ -1248,6 +1251,7 @@ const MediaListRow = memo(function MediaListRow({
 
           <div className="flex flex-col min-w-0">
             <div className="font-semibold text-white truncate text-xs sm:text-sm group-hover:text-cyan-300 transition flex items-center gap-1.5" title={item.Name}>
+              <SubtitleBadgeChip item={item} />
               <span>{item.Name}</span>
               {isSeries && (
                 <span className="px-1.5 py-0.2 rounded bg-amber-500/90 text-slate-950 text-[9px] font-mono font-black flex-shrink-0">
@@ -3618,6 +3622,10 @@ export default function LibraryView({
                           className="relative w-full h-full object-cover group-hover:scale-105 transition"
                         />
                       )}
+                      {/* JAV 字幕/版本角标 */}
+                      <div className="absolute top-1.5 left-1.5 z-10 pointer-events-none">
+                        <SubtitleBadgeChip item={item} />
+                      </div>
                       <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition flex items-center justify-center">
                         <div className="w-10 h-10 rounded-full bg-cyan-500/90 flex items-center justify-center text-white shadow-xl">
                           <Play size={18} className="ml-0.5 fill-white" />

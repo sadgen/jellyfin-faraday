@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { jellyfin } from '../api/jellyfinClient';
 import TrickplayScrubberThumbnail from './TrickplayScrubberThumbnail';
+import SubtitleBadgeChip from './SubtitleBadgeChip';
 import SubtitleOverlay from './SubtitleOverlay';
 import SubtitleModal from './SubtitleModal';
 import VolumeControl from './VolumeControl';
@@ -643,6 +644,7 @@ export default function VrPlayerModal({
             <Glasses size={14} className="animate-pulse" />
             <span>VR 全景影院</span>
           </div>
+          <SubtitleBadgeChip item={item} />
           <span className="text-white font-bold text-sm truncate">{item.Name}</span>
         </div>
 

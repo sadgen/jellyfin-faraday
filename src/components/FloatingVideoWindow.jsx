@@ -14,6 +14,7 @@ import { getPlaybackDefaults } from '../utils/playbackDefaults';
 import { calculateSmartStartTime } from '../utils/smartStartHelper';
 import { QUALITY_OPTIONS, PLAYBACK_SPEED_OPTIONS } from '../utils/qualityPresets';
 import TrickplayScrubberThumbnail from './TrickplayScrubberThumbnail';
+import SubtitleBadgeChip from './SubtitleBadgeChip';
 import * as THREE from 'three';
 import InlineVrCanvas from './InlineVrCanvas';
 import SubtitleOverlay from './SubtitleOverlay';
@@ -1883,6 +1884,8 @@ export default function FloatingVideoWindow({
             </select>
           </div>
         )}
+        {/* JAV 字幕/版本角标（标题最左侧） */}
+        <SubtitleBadgeChip item={item} />
         {/* 播放次数（标题最左侧，仅数字） */}
         {!!item?.UserData?.PlayCount && (
           <span

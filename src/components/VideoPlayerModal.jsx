@@ -7,6 +7,7 @@ import { useMediaPlaybackInfo } from '../hooks/useMediaPlaybackInfo';
 import { useSubtitleTracks } from '../hooks/useSubtitleTracks';
 import { useViewport } from '../hooks/useViewport';
 import TrickplayScrubberThumbnail from './TrickplayScrubberThumbnail';
+import SubtitleBadgeChip from './SubtitleBadgeChip';
 import InlineVrCanvas from './InlineVrCanvas';
 import SubtitleOverlay from './SubtitleOverlay';
 import DeleteConfirmModal from './DeleteConfirmModal';
@@ -996,6 +997,7 @@ export default function VideoPlayerModal({
         <div className="p-3 sm:p-3.5 border-b border-white/5 flex items-center justify-between bg-black/60 text-xs z-30 pt-[max(0.75rem,env(safe-area-inset-top))] flex-shrink-0">
           <div className="flex items-center gap-2.5 min-w-0 pr-2">
             <Film size={18} className="text-cyan-400 flex-shrink-0" />
+            <SubtitleBadgeChip item={item} />
             <span className="font-bold text-white text-sm truncate">{item?.Name}</span>
             {item?.ProductionYear && (
               <span className="text-gray-400 font-mono hidden sm:inline">({item.ProductionYear})</span>

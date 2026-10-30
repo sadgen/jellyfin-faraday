@@ -950,7 +950,7 @@ const MediaCard = memo(function MediaCard({
             </div>
           )}
 
-          {!isDuplicate && !item.healthIssue && playCount > 0 && (
+          {playCount > 0 && (
             <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-black/60 backdrop-blur-md border border-white/10 text-[10px] font-mono text-cyan-300">
               <Eye size={11} className="text-cyan-400" />
               <span>{playCount}</span>

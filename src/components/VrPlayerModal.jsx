@@ -10,6 +10,7 @@ import SleepTimerButton from './SleepTimerButton';
 import { useVolumeControl } from '../hooks/useVolumeControl';
 import { useMediaPlaybackInfo } from '../hooks/useMediaPlaybackInfo';
 import { useSubtitleTracks } from '../hooks/useSubtitleTracks';
+import { isNativePlayerAvailable } from '../utils/nativePlayerBridge';
 import { PLAYBACK_SPEED_OPTIONS } from '../utils/qualityPresets';
 import { getPlaybackDefaults } from '../utils/playbackDefaults';
 import { getStoredSeekSpeed, getSeekStepSeconds } from '../utils/seekSettings';
@@ -745,7 +746,7 @@ export default function VrPlayerModal({
       )}
 
       {/* 字幕覆盖层（视频元素被 Canvas 遮挡，原生字幕轨不可见） */}
-      <SubtitleOverlay videoRef={videoRef} visible={selectedSubtitleIndex !== -1} selectedSubtitleIndex={selectedSubtitleIndex} />
+      {!isNativePlayerAvailable() && <SubtitleOverlay videoRef={videoRef} visible={selectedSubtitleIndex !== -1} selectedSubtitleIndex={selectedSubtitleIndex} />}
 
       {/* Bottom Transport Scrubber & HUD */}
       <div className="absolute bottom-0 inset-x-0 z-30 p-4 pt-8 bg-gradient-to-t from-black/95 via-black/80 to-transparent flex flex-col gap-2.5 pointer-events-auto">

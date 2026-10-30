@@ -1179,8 +1179,11 @@ export default function VideoPlayerModal({
             />
           )}
 
-          {/* 自定义字幕渲染层：字号/颜色/描边/背景/延迟补偿（设置见字幕弹窗） */}
-          {!isVrActive && (
+          {/* 自定义字幕渲染层：字号/颜色/描边/背景/延迟补偿（设置见字幕弹窗）。
+              壳内不挂载：DOM 字幕被 on-top 视频 surface 压在下面，dim 让位时
+              透出会造成「字幕夹在视频与菜单之间」的假层——安卓字幕由原生字幕
+              surface（UnderlayVideoManager）渲染 */}
+          {!isVrActive && !isNativePlayerAvailable() && (
             <SubtitleOverlay
               videoRef={videoRef}
               visible={selectedSubtitleIndex !== -1}

@@ -91,7 +91,7 @@ export default function SubtitleOverlay({ videoRef, visible = true, selectedSubt
   const fontSize = Math.max(11, Math.round(Math.max(containerH, 200) * 0.052 * (style.scale || 1)));
 
   return (
-    <div className="absolute inset-x-0 bottom-[6%] z-30 flex justify-center pointer-events-none px-6">
+    <div className="absolute inset-x-0 bottom-[6%] z-[35] flex justify-center pointer-events-none px-6">
       <div
         className="max-w-[92%] whitespace-pre-line text-center leading-snug font-medium rounded-md px-3 py-1"
         style={{

@@ -1711,12 +1711,16 @@ export default function FloatingVideoWindow({
           ))}
         </video>
 
-        {/* 自定义字幕渲染层（与影院播放器共享样式设置） */}
-        <SubtitleOverlay
-          videoRef={videoRef}
-          visible={selectedSubtitleIndex !== -1}
-          selectedSubtitleIndex={selectedSubtitleIndex}
-        />
+        {/* 自定义字幕渲染层（与影院播放器共享样式设置）。
+            壳内不挂载：DOM 字幕被 on-top 视频 surface 压在下面，dim 让位时
+            透出=「字幕夹在视频与菜单之间」假层；安卓字幕由原生字幕 surface 渲染 */}
+        {!isNativePlayerAvailable() && (
+          <SubtitleOverlay
+            videoRef={videoRef}
+            visible={selectedSubtitleIndex !== -1}
+            selectedSubtitleIndex={selectedSubtitleIndex}
+          />
+        )}
 
         {/* INLINE VR WEBGL CANVAS（壳内不挂载：镜像元素无帧，VR 走原生 VrPlayerActivity） */}
         {!isNativePlayerAvailable() && (

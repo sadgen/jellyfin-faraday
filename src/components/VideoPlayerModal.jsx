@@ -68,6 +68,11 @@ export default function VideoPlayerModal({
   const containerRef = useRef(null);
   const scrubberRef = useRef(null);
 
+  // 转码跨缓冲 seek 重启后强制重建 <track> 元素（MSE 重挂载废掉旧字幕轨 cue 缓冲，
+  // mode 复位救不回；重建元素才重新加载 vtt），浮窗同款机制
+  const [streamEpoch, setStreamEpoch] = useState(0);
+  const trackRemountPendingRef = useRef(false);
+
   const [playbackDefaults, setPlaybackDefaultsState] = useState(() => getPlaybackDefaults());
   const playbackDefaultsRef = useRef(playbackDefaults);
   playbackDefaultsRef.current = playbackDefaults;
@@ -195,6 +200,7 @@ export default function VideoPlayerModal({
       onTranscodeSeekRestart: () => {
         setPosterSuppressed(true);
         captureSeekFrameRef.current?.();
+        trackRemountPendingRef.current = true;
       },
       onError: (data) => {
         setHasError(true);
@@ -247,6 +253,13 @@ export default function VideoPlayerModal({
   const { volume, setVolume, isMuted, setIsMuted, toggleMute } = useVolumeControl(videoRef);
   const { subtitleStreams, mediaSourceId, selectedSubtitleIndex, selectSubtitle, syncSubtitleModes } =
     useSubtitleTracks({ item, playbackData, videoRef });
+
+  // track 重建后的模式回同步（重挂载的新 <track> 初始 disabled，等 commit 后置 hidden）
+  useEffect(() => {
+    if (!streamEpoch) return;
+    const t = setTimeout(syncSubtitleModes, 200);
+    return () => clearTimeout(t);
+  }, [streamEpoch, syncSubtitleModes]);
   const viewport = useViewport();
 
   // 音轨流（多音轨视频切换，如 双语配音 / 导演评论）
@@ -1133,6 +1146,10 @@ export default function VideoPlayerModal({
               setIsPlaying(true);
               setSeekFrameSnapshot(null);
               setHasPlayedOnce(true);
+              if (trackRemountPendingRef.current) {
+                trackRemountPendingRef.current = false;
+                setStreamEpoch(e => e + 1);
+              }
               syncSubtitleModes();
             }}
             onLoadedData={syncSubtitleModes}
@@ -1142,7 +1159,7 @@ export default function VideoPlayerModal({
           >
             {subtitleStreams.map(s => (
               <track
-                key={`${item.Id}-${s.Index}`}
+                key={`${streamEpoch}-${item.Id}-${s.Index}`}
                 kind="subtitles"
                 label={s.Title || s.Language || `Subtitle ${s.Index}`}
                 src={jellyfin.getSubtitleTrackUrl(item.Id, mediaSourceId, s.Index)}

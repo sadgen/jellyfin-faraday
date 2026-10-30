@@ -88,6 +88,13 @@ export default function FloatingVideoWindow({
   const videoRef = useRef(null);
   const containerRef = useRef(null);
   const scrubberRef = useRef(null);
+
+  // 转码跨缓冲 seek 重启后强制重建 <track> 元素：MSE 重挂载会让浏览器废弃
+  // 旧字幕轨的 cue 缓冲（mode 复位也救不回，只有重建元素才重新加载 vtt）。
+  // 流程：onTranscodeSeekRestart 标记 → 新流 onPlaying 时 bump epoch →
+  // track key 含 epoch 触发 React 重挂载 → 200ms 后重新同步轨模式
+  const [streamEpoch, setStreamEpoch] = useState(0);
+  const trackRemountPendingRef = useRef(false);
   // 窗内头部/控制条实测高度：点击铺满那一刻测量（此时窗口还是普通态，两者高度
   // 与铺满态一致），使铺满几何一次性同步算出，无需等高度渲染后再二次测量
   const headerRef = useRef(null);
@@ -639,7 +646,10 @@ export default function FloatingVideoWindow({
   if (!sessionControllerRef.current) {
     sessionControllerRef.current = new PlaybackSessionController({
       jellyfinClient: jellyfin,
-      onTranscodeSeekRestart: () => captureSeekFrameRef.current?.(),
+      onTranscodeSeekRestart: () => {
+        captureSeekFrameRef.current?.();
+        trackRemountPendingRef.current = true;
+      },
       onError: (data) => {
         setHasError(true);
         setSeekFrameSnapshot(null);
@@ -1049,6 +1059,14 @@ export default function FloatingVideoWindow({
     }
     setIsLoading(false);
   }, [currentPartId, setPlaybackData, syncSubtitleModes]);
+
+  // track 重建后的模式回同步：重挂载的新 <track> 初始 disabled，等 React commit
+  // 完成后再置 hidden（SubtitleOverlay 靠 500ms 轮询自会取到新 cues）
+  useEffect(() => {
+    if (!streamEpoch) return;
+    const t = setTimeout(syncSubtitleModes, 200);
+    return () => clearTimeout(t);
+  }, [streamEpoch, syncSubtitleModes]);
 
   // Switch Stream Quality / Transcode Bitrate seamlessly
   const changeStreamQuality = useCallback((qualityId, silent = false) => {
@@ -1670,6 +1688,10 @@ export default function FloatingVideoWindow({
             setIsPlaying(true);
             setEverPlayed(true);
             setSeekFrameSnapshot(null);
+            if (trackRemountPendingRef.current) {
+              trackRemountPendingRef.current = false;
+              setStreamEpoch(e => e + 1);
+            }
             syncSubtitleModes();
           }}
           onLoadedData={syncSubtitleModes}
@@ -1679,7 +1701,7 @@ export default function FloatingVideoWindow({
         >
           {subtitleStreams.map(s => (
             <track
-              key={`${currentPartId}-${s.Index}`}
+              key={`${streamEpoch}-${currentPartId}-${s.Index}`}
               kind="subtitles"
               label={s.Title || s.Language || `Subtitle ${s.Index}`}
               src={jellyfin.getSubtitleTrackUrl(currentPartId, mediaSourceId, s.Index)}

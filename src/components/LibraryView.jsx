@@ -3219,7 +3219,7 @@ export default function LibraryView({
                 viewLayout={viewLayout}
                 isMobileViewport={isMobileViewport}
                 belowFloatingWindows={hasFloatingWindows}
-                miniState={(miniWindows || []).find(w => w.item.Id === item.Id) ? { open: true, paused: !!miniWindows.find(w => w.item.Id === item.Id).cardPaused } : null}
+                miniState={(miniWindows || []).find(w => w.item.Id === seriesPageItem.Id) ? { open: true, paused: !!miniWindows.find(w => w.item.Id === seriesPageItem.Id).cardPaused } : null}
                 onOpenMiniWindow={onOpenMiniWindow}
                 onCloseMiniWindow={onCloseMiniWindow}
                 onToggleMiniPause={onToggleMiniPause}
@@ -3435,7 +3435,7 @@ export default function LibraryView({
                               isSelecting={isSelecting}
                               isMobileViewport={isMobileViewport}
                               belowFloatingWindows={hasFloatingWindows}
-                miniState={(miniWindows || []).find(w => w.item.Id === item.Id) ? { open: true, paused: !!miniWindows.find(w => w.item.Id === item.Id).cardPaused } : null}
+                miniState={(miniWindows || []).find(w => w.item.Id === file.Id) ? { open: true, paused: !!miniWindows.find(w => w.item.Id === file.Id).cardPaused } : null}
                 onOpenMiniWindow={onOpenMiniWindow}
                 onCloseMiniWindow={onCloseMiniWindow}
                 onToggleMiniPause={onToggleMiniPause}

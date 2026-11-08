@@ -1145,10 +1145,23 @@ export class JellyfinClient {
         });
         if (res.ok) {
           const data = await res.json();
+          // 同名字幕已存在: 服务端跳过了写入, 不能傻等新字幕流出现
+          if (data.skipped_existing) {
+            const e = new Error(data.note || '该影片已有同名字幕，未重复下载');
+            e.skippedExisting = true;
+            throw e;
+          }
+          if (!data.success) {
+            throw new Error(data.error || data.note || '字幕投递失败');
+          }
           await this.refreshItemMetadata(itemId).catch(() => {});
-          return Boolean(data.success);
+          return true;
         }
+        // 非 2xx: 读出服务端给出的原因 (毒药包/过小等), 不再静默回退旧通道造成困惑
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || '字幕服务响应异常');
       } catch (err) {
+        if (err.skippedExisting) throw err;
         console.warn('Failed to apply subtitle via service, fallback to legacy download:', err);
       }
     }

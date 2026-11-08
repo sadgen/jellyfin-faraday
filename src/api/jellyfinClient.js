@@ -1145,17 +1145,15 @@ export class JellyfinClient {
         });
         if (res.ok) {
           const data = await res.json();
-          // 同名字幕已存在: 服务端跳过了写入, 不能傻等新字幕流出现
-          if (data.skipped_existing) {
-            const e = new Error(data.note || '该影片已有同名字幕，未重复下载');
-            e.skippedExisting = true;
-            throw e;
+          // 如果大小与内容完全一致，服务端跳过重复写入，直接返回提示
+          if (data.skipped_identical) {
+            return { success: true, skippedIdentical: true, message: data.message || data.note };
           }
           if (!data.success) {
             throw new Error(data.error || data.note || '字幕投递失败');
           }
           await this.refreshItemMetadata(itemId).catch(() => {});
-          return true;
+          return { success: true, note: data.note };
         }
         // 非 2xx: 读出服务端给出的原因 (毒药包/过小等), 不再静默回退旧通道造成困惑
         const errData = await res.json().catch(() => ({}));

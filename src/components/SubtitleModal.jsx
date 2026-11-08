@@ -199,8 +199,15 @@ export default function SubtitleModal({
     setErrorMsg('');
     setSuccessMsg('');
     try {
-      const ok = await jellyfin.downloadRemoteSubtitle(item.Id, sub);
-      if (ok) {
+      const res = await jellyfin.downloadRemoteSubtitle(item.Id, sub);
+      if (res?.skippedIdentical) {
+        setSuccessMsg(res.message || '本地已存在完全一致的字幕文件，无需重复保存');
+        setTimeout(() => {
+          onClose();
+        }, 1500);
+        return;
+      }
+      if (res) {
         setSuccessMsg(`字幕「${sub.Name || '在线字幕'}」下载成功，正在等待服务器加载字幕流...`);
         // 只在可渲染的文本字幕流中挑选（排除 PGS/DVD/DVB 等图像字幕流），
         // 必须等到本次新下载出现的流真正进入 MediaStreams 才应用，

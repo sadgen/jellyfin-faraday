@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Hls from 'hls.js';
+import { isRemoteNetwork, isHevc10VideoStream, canMsePlayHevc10 } from '../streamRouting';
 import {
   isTimeInBuffer,
   secondsToTicks,
@@ -37,6 +38,12 @@ vi.mock('hls.js', () => {
     default: MockHls
   };
 });
+
+vi.mock('../streamRouting', () => ({
+  isRemoteNetwork: vi.fn(),
+  isHevc10VideoStream: vi.fn(),
+  canMsePlayHevc10: vi.fn()
+}));
 
 // Helper to mock HTML5 TimeRanges
 function createTimeRanges(ranges) {
@@ -111,11 +118,22 @@ describe('PlaybackSessionController', () => {
 
   beforeEach(() => {
     vi.useFakeTimers();
+    // 默认按内网处理（保持既有直连测试的行为不变），新分流用例单独覆写
+    isRemoteNetwork.mockResolvedValue(false);
+    isHevc10VideoStream.mockReturnValue(false);
+    canMsePlayHevc10.mockReturnValue(true);
     let sessionCounter = 1;
     mockJellyfin = {
+      auth: { serverUrl: 'https://jf.example', token: 'test-token', userId: 'u1' },
       createPlaySessionId: vi.fn(() => `test_session_${sessionCounter++}`),
       getStreamUrl: vi.fn((itemId) => `https://jf.example/stream/${itemId}`),
       getSmoothHlsUrl: vi.fn((itemId, bitrate, opts) => `https://jf.example/hls/${itemId}?bitrate=${bitrate}&ticks=${opts.startTimeTicks || 0}&sess=${opts.playSessionId}`),
+      getRemuxHlsUrl: vi.fn((itemId, opts) => `https://jf.example/remux/${itemId}?sess=${opts.playSessionId}`),
+      getItemPlaybackInfo: vi.fn().mockResolvedValue({
+        MediaSources: [{
+          MediaStreams: [{ Type: 'Video', Codec: 'hevc', Profile: 'Main 10', BitDepth: 10, CodecTag: 'hvc1' }]
+        }]
+      }),
       reportPlayback: vi.fn().mockResolvedValue(true),
       stopTranscoding: vi.fn().mockResolvedValue(true)
     };
@@ -184,6 +202,69 @@ describe('PlaybackSessionController', () => {
         playMethod: 'DirectPlay'
       })
     );
+  });
+
+  it('routes external HEVC 10-bit direct playback through remux HLS (DirectStream)', async () => {
+    isRemoteNetwork.mockResolvedValue(true);
+    isHevc10VideoStream.mockReturnValue(true);
+    canMsePlayHevc10.mockReturnValue(true);
+
+    await controller.loadStream({ itemId: 'item_358', streamQuality: 'direct' });
+
+    expect(controller.playMethod).toBe('DirectStream');
+    expect(mockJellyfin.getRemuxHlsUrl).toHaveBeenCalledWith('item_358', expect.objectContaining({
+      playSessionId: expect.any(String)
+    }));
+    // 不再走静态直连 src；由 hls.js 接管（loadSource 收到串流地址）
+    expect(mockVideo.src).not.toBe('https://jf.example/stream/item_358');
+    expect(isHevc10VideoStream).toHaveBeenCalled();
+    // 串流会话被视为转码态（跨缓冲 seek 走重启机制）
+    expect(controller.isTranscoding()).toBe(true);
+  });
+
+  it('keeps direct play for HEVC 10-bit on LAN (remux only for external)', async () => {
+    isRemoteNetwork.mockResolvedValue(false);
+    isHevc10VideoStream.mockReturnValue(true);
+
+    await controller.loadStream({ itemId: 'item_100', streamQuality: 'direct' });
+
+    expect(controller.playMethod).toBe('DirectPlay');
+    expect(mockJellyfin.getRemuxHlsUrl).not.toHaveBeenCalled();
+    expect(mockVideo.src).toBe('https://jf.example/stream/item_100');
+  });
+
+  it('keeps direct play for external non-10bit videos (e.g. HEVC 8-bit / H.264)', async () => {
+    isRemoteNetwork.mockResolvedValue(true);
+    isHevc10VideoStream.mockReturnValue(false);
+
+    await controller.loadStream({ itemId: 'item_639', streamQuality: 'direct' });
+
+    expect(controller.playMethod).toBe('DirectPlay');
+    expect(mockJellyfin.getRemuxHlsUrl).not.toHaveBeenCalled();
+  });
+
+  it('falls back to direct play when MSE cannot feed HEVC (old browsers)', async () => {
+    isRemoteNetwork.mockResolvedValue(true);
+    isHevc10VideoStream.mockReturnValue(true);
+    canMsePlayHevc10.mockReturnValue(false);
+
+    await controller.loadStream({ itemId: 'item_358', streamQuality: 'direct' });
+
+    expect(controller.playMethod).toBe('DirectPlay');
+    expect(mockJellyfin.getRemuxHlsUrl).not.toHaveBeenCalled();
+  });
+
+  it('caches the remux route per item so cross-buffer seek restart does not re-probe', async () => {
+    isRemoteNetwork.mockResolvedValue(true);
+    isHevc10VideoStream.mockReturnValue(true);
+
+    await controller.loadStream({ itemId: 'item_358', streamQuality: 'direct', initialSeekTime: 10 });
+    // 跨缓冲 seek 重启：同条目再次 loadStream
+    await controller.loadStream({ itemId: 'item_358', streamQuality: 'direct', initialSeekTime: 600 });
+
+    expect(controller.playMethod).toBe('DirectStream');
+    expect(mockJellyfin.getItemPlaybackInfo).toHaveBeenCalledTimes(1);
+    expect(mockJellyfin.getRemuxHlsUrl).toHaveBeenCalledTimes(2);
   });
 
   it('reports Started exactly once when a session is replaced before first play (StrictMode remount safe)', async () => {
@@ -362,6 +443,8 @@ describe('PlaybackSessionController', () => {
       callOrder.push('jellyfin.stopTranscoding');
       return true;
     });
+    // 控制器带 auth 的客户端走浅拷贝（与生产一致），替换须挂到控制器实际持有的引用上
+    controller.jellyfin.stopTranscoding = mockJellyfin.stopTranscoding;
 
     // Re-load stream to trigger cleanup of existing session
     await controller.loadStream({

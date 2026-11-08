@@ -1,6 +1,7 @@
 import Hls from 'hls.js';
 import { jellyfin } from '../api/jellyfinClient';
 import { isNativePlayerAvailable, nativePlayerBridge } from './nativePlayerBridge';
+import { isRemoteNetwork, isHevc10VideoStream, canMsePlayHevc10 } from './streamRouting';
 
 /**
  * 默认统一 HLS 配置（遵循 JELLYFIN_PLAYBACK_FIX_PLAN.md）
@@ -109,9 +110,15 @@ export class PlaybackSessionController {
 
   /**
    * 获取当前播放模式
+   * DirectStream（原样串流）与转码一样持有服务端 ffmpeg 会话，
+   * 跨缓冲 seek 必须走"快照遮罩 + 重启会话"路径，不能当直连处理
    */
   isTranscoding() {
-    return this.streamQuality !== 'direct' || this.playMethod === 'Transcode';
+    return (
+      this.streamQuality !== 'direct' ||
+      this.playMethod === 'Transcode' ||
+      this.playMethod === 'DirectStream'
+    );
   }
 
   /**
@@ -209,9 +216,25 @@ export class PlaybackSessionController {
 
     // 原画直连 = 渐进式静态流：起播零服务端开销、seek 走 HTTP Range 即时响应，
     // 由浏览器/设备硬解原文件（HEVC VR 源同样直接播）。
-    // 曾试验过 HLS DirectStream remux 以换取 hls.js 60s 缓冲垫，但这台服务器
-    // ffmpeg 起任务慢（冷启动可达 30s+），起播与跨缓冲 seek 延迟反而明显劣化，已回退。
+    // 历史注记：曾全局试验 HLS DirectStream remux 已回退（连局域网也换串流，起播与
+    // seek 全面劣化）；2026-11-08 重新引入但收窄为「外网 + HEVC 10-bit」条件分流
+    // （局域网 / 8-bit 保持直连秒开，见 shouldRemuxDirectStream）。
     if (streamQuality === 'direct' && audioStreamIndex === null) {
+      // 外网 + HEVC 10-bit：自动改走原样串流（Remux HLS，-c copy 零重编码保原画质），
+      // 换取 hls.js 60~120s 缓冲垫；局域网 / 非 10-bit 一律直连（秒开体验不变）。
+      // 探测/判定任一步失败都回落直连，绝不因新逻辑引入起播回归
+      const useRemux =
+        (await this.shouldRemuxDirectStream()) && this.generationId === currentGeneration;
+      if (useRemux) {
+        this.playMethod = 'DirectStream';
+        const remuxUrl = this.jellyfin.getRemuxHlsUrl(this.itemId, {
+          playSessionId: this.playSessionId,
+          mediaSourceId: this.mediaSourceId
+        });
+        this.initHls(remuxUrl, initialSeekTime, currentGeneration, autoPlay);
+        this.notifyState();
+        return;
+      }
       this.playMethod = 'DirectPlay';
       const directUrl = this.jellyfin.getStreamUrl(this.itemId);
 
@@ -265,6 +288,32 @@ export class PlaybackSessionController {
     }
 
     this.notifyState();
+  }
+
+  /**
+   * 外网 + HEVC 10-bit 时改走原样串流的判定（按条目缓存，跨缓冲 seek 重启不重复探测）。
+   * 依次确认：① 客户端到服务器是高延迟链路（外网/跨网段）；② 该视频是 HEVC 10-bit
+   * （PlaybackInfo 的 Codec/Profile/BitDepth，条目级请求一次）；③ 浏览器 MSE 能喂该
+   * codec tag 的 HEVC（hls.js 前置条件）。任一步不成立或失败都回落直连（保持现状）。
+   * @returns {Promise<boolean>}
+   */
+  async shouldRemuxDirectStream() {
+    if (this._directRoute?.itemId === this.itemId) {
+      return this._directRoute.useRemux;
+    }
+    const serverUrl = this.jellyfin?.auth?.serverUrl;
+    let useRemux = false;
+    try {
+      if (serverUrl && (await isRemoteNetwork(serverUrl))) {
+        const info = await this.jellyfin.getItemPlaybackInfo(this.itemId);
+        const video = (info?.MediaSources?.[0]?.MediaStreams || []).find(s => s.Type === 'Video');
+        if (isHevc10VideoStream(video) && canMsePlayHevc10(video?.CodecTag)) {
+          useRemux = true;
+        }
+      }
+    } catch {}
+    this._directRoute = { itemId: this.itemId, useRemux };
+    return useRemux;
   }
 
   /**

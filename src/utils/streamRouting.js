@@ -51,24 +51,30 @@ export async function isRemoteNetwork(serverUrl) {
  */
 export function isHevc10VideoStream(videoStream) {
   if (!videoStream) return false;
-  if (String(videoStream.Codec || '').toLowerCase() !== 'hevc') return false;
+  if (String(videoStream?.Codec || '').toLowerCase() !== 'hevc') return false;
   return videoStream.BitDepth === 10 || String(videoStream.Profile || '').includes('10');
 }
 
 /**
- * 浏览器 MSE 是否支持喂 HEVC 10-bit（hls.js 串流的前置条件）。
- * 按源文件实际 codec tag 匹配（hvc1/hev1 两种封法）；不支持时回落直连，
- * 由既有的「直连失败自动回退转码」兜底，绝不因新逻辑引入起播回归。
- * @param {string} codecTag - 源流的 CodecTag（如 'hvc1' / 'hev1'）
+ * 浏览器 MSE 是否支持喂该视频流（hls.js 串流的前置条件）。
+ * h264 avc1 全系 MSE 通行；hevc 按源 codec tag（hvc1/hev1）与位深（Main10=2.4 / Main=1.6）
+ * 拼串验证。不支持时回落直连，由既有的「直连失败自动回退转码」兜底。
+ * @param {object} videoStream - PlaybackInfo MediaStreams 中 Type==='Video' 的流
  * @returns {boolean}
  */
-export function canMsePlayHevc10(codecTag) {
+export function canMsePlayVideoStream(videoStream) {
   try {
     if (typeof MediaSource === 'undefined' || typeof MediaSource.isTypeSupported !== 'function') {
       return false;
     }
-    const tag = String(codecTag || 'hvc1').toLowerCase() === 'hev1' ? 'hev1' : 'hvc1';
-    return MediaSource.isTypeSupported(`video/mp4; codecs="${tag}.2.4.L120.B0"`);
+    const codec = String(videoStream?.Codec || '').toLowerCase();
+    if (codec === 'h264') return true;
+    if (codec === 'hevc') {
+      const tag = String(videoStream?.CodecTag || '').toLowerCase() === 'hev1' ? 'hev1' : 'hvc1';
+      const profileId = isHevc10VideoStream(videoStream) ? '2.4' : '1.6';
+      return MediaSource.isTypeSupported(`video/mp4; codecs="${tag}.${profileId}.L120.B0"`);
+    }
+    return false;
   } catch {
     return false;
   }

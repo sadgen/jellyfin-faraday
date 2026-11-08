@@ -1,7 +1,7 @@
 import Hls from 'hls.js';
 import { jellyfin } from '../api/jellyfinClient';
 import { isNativePlayerAvailable, nativePlayerBridge } from './nativePlayerBridge';
-import { isRemoteNetwork, isHevc10VideoStream, canMsePlayHevc10 } from './streamRouting';
+import { isRemoteNetwork, isHevc10VideoStream, canMsePlayVideoStream } from './streamRouting';
 
 /**
  * 默认统一 HLS 配置（遵循 JELLYFIN_PLAYBACK_FIX_PLAN.md）
@@ -68,7 +68,8 @@ export class PlaybackSessionController {
     onStateChange = null,
     onError = null,
     onAutoDirectFallback = null,
-    onTranscodeSeekRestart = null
+    onTranscodeSeekRestart = null,
+    onStreamRoute = null
   } = {}) {
     // Each controller owns the credentials of the account that created it.
     this.jellyfin = jellyfinClient.auth
@@ -79,18 +80,20 @@ export class PlaybackSessionController {
     this.onAutoDirectFallback = onAutoDirectFallback;
     // 跨缓冲转码 seek 重启流之前、video 尚未清空时同步触发（UI 可抓最后一帧做加载底图）
     this.onTranscodeSeekRestart = onTranscodeSeekRestart;
+    // 原画档自动分流结果回调（mode: 'auto-remux'）——UI 据此 toast 告知用户实际走的路
+    this.onStreamRoute = onStreamRoute;
 
     this.videoEl = null;
     this.itemId = null;
     this.mediaSourceId = null;
-    this.streamQuality = 'direct'; // 'direct' | '8000000' | '4000000' | '1000000' etc.
+    this.streamQuality = 'direct'; // 'direct' | 'remux' | '8000000' | '4000000' | '1000000' etc.
     this.audioStreamIndex = null;
     this.subtitleStreamIndex = null;
 
     this.playSessionId = null;
     this.generationId = 0;
     this.hlsInstance = null;
-    this.playMethod = 'DirectPlay'; // 'DirectPlay' | 'Transcode'
+    this.playMethod = 'DirectPlay'; // 'DirectPlay' | 'DirectStream' | 'Transcode'
     this.isDestroyed = false;
 
     this.reportTimer = null;
@@ -181,8 +184,11 @@ export class PlaybackSessionController {
     // 安卓壳（Capacitor）：原生 ExoPlayer 全权接管播放与 Jellyfin PlaybackEvents
     // 上报，页面 video 元素退化为状态镜像。web 侧不武装 Started/心跳，防止双计。
     if (isNativePlayerAvailable()) {
+      // 原生 ExoPlayer 直推无浏览器缓冲短板，「串流」档在壳内等价原画直推
       this.playMethod =
-        streamQuality === 'direct' && audioStreamIndex === null ? 'DirectPlay' : 'Transcode';
+        (streamQuality === 'direct' || streamQuality === 'remux') && audioStreamIndex === null
+          ? 'DirectPlay'
+          : 'Transcode';
       const streamUrl =
         this.playMethod === 'DirectPlay'
           ? this.jellyfin.getStreamUrl(this.itemId)
@@ -219,19 +225,28 @@ export class PlaybackSessionController {
     // 历史注记：曾全局试验 HLS DirectStream remux 已回退（连局域网也换串流，起播与
     // seek 全面劣化）；2026-11-08 重新引入但收窄为「外网 + HEVC 10-bit」条件分流
     // （局域网 / 8-bit 保持直连秒开，见 shouldRemuxDirectStream）。
-    if (streamQuality === 'direct' && audioStreamIndex === null) {
-      // 外网 + HEVC 10-bit：自动改走原样串流（Remux HLS，-c copy 零重编码保原画质），
-      // 换取 hls.js 60~120s 缓冲垫；局域网 / 非 10-bit 一律直连（秒开体验不变）。
-      // 探测/判定任一步失败都回落直连，绝不因新逻辑引入起播回归
-      const useRemux =
-        (await this.shouldRemuxDirectStream()) && this.generationId === currentGeneration;
-      if (useRemux) {
+    if ((streamQuality === 'direct' || streamQuality === 'remux') && audioStreamIndex === null) {
+      // 原画档路由：'direct' 在外网 + HEVC 10-bit 时自动改走原样串流（Remux HLS，
+      // -c copy 零重编码保原画质，换取 hls.js 60~120s 缓冲垫；局域网 / 非 10-bit
+      // 一律直连，秒开体验不变）；'remux' 为用户显式选择的串流档，不看网络不看位深，
+      // h264/hevc 均可原样串流。探测/判定任一步失败都回落直连，绝不因新逻辑引入起播回归
+      const forced = streamQuality === 'remux';
+      const route = await this.resolveDirectRoute(forced);
+      if (this.generationId !== currentGeneration) return;
+      if (route?.useRemux) {
         this.playMethod = 'DirectStream';
         const remuxUrl = this.jellyfin.getRemuxHlsUrl(this.itemId, {
           playSessionId: this.playSessionId,
-          mediaSourceId: this.mediaSourceId
+          mediaSourceId: this.mediaSourceId,
+          videoCodec: route.videoCodec
         });
         this.initHls(remuxUrl, initialSeekTime, currentGeneration, autoPlay);
+        // 自动分流对用户透明，回调让 UI toast 告知实际模式（显式档用户自己选的，不提示）
+        if (!forced && this.onStreamRoute) {
+          try {
+            this.onStreamRoute({ mode: 'auto-remux', videoCodec: route.videoCodec });
+          } catch {}
+        }
         this.notifyState();
         return;
       }
@@ -291,29 +306,38 @@ export class PlaybackSessionController {
   }
 
   /**
-   * 外网 + HEVC 10-bit 时改走原样串流的判定（按条目缓存，跨缓冲 seek 重启不重复探测）。
-   * 依次确认：① 客户端到服务器是高延迟链路（外网/跨网段）；② 该视频是 HEVC 10-bit
-   * （PlaybackInfo 的 Codec/Profile/BitDepth，条目级请求一次）；③ 浏览器 MSE 能喂该
-   * codec tag 的 HEVC（hls.js 前置条件）。任一步不成立或失败都回落直连（保持现状）。
-   * @returns {Promise<boolean>}
+   * 原画档串流路由判定（按条目缓存，跨缓冲 seek 重启不重复探测）。
+   * 自动档（force=false）依次确认：① 客户端到服务器是高延迟链路（外网/跨网段）；
+   * ② 该视频是 HEVC 10-bit（PlaybackInfo 的 Codec/Profile/BitDepth）；③ 浏览器 MSE
+   * 能喂该流。显式档（force=true）跳过网络判定，h264/hevc 均可原样串流。
+   * 任一步不成立或失败都回落直连（保持现状）。
+   * @param {boolean} force - 用户显式选择「串流」档
+   * @returns {Promise<{itemId: string, useRemux: boolean, videoCodec: string|null}>}
    */
-  async shouldRemuxDirectStream() {
+  async resolveDirectRoute(force = false) {
     if (this._directRoute?.itemId === this.itemId) {
-      return this._directRoute.useRemux;
+      return this._directRoute;
     }
     const serverUrl = this.jellyfin?.auth?.serverUrl;
     let useRemux = false;
+    let videoCodec = null;
     try {
-      if (serverUrl && (await isRemoteNetwork(serverUrl))) {
+      const remote = serverUrl ? await isRemoteNetwork(serverUrl) : false;
+      if (remote || force) {
         const info = await this.jellyfin.getItemPlaybackInfo(this.itemId);
         const video = (info?.MediaSources?.[0]?.MediaStreams || []).find(s => s.Type === 'Video');
-        if (isHevc10VideoStream(video) && canMsePlayHevc10(video?.CodecTag)) {
+        const codec = String(video?.Codec || '').toLowerCase();
+        const eligible = force
+          ? codec === 'hevc' || codec === 'h264'
+          : isHevc10VideoStream(video);
+        if (eligible && canMsePlayVideoStream(video)) {
           useRemux = true;
+          videoCodec = codec;
         }
       }
     } catch {}
-    this._directRoute = { itemId: this.itemId, useRemux };
-    return useRemux;
+    this._directRoute = { itemId: this.itemId, useRemux, videoCodec };
+    return this._directRoute;
   }
 
   /**
@@ -443,8 +467,8 @@ export class PlaybackSessionController {
     if (this.streamQuality === qualityId) return;
     const currentPos = this.videoEl?.currentTime || this.lastReportedPosition || 0;
     let audioIdx = this.audioStreamIndex;
-    if (qualityId === 'direct' && audioIdx !== null) {
-      audioIdx = null; // 原画直推重置音轨选择
+    if ((qualityId === 'direct' || qualityId === 'remux') && audioIdx !== null) {
+      audioIdx = null; // 原画档（直推/串流）重置音轨选择
     }
     const currentSpeed = this.videoEl?.playbackRate || 1;
     const isMuted = this.videoEl?.muted || false;
@@ -469,7 +493,11 @@ export class PlaybackSessionController {
   async changeAudioTrack(streamIndex, preferredQuality = '8000000') {
     if (this.audioStreamIndex === streamIndex) return;
     const currentPos = this.videoEl?.currentTime || this.lastReportedPosition || 0;
-    const targetQuality = this.streamQuality !== 'direct' ? this.streamQuality : preferredQuality;
+    // 原画档（直推/串流）无法指定音轨，切音轨回落转码档
+    const targetQuality =
+      this.streamQuality !== 'direct' && this.streamQuality !== 'remux'
+        ? this.streamQuality
+        : preferredQuality;
     const currentSpeed = this.videoEl?.playbackRate || 1;
     const isMuted = this.videoEl?.muted || false;
     const volume = this.videoEl?.volume || 1;

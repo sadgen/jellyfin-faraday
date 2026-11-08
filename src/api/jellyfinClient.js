@@ -809,14 +809,15 @@ export class JellyfinClient {
 
   /**
    * Get Remux HLS URL（原样串流：-c copy 只转容器不重编码，100% 原画质）
-   * 用于外网 HEVC 10-bit 原画：<video> 直推缓冲太小易卡死，串流换取 hls.js
-   * 大缓冲垫；服务端 Remux 实测 57x 实时，CPU 近零。
+   * 用于外网 HEVC 10-bit 原画与显式「串流」档：<video> 直推缓冲太小易卡死，
+   * 串流换取 hls.js 大缓冲垫；服务端 Remux 实测 57x 实时，CPU 近零。
    * 注意：与转码 URL 一样不可带 StartTimeTicks（服务端会抛 ArgumentException），
    * 起播定位由 hls.js startPosition 负责，服务端按分片序号自适应 FFmpeg -ss。
    * @param {string} itemId
-   * @param {object} opts - { playSessionId, mediaSourceId }
+   * @param {object} opts - { playSessionId, mediaSourceId, videoCodec }（videoCodec 按源流
+   *   传 'hevc'/'h264'，Jellyfin 的 VideoCodecCopy 匹配源 codec 才走 copy，不匹配会退化转码）
    */
-  getRemuxHlsUrl(itemId, { playSessionId = null, mediaSourceId = null } = {}) {
+  getRemuxHlsUrl(itemId, { playSessionId = null, mediaSourceId = null, videoCodec = 'hevc' } = {}) {
     if (!this.auth.serverUrl || !itemId) return '';
     const query = new URLSearchParams({
       MediaSourceId: mediaSourceId || itemId,
@@ -824,7 +825,7 @@ export class JellyfinClient {
       api_key: this.auth.token,
       DeviceId: 'FaradayWebClient',
       PlaySessionId: playSessionId || this.createPlaySessionId(),
-      VideoCodecCopy: 'hevc',
+      VideoCodecCopy: videoCodec,
       AudioCodecCopy: 'aac',
       TranscodingMaxAudioChannels: '2',
       RequireAvc: 'false',

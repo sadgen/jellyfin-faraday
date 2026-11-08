@@ -581,7 +581,7 @@ export default function FloatingVideoWindow({
 
   // Stream Quality: 'direct' | '8000000' | '4000000' | '2000000' | '1000000'
   const [streamQuality, setStreamQuality] = useState(() => playbackDefaults.quality || 'direct');
-  const isSmoothMode = streamQuality !== 'direct';
+  const isSmoothMode = streamQuality !== 'direct' && streamQuality !== 'remux';
   const [smoothToast, setSmoothToast] = useState('');
 
   // Pinned Poster PIP: defaults from global settings (1X on Mobile, 1.5X on Desktop)
@@ -650,6 +650,13 @@ export default function FloatingVideoWindow({
         captureSeekFrameRef.current?.();
         trackRemountPendingRef.current = true;
       },
+      onStreamRoute: ({ mode }) => {
+        // 原画档自动分流告知：用户点名「原画」时可能实际走了串流，toast 说清
+        if (mode === 'auto-remux') {
+          setSmoothToast('🔀 外网 HEVC 10-bit：已自动走原画串流（零转码，可切「串流」档固定）');
+          setTimeout(() => setSmoothToast(''), 4200);
+        }
+      },
       onError: (data) => {
         setHasError(true);
         setSeekFrameSnapshot(null);
@@ -678,7 +685,9 @@ export default function FloatingVideoWindow({
           return;
         }
         directDiagRef.current = `直连流: ${reasonText}，已自动回退到转码流`;
-        const defaultQuality = streamQualityRef.current !== 'direct' ? streamQualityRef.current : '4000000';
+        const curQuality = streamQualityRef.current;
+        const defaultQuality =
+          curQuality !== 'direct' && curQuality !== 'remux' ? curQuality : '4000000';
         setStreamQuality(defaultQuality);
         const tierLabel = defaultQuality === '4000000' ? '4M' : `${Math.round(parseInt(defaultQuality, 10) / 1000000)}M`;
         setSmoothToast(`⚠️ 原画直推失败：${reasonText}，已回退 ${tierLabel} 转码`);
@@ -1080,6 +1089,8 @@ export default function FloatingVideoWindow({
     if (!silent) {
       if (qualityId === 'direct') {
         setSmoothToast('🎬 已切换为原画直推模式');
+      } else if (qualityId === 'remux') {
+        setSmoothToast('📡 已切换为原画串流（HLS 零转码无损）');
       } else {
         const opt = QUALITY_OPTIONS.find(q => q.id === qualityId);
         setSmoothToast(`⚡ 已切换为 ${opt?.shortLabel || qualityId} 转码模式`);

@@ -6,6 +6,7 @@
 
 export const QUALITY_OPTIONS = [
   { id: 'direct', label: '🎬 原画直推 (原始码率)', shortLabel: '原画', bitrate: 0 },
+  { id: 'remux', label: '📡 原画串流 (HLS·零转码无损)', shortLabel: '串流', bitrate: 0 },
   { id: '8000000', label: '🌟 极清 8 Mbps (1080p)', shortLabel: '8M', bitrate: 8000000 },
   { id: '4000000', label: '⚡ 流畅 4 Mbps (1080p)', shortLabel: '4M', bitrate: 4000000 },
   { id: '2000000', label: '🚀 标清 2 Mbps (720p)', shortLabel: '2M', bitrate: 2000000 },

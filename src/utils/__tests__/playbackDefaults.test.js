@@ -15,6 +15,16 @@ describe('playbackDefaults preferences', () => {
     expect(defaults.smartStart).toBe(false);
     expect(defaults.patrolMode).toBe(false);
     expect(defaults.patrolIntervalSeconds).toBe(45);
+    expect(defaults.mobileOpenMode).toBe('crop');
+  });
+
+  it('persists mobileOpenMode and sanitizes unknown values back to crop', () => {
+    setPlaybackDefaults({ mobileOpenMode: 'float' });
+    expect(getPlaybackDefaults().mobileOpenMode).toBe('float');
+
+    // 未知/脏值回落默认 crop（三屏取中），不浮窗不炸
+    localStorage.setItem('faraday_playback_defaults', JSON.stringify({ mobileOpenMode: 'weird' }));
+    expect(getPlaybackDefaults().mobileOpenMode).toBe('crop');
   });
 
   it('updates preferences and persists to localStorage', () => {

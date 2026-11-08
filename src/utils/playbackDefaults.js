@@ -18,6 +18,12 @@ export const GYRO_SWEEP_OPTIONS = [
   { id: 'ultra', label: '极灵敏', deg: 30 }
 ];
 
+// 手机默认打开方式：点开视频时浮窗默认进入的形态（仅手机端生效）
+export const MOBILE_OPEN_MODE_OPTIONS = [
+  { id: 'crop', label: '三屏取中铺满' },
+  { id: 'float', label: '普通浮窗' }
+];
+
 export function getPlaybackDefaults() {
   if (typeof window === 'undefined') {
     return {
@@ -29,7 +35,8 @@ export function getPlaybackDefaults() {
       smartStart: false,
       patrolMode: false,
       patrolIntervalSeconds: 45,
-      gyroSweepDeg: 90
+      gyroSweepDeg: 90,
+      mobileOpenMode: 'crop'
     };
   }
   try {
@@ -45,7 +52,8 @@ export function getPlaybackDefaults() {
         smartStart: !!parsed.smartStart,
         patrolMode: !!parsed.patrolMode,
         patrolIntervalSeconds: Number(parsed.patrolIntervalSeconds) || 45,
-        gyroSweepDeg: Number(parsed.gyroSweepDeg) || 90
+        gyroSweepDeg: Number(parsed.gyroSweepDeg) || 90,
+        mobileOpenMode: parsed.mobileOpenMode === 'float' ? 'float' : 'crop'
       };
     }
   } catch {}
@@ -58,7 +66,8 @@ export function getPlaybackDefaults() {
     smartStart: false,
     patrolMode: false,
     patrolIntervalSeconds: 45,
-    gyroSweepDeg: 90
+    gyroSweepDeg: 90,
+    mobileOpenMode: 'crop'
   };
 }
 

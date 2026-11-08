@@ -8,7 +8,7 @@ import { aggregateActors } from '../utils/actorAggregator';
 import { stackMediaItems } from '../utils/mediaStacking';
 import { sortMediaItems } from '../utils/mediaSorter';
 import { useViewport } from '../hooks/useViewport';
-import { getPlaybackDefaults, setPlaybackDefaults, QUALITY_OPTIONS, SPEED_PRESETS, PATROL_INTERVALS, GYRO_SWEEP_OPTIONS } from '../utils/playbackDefaults';
+import { getPlaybackDefaults, setPlaybackDefaults, QUALITY_OPTIONS, SPEED_PRESETS, PATROL_INTERVALS, GYRO_SWEEP_OPTIONS, MOBILE_OPEN_MODE_OPTIONS } from '../utils/playbackDefaults';
 import { SEEK_SPEED_OPTIONS, getStoredSeekSpeed, setStoredSeekSpeed } from '../utils/seekSettings';
 import { GESTURE_ACTIONS, getGestureSettings, setGestureSettings } from '../utils/gestureSettings';
 import { pushSentinel, consumeSentinel, sentinelDepth } from '../utils/backSentinel';
@@ -2324,7 +2324,7 @@ export default function LibraryView({
 
                     <div className="flex flex-col gap-1.5">
                     <span className="text-[11px] text-cyan-300 font-bold">🎥 默认画质</span>
-                    <div className="grid grid-cols-5 gap-1.5">
+                    <div className="grid grid-cols-3 gap-1.5">
                       {QUALITY_OPTIONS.map(q => (
                         <button
                           key={q.id}
@@ -2398,6 +2398,30 @@ export default function LibraryView({
                         关闭
                       </button>
                     </div>
+                  </div>
+
+                  {/* 3.5 手机默认打开方式（仅手机端点开视频时生效） */}
+                  <div className="flex flex-col gap-1.5 pt-1 border-t border-white/10">
+                    <span className="text-[11px] text-cyan-300 font-bold">📱 手机默认打开方式（点开视频时浮窗的形态）</span>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {MOBILE_OPEN_MODE_OPTIONS.map(o => (
+                        <button
+                          key={o.id}
+                          onClick={() => {
+                            const updated = setPlaybackDefaults({ mobileOpenMode: o.id });
+                            setPlaybackDefaultsState(updated);
+                          }}
+                          className={`py-1.5 rounded-lg text-[11px] text-center transition ${
+                            (playbackDefaults.mobileOpenMode || 'crop') === o.id
+                              ? 'bg-cyan-400 text-slate-950 font-extrabold shadow-md shadow-cyan-400/40'
+                              : 'bg-slate-800 hover:bg-slate-700 text-gray-200 border border-white/10 font-medium'
+                          }`}
+                        >
+                          {o.label}
+                        </button>
+                      ))}
+                    </div>
+                    <span className="text-[9px] text-gray-500">仅手机端生效；「三屏取中铺满」= 三竖屏拼接只看中屏并上下顶满，「普通浮窗」= 常规可拖动小窗（窗内菜单仍可随时切换）</span>
                   </div>
 
                   {/* 4. Seek Speed Tier */}

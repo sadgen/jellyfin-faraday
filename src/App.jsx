@@ -333,6 +333,10 @@ export default function App() {
     typeof window !== 'undefined' && (window.innerWidth < 768 ||
       (navigator.maxTouchPoints > 1 && window.innerWidth < 1200));
 
+  // 手机单开浮窗是否默认进入三屏取中铺满（全局设置 mobileOpenMode，'float' = 普通浮窗）
+  const phoneAutoCrop = () =>
+    isPhoneViewport() && getPlaybackDefaults().mobileOpenMode !== 'float';
+
   // ==================== FLOATING 3-WINDOW PIP SYSTEM ====================
   // 安卓壳 v1 为单实例原生播放：网页浮窗窗格画面会被原生层接管（互相顶替），
   // 多窗同播属 v2 多实例范围，入口直接降级提示
@@ -348,8 +352,9 @@ export default function App() {
       if (prev.length < 3) {
         const occupiedSlots = prev.map(w => w.slotIndex);
         const targetSlot = [0, 1, 2].find(s => !occupiedSlots.includes(s)) ?? prev.length;
-        // 手机上单开浮窗默认三屏取中铺满（窗口挂 autoCrop 标记，多窗补齐不触发）
-        const autoCrop = isPhoneViewport();
+        // 手机上单开浮窗默认三屏取中铺满（窗口挂 autoCrop 标记，多窗补齐不触发；
+        // 全局设置选「普通浮窗」时不取中）
+        const autoCrop = phoneAutoCrop();
         return [
           ...prev,
           {
@@ -382,7 +387,7 @@ export default function App() {
           item,
           startSecond,
           timestamp: Date.now(),
-          autoCrop: isPhoneViewport()
+          autoCrop: phoneAutoCrop()
         }
       ];
     });

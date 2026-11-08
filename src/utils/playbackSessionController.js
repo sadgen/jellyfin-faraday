@@ -179,6 +179,14 @@ export class PlaybackSessionController {
     // 5. 为新播放流创建独立 PlaySessionId
     this.playSessionId = this.jellyfin.createPlaySessionId();
 
+    // 5.5 武装突然关页兜底：手机划掉标签/浏览器关闭时 destroy 不会执行，
+    // 服务端转码/串流切片会滞留到会话超时（remux 全速切片滞留可达数 GB）。
+    // pagehide 在移动端可靠触发，sendBeacon 补发 Stopped（带不了 Authorization
+    // 头，鉴权走 ApiKey query 参数，端点已实测接受）
+    if (!isNativePlayerAvailable()) {
+      this.armPageHideStop();
+    }
+
     if (!videoEl || !this.itemId) return;
 
     // 安卓壳（Capacitor）：原生 ExoPlayer 全权接管播放与 Jellyfin PlaybackEvents
@@ -651,6 +659,46 @@ export class PlaybackSessionController {
   }
 
   /**
+   * 突然关页兜底：pagehide 时以 sendBeacon 补发 Stopped（会话与位置实时读取，
+   * 会话被正常替换/销毁后 handler 已摘除或身份为空，不会误报新会话）。
+   */
+  armPageHideStop() {
+    this.clearPageHideStop();
+    if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return;
+    const handler = () => {
+      try {
+        const auth = this.jellyfin?.auth;
+        if (!auth?.serverUrl || !this.itemId || !this.playSessionId) return;
+        const posSec = this.videoEl?.currentTime ?? this.lastReportedPosition ?? 0;
+        const body = {
+          ItemId: this.itemId,
+          PositionTicks: Math.floor(posSec * 10000000),
+          PlaySessionId: this.playSessionId,
+          MediaSourceId: this.mediaSourceId,
+          PlayMethod: this.playMethod,
+          EventName: 'Stopped'
+        };
+        const url = `${auth.serverUrl}/Sessions/Playing/Stopped?ApiKey=${encodeURIComponent(auth.token)}`;
+        globalThis.navigator?.sendBeacon?.(
+          url,
+          new Blob([JSON.stringify(body)], { type: 'application/json' })
+        );
+      } catch {}
+    };
+    window.addEventListener('pagehide', handler);
+    this.pageHideRemover = () => window.removeEventListener('pagehide', handler);
+  }
+
+  clearPageHideStop() {
+    if (this.pageHideRemover) {
+      try {
+        this.pageHideRemover();
+      } catch {}
+      this.pageHideRemover = null;
+    }
+  }
+
+  /**
    * 销毁 HLS 实例并终止所有在途分片加载
    */
   destroyHls() {
@@ -688,6 +736,7 @@ export class PlaybackSessionController {
     this.generationId++;
     this.stopHeartbeat();
     this.clearStartedArm();
+    this.clearPageHideStop();
 
     // 安卓壳：web 侧会话从未上报服务器，结束交原生（Stopped/资源释放）
     if (isNativePlayerAvailable()) {

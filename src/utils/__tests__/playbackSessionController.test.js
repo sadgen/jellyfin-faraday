@@ -309,6 +309,32 @@ describe('PlaybackSessionController', () => {
     expect(mockJellyfin.getRemuxHlsUrl).toHaveBeenCalledTimes(2);
   });
 
+  it('sends a beacon Stopped report on pagehide to clean up server-side sessions', async () => {
+    const beacons = [];
+    const origSendBeacon = globalThis.navigator.sendBeacon;
+    globalThis.navigator.sendBeacon = vi.fn((url, blob) => beacons.push({ url, blob }));
+    try {
+      await controller.loadStream({ itemId: 'item_358', streamQuality: 'direct' });
+      mockVideo.currentTime = 42;
+
+      window.dispatchEvent(new Event('pagehide'));
+      expect(beacons.length).toBe(1);
+      expect(beacons[0].url).toContain('/Sessions/Playing/Stopped?ApiKey=test-token');
+      expect(beacons[0].blob.type).toBe('application/json');
+      const body = JSON.parse(await beacons[0].blob.text());
+      expect(body.ItemId).toBe('item_358');
+      expect(body.EventName).toBe('Stopped');
+      expect(body.PositionTicks).toBe(420000000);
+
+      // destroy 摘除 handler：后续 pagehide 不再补发
+      controller.destroy();
+      window.dispatchEvent(new Event('pagehide'));
+      expect(beacons.length).toBe(1);
+    } finally {
+      globalThis.navigator.sendBeacon = origSendBeacon;
+    }
+  });
+
   it('reports Started exactly once when a session is replaced before first play (StrictMode remount safe)', async () => {
     // First mount: session armed, then destroyed before playback starts
     await controller.loadStream({ itemId: 'item_800', streamQuality: 'direct', initialSeekTime: 5 });

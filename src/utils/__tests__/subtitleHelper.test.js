@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   hasHardcodedChineseSubtitles, getDefaultSubtitleIndex, detectChineseVariant,
-  buildSubtitleDefaultKey, matchStoredDefault
+  buildSubtitleDefaultKey, matchStoredDefault,
+  srtDialogueFingerprint, dialogueSimilarity
 } from '../subtitleHelper';
 
 describe('subtitleHelper hardsub detection and stream selection', () => {
@@ -147,5 +148,42 @@ describe('getDefaultSubtitleIndex with explicit stored default', () => {
   it('stays backward compatible without the third argument', () => {
     expect(getDefaultSubtitleIndex(item, streams)).toBe(1);
     expect(getDefaultSubtitleIndex(item, streams, null)).toBe(1);
+  });
+});
+
+describe('srtDialogueFingerprint + dialogueSimilarity (client-side dup detection)', () => {
+  const mkSrt = (lines) => lines.map((t, i) => `${i + 1}\n00:00:${String(i).padStart(2, '0')},000 --> 00:00:${String(i + 1).padStart(2, '0')},000\n${t}\n`).join('\n');
+
+  it('strips indexes/timestamps/punctuation and keeps CJK text', () => {
+    const fp = srtDialogueFingerprint(mkSrt(['你好，世界！', '这是第二句']));
+    expect(fp).toBe('你好世界这是第二句');
+    expect(srtDialogueFingerprint('')).toBe(null);
+    expect(srtDialogueFingerprint('1\n00:00:01,000 --> 00:00:02,000\n')).toBe(null);
+  });
+
+  it('gives similarity 1 for identical dialogue with different formatting/timing', () => {
+    const a = mkSrt(['今天天气不错', '我们出去玩吧', '好主意']);
+    const b = mkSrt(['今天天气  不错。', '我们出去玩吧', '好主意!']);
+    const fa = srtDialogueFingerprint(a);
+    const fb = srtDialogueFingerprint(b);
+    expect(dialogueSimilarity(fa, fb)).toBe(1);
+  });
+
+  it('scores minor diffs >= 0.9 (same subtitle, few typos)', () => {
+    // 仅个别错字/多字：单处替换+单处插入，非全篇简繁差异（全篇差异 ~0.85 应按政策保留双轨）
+    const a = srtDialogueFingerprint(mkSrt(['今天天气相当不错适合出门'.repeat(4), '我们到时候一起去公园散步聊天']));
+    const b = srtDialogueFingerprint(mkSrt(['今天天气相当不错适合出门'.repeat(3) + '今天天气相当不错适合出門', '我们到时候一起去公园散步行聊天']));
+    expect(dialogueSimilarity(a, b)).toBeGreaterThanOrEqual(0.9);
+  });
+
+  it('scores different translations well below 0.9', () => {
+    const a = srtDialogueFingerprint(mkSrt(['今天天气相当不错适合出门'.repeat(4), '我们到时候一起去公园散步聊天']));
+    const b = srtDialogueFingerprint(mkSrt(['此刻天色晴朗万里无云正是踏青好时节'.repeat(4), '不如相约午后前往郊外绿地谈谈心']));
+    expect(dialogueSimilarity(a, b)).toBeLessThan(0.9);
+  });
+
+  it('handles empty or null fingerprints', () => {
+    expect(dialogueSimilarity(null, 'abc')).toBe(0);
+    expect(dialogueSimilarity('abc', null)).toBe(0);
   });
 });

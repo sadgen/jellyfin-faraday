@@ -11,7 +11,8 @@ import {
   outlineToShadow, bgToCss
 } from '../utils/subtitleStyle';
 import {
-  detectChineseVariant, rankRemoteSubtitles, buildSubtitleDefaultKey
+  detectChineseVariant, rankRemoteSubtitles, buildSubtitleDefaultKey,
+  srtDialogueFingerprint, dialogueSimilarity
 } from '../utils/subtitleHelper';
 import {
   getDefaultSubtitle, saveDefaultSubtitle, clearDefaultSubtitle,
@@ -38,22 +39,18 @@ async function pollForNewSubtitle(itemId, findNewStream, { intervalMs = 500, tim
 }
 
 /**
- * 轮询 PlaybackInfo 直到指定字幕流消失（删除外部字幕后的服务端确认，
- * 与下载同款竞速问题：/Items/{id}/Refresh 是异步队列）。
+ * 从 PlaybackInfo 播放数据中摘除指定字幕流（乐观更新用，纯函数浅拷贝不改动原对象）。
  */
-async function pollForSubtitleRemoval(itemId, removedIndex, { intervalMs = 500, timeoutMs = 15000 } = {}) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    await new Promise(r => setTimeout(r, intervalMs));
-    try {
-      const playback = await jellyfin.getItemPlaybackInfo(itemId);
-      const streams = playback?.MediaSources?.[0]?.MediaStreams || playback?.MediaStreams || [];
-      if (!streams.some(s => s.Type === 'Subtitle' && s.Index === removedIndex)) return playback;
-    } catch {
-      // 单次拉取失败继续重试，直到超时
-    }
-  }
-  return null;
+function stripSubtitleStreams(playback, removeSet) {
+  if (!playback || !(removeSet instanceof Set) || removeSet.size === 0) return playback;
+  if (!playback.MediaSources?.length) return playback;
+  const strip = (streams) => (streams || []).filter(s => !removeSet.has(s.Index));
+  return {
+    ...playback,
+    MediaSources: playback.MediaSources.map((src, i) =>
+      i === 0 ? { ...src, MediaStreams: strip(src.MediaStreams) } : src),
+    ...(playback.MediaStreams ? { MediaStreams: strip(playback.MediaStreams) } : {})
+  };
 }
 
 // 下载记录：Jellyfin 对插件下载的字幕不保留来源与时间（文件 mtime 也无 API 可读），
@@ -147,6 +144,13 @@ export default function SubtitleModal({
   const [confirmDeleteIdx, setConfirmDeleteIdx] = useState(null);
   const [deletingIdx, setDeletingIdx] = useState(null);
   const deleteConfirmTimerRef = useRef(null);
+  // 乐观删除的「待确认消失」索引：后台对账期间持续压制这些行，防止回放数据复活已删轨
+  const pendingDeletedRef = useRef(new Set());
+  const latestItemIdRef = useRef(item?.Id);
+  const reconcileBusyRef = useRef(false);
+  useEffect(() => {
+    latestItemIdRef.current = item?.Id;
+  }, [item?.Id]);
   // 字幕下载记录：服务端为主（同账号全设备共享），本地为离线兜底
   const [downloadLog, setDownloadLog] = useState(() => loadLocalSubtitleLog());
   const latestLogRef = useRef(downloadLog);
@@ -160,7 +164,8 @@ export default function SubtitleModal({
   // Fetch full playback info with MediaSources & MediaStreams when opened
   useEffect(() => {
     if (isOpen && item?.Id) {
-      // 重置上一次打开残留的操作状态
+      // 重置上一次打开残留的操作状态（已删流经实测即时生效，残留压制无意义）
+      pendingDeletedRef.current = new Set();
       setConfirmDeleteIdx(null);
       setDeletingIdx(null);
       jellyfin.getItemPlaybackInfo(item.Id).then(data => {
@@ -262,7 +267,7 @@ export default function SubtitleModal({
         return;
       }
       if (res) {
-        setSuccessMsg(`字幕「${sub.Name || '在线字幕'}」下载成功，正在等待服务器加载字幕流...`);
+        setSuccessMsg(`字幕已保存到服务器，正在等待探测加载新字幕流（大文件较慢）...`);
         // 只在可渲染的文本字幕流中挑选（排除 PGS/DVD/DVB 等图像字幕流），
         // 必须等到本次新下载出现的流真正进入 MediaStreams 才应用，
         // 拿不到就不动当前字幕（绝不能乱切到已有旧轨）
@@ -277,6 +282,23 @@ export default function SubtitleModal({
         const updatedPlayback = await pollForNewSubtitle(item.Id, findNewStream);
         const newStream = updatedPlayback ? findNewStream(updatedPlayback) : null;
         if (newStream) {
+          // 客户端侧查重兜底：与既有轨内容比对，≥90% 相似判定为重复 →
+          // 自动删除刚下载的重复轨并明示用户（服务端查重只覆盖 .zh 命名且媒体可达的条目）
+          const dupNote = await detectDownloadedDuplicate(item.Id, updatedPlayback, newStream);
+          if (dupNote) {
+            setSuccessMsg(`检测到重复字幕：${dupNote}，正在自动清理...`);
+            try {
+              await jellyfin.deleteSubtitle(item.Id, newStream.Index);
+              const cleaned = stripSubtitleStreams(updatedPlayback, new Set([newStream.Index]));
+              setPlaybackData(cleaned);
+              setSuccessMsg(`该字幕与现有字幕重复（${dupNote}），已自动清理，无需重复下载`);
+              // 不记账、不应用、不自动关窗——用户可另选其他字幕
+              return;
+            } catch {
+              setErrorMsg(`检测到重复字幕（${dupNote}），但自动清理失败，可在「现有字幕」页签手动删除`);
+              return;
+            }
+          }
           const nextLog = addSubtitleDownload(latestLogRef.current, item.Id, newStream, sub);
           latestLogRef.current = nextLog;
           setDownloadLog(nextLog);
@@ -290,7 +312,7 @@ export default function SubtitleModal({
             onClose();
           }, 1200);
         } else {
-          setErrorMsg('字幕已保存到服务器，但后台刷新尚未完成，请稍后重新打开播放窗口加载字幕');
+          setErrorMsg('字幕已保存到服务器，但后台探测尚未完成（大文件较慢）——通常半分钟内自动生效，不会丢失，稍后重新打开字幕列表即可看到');
         }
       } else {
         setErrorMsg('字幕下载失败，请检查服务连接');
@@ -333,22 +355,86 @@ export default function SubtitleModal({
     setSuccessMsg('');
     try {
       await jellyfin.deleteSubtitle(item.Id, s.Index);
-      await jellyfin.refreshItemMetadata(item.Id);
-      const updatedPlayback = await pollForSubtitleRemoval(item.Id, s.Index);
-      if (!updatedPlayback) {
-        setErrorMsg('字幕文件已删除，但服务器后台刷新未完成，请稍后重新打开播放窗口确认');
-      }
+      // 实测（2026-11-10）：DELETE 即时生效，流 ~0.4s 内从 PlaybackInfo 消失，
+      // 无需显式刷新+轮询等待——乐观摘流 + 即时反馈，后台静默对账兜底
+      pendingDeletedRef.current.add(s.Index);
       // 删除的是本片默认轨 → 连带清除默认轨记录，避免指向已不存在的指纹
       if (isDefaultRow(s)) clearDefaultSubtitle(item.Id);
-      if (updatedPlayback) setPlaybackData(updatedPlayback);
+      const updated = stripSubtitleStreams(playbackData, pendingDeletedRef.current);
+      if (updated !== playbackData) setPlaybackData(updated);
       setSuccessMsg(`字幕「${s.Title || s.DisplayTitle || s.Language || '字幕'}」已删除`);
       // 播放面据此更新 playbackData；删的是当前选中轨时由它重选默认/关闭字幕
-      if (onSubtitleDeleted) onSubtitleDeleted(updatedPlayback || null, s.Index);
+      if (onSubtitleDeleted) onSubtitleDeleted(updated || null, s.Index);
+      reconcileAfterDelete(item.Id);
     } catch (err) {
       setErrorMsg(err.message || '删除字幕失败');
     } finally {
       setDeletingIdx(null);
     }
+  };
+
+  /**
+   * 后台对账（不阻塞 UI）：拉取服务器真值覆盖本地，并从中移除已确认消失的
+   * 待删索引。若某条仍在（刷新迟滞），压制状态下继续重试，行绝不复活。
+   */
+  const reconcileAfterDelete = (itemId) => {
+    if (!itemId || reconcileBusyRef.current) return;
+    reconcileBusyRef.current = true;
+    (async () => {
+      try {
+        for (let round = 0; round < 6; round++) {
+          await new Promise(r => setTimeout(r, 1200));
+          if (latestItemIdRef.current !== itemId) return; // 已换片，放弃本轮
+          let fresh = null;
+          try {
+            fresh = await jellyfin.getItemPlaybackInfo(itemId);
+          } catch {
+            continue;
+          }
+          if (!fresh) continue;
+          const streams = fresh?.MediaSources?.[0]?.MediaStreams || fresh?.MediaStreams || [];
+          const present = new Set(streams.map(s => s.Index));
+          for (const idx of [...pendingDeletedRef.current]) {
+            if (!present.has(idx)) pendingDeletedRef.current.delete(idx);
+          }
+          setPlaybackData(stripSubtitleStreams(fresh, pendingDeletedRef.current));
+          if (pendingDeletedRef.current.size === 0) return;
+        }
+      } finally {
+        reconcileBusyRef.current = false;
+      }
+    })();
+  };
+
+  /**
+   * 下载后查重兜底：新轨内容 vs 其余文本轨内容（Stream.srt 统一转 srt 后比对）。
+   * 服务端查重只覆盖 .zh 命名且媒体路径可达的条目；上传回退路径与既有 .chi.srt
+   * 命名的重复它拦不住。≥90% 相似判定为重复，返回描述（供自动清理）。
+   */
+  const detectDownloadedDuplicate = async (itemId, playback, newStream) => {
+    try {
+      const srcId = playback?.MediaSources?.[0]?.Id || itemId;
+      const streams = playback?.MediaSources?.[0]?.MediaStreams || playback?.MediaStreams || [];
+      const others = streams.filter(s =>
+        s && s.Type === 'Subtitle' && s.Index !== newStream.Index &&
+        !['pgssub', 'dvdsub', 'dvbsub'].includes(String(s.Codec || '').toLowerCase())
+      ).slice(0, 6); // 封顶：多轨长片比对最多 6 条，避免拖慢
+      const newText = await jellyfin.getSubtitleStreamContent(itemId, srcId, newStream.Index);
+      const newFp = srtDialogueFingerprint(newText || '');
+      if (!newFp || newFp.length < 20) return null; // 台词太少不判（证据不足绝不误删）
+      for (const t of others) {
+        const text = await jellyfin.getSubtitleStreamContent(itemId, srcId, t.Index);
+        const fp = srtDialogueFingerprint(text || '');
+        if (!fp) continue;
+        const label = t.Title || t.DisplayTitle || t.Language || `#${t.Index}`;
+        if (fp === newFp) return `与已有字幕「${label}」台词完全一致`;
+        const ratio = dialogueSimilarity(newFp, fp);
+        if (ratio >= 0.9) return `与已有字幕「${label}」相似度 ${Math.round(ratio * 100)}%`;
+      }
+    } catch {
+      // 检测失败不阻塞正常下载
+    }
+    return null;
   };
 
   const renderRemoteResult = (sub, isExact) => {

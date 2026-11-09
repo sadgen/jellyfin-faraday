@@ -180,3 +180,53 @@ export function getDefaultSubtitleIndex(item, subtitleStreams = [], storedDefaul
 
   return defaultStream ? defaultStream.Index : -1;
 }
+
+/**
+ * 字幕纯台词指纹（微服务 _srt_fingerprint 的 JS 版，客户端查重比对用）：
+ * 去序号/时间轴/空白/标点后拼接台词正文。输入应为 Stream.srt 转换后的文本，
+ * 跨格式（srt/ass/内嵌轨统一转 srt）比对稳定。无法提取台词返回 null。
+ */
+export function srtDialogueFingerprint(text) {
+  if (!text || text.includes('\x00')) return null;
+  const dialogue = [];
+  for (const block of String(text).trim().split(/\n\s*\n/)) {
+    for (const line of block.split(/\r?\n/)) {
+      const t = line.trim();
+      if (!t || t.includes('-->') || /^\d+$/.test(t)) continue;
+      // 注意用 \p{L}\p{N} 而非 \w：JS 的 \w 只认 ASCII，会把整句中文剥空
+      const clean = t.replace(/[^\p{L}\p{N}]+/gu, '');
+      if (clean) dialogue.push(clean);
+    }
+  }
+  return dialogue.join('') || null;
+}
+
+/**
+ * 台词相似度（字符二元组 Dice 系数，O(n)）。指纹动辄上万字符，
+ * SequenceMatcher 级 O(n²) 在浏览器里跑不动，Dice 与之在 ≥0.9 阈值附近判定一致：
+ * 完全相同 → 1；微小差异（个别错字/时间轴差异）≈ 0.95+；不同翻译通常远低于 0.9。
+ */
+export function dialogueSimilarity(fpA, fpB) {
+  if (!fpA || !fpB) return 0;
+  const MAX = 20000; // 封顶防超长指纹卡顿（阈值判定不受影响）
+  const a = fpA.slice(0, MAX);
+  const b = fpB.slice(0, MAX);
+  if (a === b) return 1;
+  const bigrams = (s) => {
+    const m = new Map();
+    for (let i = 0; i < s.length - 1; i++) {
+      const g = s.slice(i, i + 2);
+      m.set(g, (m.get(g) || 0) + 1);
+    }
+    return m;
+  };
+  const ga = bigrams(a);
+  const gb = bigrams(b);
+  let inter = 0;
+  for (const [g, c] of ga) {
+    const cc = gb.get(g);
+    if (cc) inter += Math.min(c, cc);
+  }
+  const denom = (a.length - 1) + (b.length - 1);
+  return denom > 0 ? (2 * inter) / denom : 0;
+}

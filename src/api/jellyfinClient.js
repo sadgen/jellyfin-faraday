@@ -1161,7 +1161,7 @@ export class JellyfinClient {
               format: subtitleItem.Format || 'srt'
             }
           }),
-          signal: globalThis.AbortSignal?.timeout ? globalThis.AbortSignal.timeout(20000) : undefined
+          signal: globalThis.AbortSignal?.timeout ? globalThis.AbortSignal.timeout(30000) : undefined
         });
         if (res.ok) {
           const data = await res.json();
@@ -1180,6 +1180,11 @@ export class JellyfinClient {
         throw new Error(errData.error || '字幕服务响应异常');
       } catch (err) {
         if (err.skippedExisting) throw err;
+        // 超时绝不静默回退旧通道：服务端可能仍在查重/落盘，回退通道再下一次
+        // 就是重复轨（「下载重复却显示等待服务器」正是超时回退后走插件通道的表现）
+        if (err.name === 'TimeoutError' || /timed?\s*out|timeout/i.test(String(err?.message || ''))) {
+          throw new Error('字幕服务处理超时（可能在查重或上游较慢），请稍后重试；若已生成重复字幕可在「现有字幕」页签删除');
+        }
         console.warn('Failed to apply subtitle via service, fallback to legacy download:', err);
       }
     }
@@ -1210,6 +1215,22 @@ export class JellyfinClient {
     if (!this.auth.serverUrl || !itemId || subtitleIndex === undefined) return '';
     const srcId = mediaSourceId || itemId;
     return `${this.auth.serverUrl}/Videos/${itemId}/${srcId}/Subtitles/${subtitleIndex}/Stream.vtt?ApiKey=${this.auth.token}&api_key=${this.auth.token}`;
+  }
+
+  /**
+   * 取字幕轨纯文本内容（Stream.srt 会把 srt/ass/内嵌文本轨统一转成 srt），
+   * 供客户端侧下载查重比对。失败返回 null。
+   */
+  async getSubtitleStreamContent(itemId, mediaSourceId, subtitleIndex) {
+    if (!this.auth.isConfigured || !itemId || subtitleIndex === undefined) return null;
+    try {
+      const srcId = mediaSourceId || itemId;
+      const res = await fetch(`${this.auth.serverUrl}/Videos/${itemId}/${srcId}/Subtitles/${subtitleIndex}/Stream.srt?ApiKey=${this.auth.token}&api_key=${this.auth.token}`);
+      if (!res.ok) return null;
+      return await res.text();
+    } catch {
+      return null;
+    }
   }
 
   /**

@@ -2,14 +2,21 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { jellyfin } from '../api/jellyfinClient';
 import {
   Subtitles, Download, Check, Search,
-  X, RefreshCw, Sparkles, FileText, AlertCircle, Palette, Clock, Crosshair
+  X, RefreshCw, Sparkles, FileText, AlertCircle, Palette, Clock, Crosshair,
+  Star, Trash2
 } from 'lucide-react';
 import {
   getSubtitleStyle, saveSubtitleStyle,
   SUBTITLE_COLORS, SUBTITLE_OUTLINES, SUBTITLE_BGS,
   outlineToShadow, bgToCss
 } from '../utils/subtitleStyle';
-import { detectChineseVariant, rankRemoteSubtitles } from '../utils/subtitleHelper';
+import {
+  detectChineseVariant, rankRemoteSubtitles, buildSubtitleDefaultKey
+} from '../utils/subtitleHelper';
+import {
+  getDefaultSubtitle, saveDefaultSubtitle, clearDefaultSubtitle,
+  subscribeSubtitleDefaultChanges, syncSubtitleDefaultsWithServer
+} from '../utils/subtitleDefaults';
 
 /**
  * 轮询 PlaybackInfo 直到出现新字幕流。
@@ -23,6 +30,25 @@ async function pollForNewSubtitle(itemId, findNewStream, { intervalMs = 500, tim
     try {
       const playback = await jellyfin.getItemPlaybackInfo(itemId);
       if (playback && findNewStream(playback)) return playback;
+    } catch {
+      // 单次拉取失败继续重试，直到超时
+    }
+  }
+  return null;
+}
+
+/**
+ * 轮询 PlaybackInfo 直到指定字幕流消失（删除外部字幕后的服务端确认，
+ * 与下载同款竞速问题：/Items/{id}/Refresh 是异步队列）。
+ */
+async function pollForSubtitleRemoval(itemId, removedIndex, { intervalMs = 500, timeoutMs = 15000 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, intervalMs));
+    try {
+      const playback = await jellyfin.getItemPlaybackInfo(itemId);
+      const streams = playback?.MediaSources?.[0]?.MediaStreams || playback?.MediaStreams || [];
+      if (!streams.some(s => s.Type === 'Subtitle' && s.Index === removedIndex)) return playback;
     } catch {
       // 单次拉取失败继续重试，直到超时
     }
@@ -104,6 +130,7 @@ export default function SubtitleModal({
   currentSubtitleIndex = -1,
   onSelectSubtitle,
   onSubtitleDownloaded,
+  onSubtitleDeleted,
   onClose
 }) {
   const [activeTab, setActiveTab] = useState('local'); // 'local' | 'remote' | 'style'
@@ -115,6 +142,11 @@ export default function SubtitleModal({
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [playbackData, setPlaybackData] = useState(null);
+  // 默认轨指纹（⭐）与删除两步确认/进行中状态
+  const [storedDefault, setStoredDefault] = useState(() => getDefaultSubtitle(item?.Id));
+  const [confirmDeleteIdx, setConfirmDeleteIdx] = useState(null);
+  const [deletingIdx, setDeletingIdx] = useState(null);
+  const deleteConfirmTimerRef = useRef(null);
   // 字幕下载记录：服务端为主（同账号全设备共享），本地为离线兜底
   const [downloadLog, setDownloadLog] = useState(() => loadLocalSubtitleLog());
   const latestLogRef = useRef(downloadLog);
@@ -128,11 +160,33 @@ export default function SubtitleModal({
   // Fetch full playback info with MediaSources & MediaStreams when opened
   useEffect(() => {
     if (isOpen && item?.Id) {
+      // 重置上一次打开残留的操作状态
+      setConfirmDeleteIdx(null);
+      setDeletingIdx(null);
       jellyfin.getItemPlaybackInfo(item.Id).then(data => {
         if (data) setPlaybackData(data);
       }).catch(() => {});
     }
   }, [isOpen, item?.Id]);
+
+  // 默认轨状态：本地缓存秒读；打开时与服务端 KV 对齐，并订阅跨端变更广播
+  useEffect(() => {
+    if (!isOpen || !item?.Id) return;
+    let cancelled = false;
+    setStoredDefault(getDefaultSubtitle(item.Id));
+    syncSubtitleDefaultsWithServer()
+      .then(map => { if (!cancelled) setStoredDefault(map?.[item.Id] || null); })
+      .catch(() => {});
+    const unsub = subscribeSubtitleDefaultChanges(() => {
+      setStoredDefault(getDefaultSubtitle(item.Id));
+    });
+    return () => { cancelled = true; unsub(); };
+  }, [isOpen, item?.Id]);
+
+  // 卸载时清掉两步确认的回退定时器
+  useEffect(() => () => {
+    if (deleteConfirmTimerRef.current) clearTimeout(deleteConfirmTimerRef.current);
+  }, []);
 
   // 打开时拉服务端下载记录并与本地合并；本地多出的旧记录（其它端看不到的）自动迁到服务端
   useEffect(() => {
@@ -245,6 +299,55 @@ export default function SubtitleModal({
       setErrorMsg(err.message || '下载出错');
     } finally {
       setDownloadingId(null);
+    }
+  };
+
+  /** 该轨是否为本片当前指定的默认轨（⭐） */
+  const isDefaultRow = (s) =>
+    !!storedDefault && buildSubtitleDefaultKey(storedDefault) === buildSubtitleDefaultKey(s);
+
+  const handleSetDefault = (s) => {
+    if (!item?.Id) return;
+    if (isDefaultRow(s)) {
+      clearDefaultSubtitle(item.Id);
+      setStoredDefault(null);
+    } else {
+      saveDefaultSubtitle(item.Id, s);
+      setStoredDefault(getDefaultSubtitle(item.Id));
+    }
+  };
+
+  // 删除两步确认：首击变红「确认？」，3 秒不点回退
+  const armConfirmDelete = (index) => {
+    setConfirmDeleteIdx(index);
+    if (deleteConfirmTimerRef.current) clearTimeout(deleteConfirmTimerRef.current);
+    deleteConfirmTimerRef.current = setTimeout(() => setConfirmDeleteIdx(null), 3000);
+  };
+
+  const handleConfirmDelete = async (s) => {
+    if (deleteConfirmTimerRef.current) clearTimeout(deleteConfirmTimerRef.current);
+    setConfirmDeleteIdx(null);
+    if (!item?.Id) return;
+    setDeletingIdx(s.Index);
+    setErrorMsg('');
+    setSuccessMsg('');
+    try {
+      await jellyfin.deleteSubtitle(item.Id, s.Index);
+      await jellyfin.refreshItemMetadata(item.Id);
+      const updatedPlayback = await pollForSubtitleRemoval(item.Id, s.Index);
+      if (!updatedPlayback) {
+        setErrorMsg('字幕文件已删除，但服务器后台刷新未完成，请稍后重新打开播放窗口确认');
+      }
+      // 删除的是本片默认轨 → 连带清除默认轨记录，避免指向已不存在的指纹
+      if (isDefaultRow(s)) clearDefaultSubtitle(item.Id);
+      if (updatedPlayback) setPlaybackData(updatedPlayback);
+      setSuccessMsg(`字幕「${s.Title || s.DisplayTitle || s.Language || '字幕'}」已删除`);
+      // 播放面据此更新 playbackData；删的是当前选中轨时由它重选默认/关闭字幕
+      if (onSubtitleDeleted) onSubtitleDeleted(updatedPlayback || null, s.Index);
+    } catch (err) {
+      setErrorMsg(err.message || '删除字幕失败');
+    } finally {
+      setDeletingIdx(null);
     }
   };
 
@@ -432,41 +535,93 @@ export default function SubtitleModal({
                 const title = s.Title || s.DisplayTitle || `${s.Language || '字幕'} #${idx + 1}`;
                 const variant = detectChineseVariant(s);
                 const download = lookupSubtitleDownload(downloadLog, item?.Id, s);
+                const isDefault = isDefaultRow(s);
+                const isConfirming = confirmDeleteIdx === s.Index;
+                const isDeleting = deletingIdx === s.Index;
                 return (
-                  <button
+                  <div
                     key={s.Index}
-                    onClick={() => {
-                      onSelectSubtitle(s.Index);
-                      onClose();
-                    }}
-                    className={`p-3 rounded-xl border flex items-center justify-between text-left transition ${
+                    className={`p-3 rounded-xl border flex items-center gap-1 transition ${
                       isSelected
-                        ? 'bg-cyan-500/20 border-cyan-400 text-cyan-300 font-bold'
-                        : 'bg-black/40 border-white/5 text-gray-300 hover:bg-white/5'
+                        ? 'bg-cyan-500/20 border-cyan-400'
+                        : 'bg-black/40 border-white/5'
                     }`}
                   >
-                    <div className="flex flex-col min-w-0 pr-2">
-                      <span className="truncate">
-                        {title}
-                        {variant && (
-                          <span className="ml-1.5 px-1 py-0.5 rounded bg-cyan-950/80 border border-cyan-500/40 text-cyan-300 text-[9px] font-bold align-middle">
-                            {variant}
+                    <button
+                      onClick={() => {
+                        onSelectSubtitle(s.Index);
+                        onClose();
+                      }}
+                      className="flex-1 min-w-0 flex items-center justify-between text-left"
+                    >
+                      <div className="flex flex-col min-w-0 pr-2">
+                        <span className={`truncate ${isSelected ? 'text-cyan-300 font-bold' : 'text-gray-300'}`}>
+                          {title}
+                          {isDefault && (
+                            <span className="ml-1.5 inline-flex items-center gap-0.5 px-1 py-0.5 rounded bg-amber-950/80 border border-amber-500/40 text-amber-300 text-[9px] font-bold align-middle">
+                              <Star size={9} fill="currentColor" /> 默认
+                            </span>
+                          )}
+                          {variant && (
+                            <span className="ml-1.5 px-1 py-0.5 rounded bg-cyan-950/80 border border-cyan-500/40 text-cyan-300 text-[9px] font-bold align-middle">
+                              {variant}
+                            </span>
+                          )}
+                        </span>
+                        <span className="text-[10px] text-gray-500 font-mono mt-0.5">
+                          {s.Codec?.toUpperCase()} {s.Language && `• ${s.Language}`} {s.IsDefault && '• 服务器默认'} {s.IsForced && '• 强制'} {!s.IsExternal && '• 内嵌'}
+                        </span>
+                        {download && (
+                          <span className="text-[10px] text-emerald-400/90 font-mono mt-0.5 truncate">
+                            ⬇ {formatDownloadTime(download.ts)}{download.provider ? ` · ${download.provider}` : ''}
                           </span>
                         )}
-                      </span>
-                      <span className="text-[10px] text-gray-500 font-mono mt-0.5">
-                        {s.Codec?.toUpperCase()} {s.Language && `• ${s.Language}`} {s.IsDefault && '• 默认'} {s.IsForced && '• 强制'}
-                      </span>
-                      {download && (
-                        <span className="text-[10px] text-emerald-400/90 font-mono mt-0.5 truncate">
-                          ⬇ {formatDownloadTime(download.ts)}{download.provider ? ` · ${download.provider}` : ''}
-                        </span>
+                      </div>
+                      {isSelected && <Check size={16} className="text-cyan-400 flex-shrink-0" />}
+                    </button>
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                      <button
+                        onClick={() => handleSetDefault(s)}
+                        title={isDefault ? '取消默认（下次打开恢复自动选择）' : '设为默认（下次打开自动挂载，本账号全设备生效）'}
+                        className={`p-1.5 rounded-lg transition ${
+                          isDefault
+                            ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                            : 'text-gray-500 hover:text-amber-300 hover:bg-amber-500/10'
+                        }`}
+                      >
+                        <Star size={14} fill={isDefault ? 'currentColor' : 'none'} />
+                      </button>
+                      {s.IsExternal && (
+                        <button
+                          onClick={() => {
+                            if (isDeleting) return;
+                            if (isConfirming) handleConfirmDelete(s);
+                            else armConfirmDelete(s.Index);
+                          }}
+                          disabled={isDeleting}
+                          title={isConfirming ? '再点一次确认删除字幕文件' : '删除此字幕文件'}
+                          className={`px-2 py-1.5 rounded-lg font-bold transition ${
+                            isConfirming
+                              ? 'bg-red-600 text-white'
+                              : 'text-gray-500 hover:text-red-400 hover:bg-red-500/10'
+                          } disabled:opacity-60`}
+                        >
+                          {isDeleting
+                            ? <RefreshCw size={14} className="animate-spin" />
+                            : isConfirming ? <span className="text-[10px]">确认?</span> : <Trash2 size={14} />}
+                        </button>
                       )}
                     </div>
-                    {isSelected && <Check size={16} className="text-cyan-400 flex-shrink-0" />}
-                  </button>
+                  </div>
                 );
               })}
+
+              {localSubtitles.length > 0 && (
+                <div className="flex items-center gap-1.5 text-[10px] text-gray-500 px-1 pt-1">
+                  <Star size={11} fill="currentColor" className="text-amber-400/80 flex-shrink-0" />
+                  <span>默认字幕下次打开自动挂载（本账号全设备生效）；🗑 仅可删除外挂字幕文件，内嵌轨道不可删</span>
+                </div>
+              )}
 
               {localSubtitles.length === 0 && (
                 <div className="flex flex-col items-center justify-center text-gray-500 py-8 gap-2">

@@ -6,7 +6,9 @@ import { useExternalPlayer } from '../hooks/useExternalPlayer';
 import { useTouchGestures } from '../hooks/useTouchGestures';
 import { useVolumeControl } from '../hooks/useVolumeControl';
 import { useMediaPlaybackInfo } from '../hooks/useMediaPlaybackInfo';
-import { useSubtitleTracks } from '../hooks/useSubtitleTracks';
+import { useSubtitleTracks, filterTextSubtitleStreams } from '../hooks/useSubtitleTracks';
+import { getDefaultSubtitleIndex } from '../utils/subtitleHelper';
+import { getDefaultSubtitle } from '../utils/subtitleDefaults';
 import { useViewport } from '../hooks/useViewport';
 import { SEEK_SPEED_OPTIONS, getStoredSeekSpeed, setStoredSeekSpeed, getSeekStepSeconds } from '../utils/seekSettings';
 import { createSeekLock } from '../utils/seekLock';
@@ -2395,6 +2397,18 @@ export default function FloatingVideoWindow({
         onSubtitleDownloaded={(updatedPlayback, subIdx) => {
           if (updatedPlayback) setPlaybackData(updatedPlayback);
           if (subIdx !== undefined && subIdx !== null) selectSubtitle(subIdx);
+        }}
+        onSubtitleDeleted={(updatedPlayback, deletedIdx) => {
+          if (updatedPlayback) setPlaybackData(updatedPlayback);
+          if (deletedIdx === selectedSubtitleIndex) {
+            const streams = filterTextSubtitleStreams(
+              updatedPlayback?.MediaSources?.[0]?.MediaStreams || updatedPlayback?.MediaStreams || []
+            );
+            const nextIdx = getDefaultSubtitleIndex(item, streams, getDefaultSubtitle(item?.Id));
+            selectSubtitle(nextIdx);
+            // 快捷开关的「最近轨」记忆同步失效，避免 CC 恢复到已删除的轨
+            lastSubtitleIndexRef.current = nextIdx;
+          }
         }}
         onClose={() => setShowSubtitleModal(false)}
       />

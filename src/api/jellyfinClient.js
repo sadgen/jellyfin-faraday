@@ -7,9 +7,10 @@ import { shellImageBase } from '../utils/shellOrigin';
 
 const STORAGE_KEY = 'jellyfin_faraday_auth';
 
-// 字幕下载记录的 DisplayPreferences id（服务器按 userId+client 存，同账号跨设备共享）
+// 字幕客户端 KV 的 DisplayPreferences id（服务器按 userId+client 存，同账号跨设备共享）
 const SUBTITLE_LOG_PREF_ID = '8f3a2b64-1c4d-4e5f-9a6b-7c8d9e0f1a2b';
 const SUBTITLE_LOG_PREF_KEY = 'subtitleDownloadLog';
+const SUBTITLE_DEFAULTS_PREF_KEY = 'faradaySubtitleDefaults';
 
 export class JellyfinClient {
   constructor() {
@@ -733,6 +734,25 @@ export class JellyfinClient {
   }
 
   /**
+   * 删除外部字幕文件（Jellyfin 原生端点）：仅 IsExternal 的字幕轨可删，
+   * 内嵌（MKV 容器）轨道物理上删不了，调用方须先过滤。
+   */
+  async deleteSubtitle(itemId, streamIndex) {
+    if (!this.auth.isConfigured || !itemId || streamIndex === undefined) return false;
+    const res = await fetch(`${this.auth.serverUrl}/Videos/${itemId}/Subtitles/${streamIndex}`, {
+      method: 'DELETE',
+      headers: this.getAuthHeaders()
+    });
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => null);
+      const detail = errJson?.detail || errJson?.title || errJson?.message;
+      const statusText = detail ? `${detail} (HTTP ${res.status})` : `可能没有管理员/写权限 (HTTP ${res.status})`;
+      throw new Error(`删除字幕失败，${statusText}`);
+    }
+    return true;
+  }
+
+  /**
    * Get direct playable stream URL
    */
   getStreamUrl(itemId) {
@@ -1193,11 +1213,10 @@ export class JellyfinClient {
   }
 
   /**
-   * 字幕下载记录（时间/来源）存服务端：Jellyfin 本身不记这些信息（文件 mtime 无 API 可读），
-   * 借官方用户级 KV（DisplayPreferences CustomPrefs）在下载时刻由客户端记账，同账号全设备共享。
-   * 返回 { itemId: { 字幕文件名或'#index': {ts,name,provider,index} } }，不可达时返回 null。
+   * 用户级 DisplayPreferences 文档（CustomPrefs KV，按 userId+client 存）原始读取。
+   * 不可达/未配置返回 null；正常返回 CustomPrefs 对象（可能为空）。
    */
-  async getSubtitleDownloadLog() {
+  async getDisplayPrefsCustomPrefs() {
     if (!this.auth.isConfigured || !this.auth.userId) return null;
     try {
       const res = await fetch(`${this.auth.serverUrl}/DisplayPreferences/${SUBTITLE_LOG_PREF_ID}?userId=${this.auth.userId}&client=${this.clientName}`, {
@@ -1205,16 +1224,20 @@ export class JellyfinClient {
       });
       if (!res.ok) return null;
       const data = await res.json();
-      const raw = data?.CustomPrefs?.[SUBTITLE_LOG_PREF_KEY];
-      return raw ? JSON.parse(raw) : {};
+      return data?.CustomPrefs || {};
     } catch {
       return null;
     }
   }
 
-  async saveSubtitleDownloadLog(log) {
+  /**
+   * 合并写入 CustomPrefs 中的一个 key：读→改→POST 全量，保留同文档其他 key
+   * （subtitleDownloadLog 与 faradaySubtitleDefaults 共用一个 pref 文档）。
+   */
+  async saveDisplayPrefsCustomPrefs(key, value) {
     if (!this.auth.isConfigured || !this.auth.userId) return false;
     try {
+      const existing = await this.getDisplayPrefsCustomPrefs();
       const res = await fetch(`${this.auth.serverUrl}/DisplayPreferences/${SUBTITLE_LOG_PREF_ID}?userId=${this.auth.userId}&client=${this.clientName}`, {
         method: 'POST',
         headers: this.getAuthHeaders(),
@@ -1226,13 +1249,55 @@ export class JellyfinClient {
           SortBy: 'SortName',
           RememberIndexing: false,
           RememberSorting: false,
-          CustomPrefs: { [SUBTITLE_LOG_PREF_KEY]: JSON.stringify(log) }
+          CustomPrefs: { ...(existing || {}), [key]: JSON.stringify(value) }
         })
       });
       return res.ok;
     } catch {
       return false;
     }
+  }
+
+  /**
+   * 字幕下载记录（时间/来源）存服务端：Jellyfin 本身不记这些信息（文件 mtime 无 API 可读），
+   * 在下载时刻由客户端记账，同账号全设备共享。
+   * 返回 { itemId: { 字幕文件名或'#index': {ts,name,provider,index} } }，不可达时返回 null。
+   */
+  async getSubtitleDownloadLog() {
+    const prefs = await this.getDisplayPrefsCustomPrefs();
+    if (!prefs) return null;
+    const raw = prefs[SUBTITLE_LOG_PREF_KEY];
+    if (!raw) return {};
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return {};
+    }
+  }
+
+  async saveSubtitleDownloadLog(log) {
+    return this.saveDisplayPrefsCustomPrefs(SUBTITLE_LOG_PREF_KEY, log);
+  }
+
+  /**
+   * 字幕默认轨 KV：{ itemId: { index, external, language, displayTitle, path, ts } }。
+   * 记录流指纹而非裸 index（外部轨=文件名基名、内嵌轨=index+DisplayTitle），
+   * 删轨导致 Jellyfin 重编号后仍能对上正确的轨道。不可达时返回 null。
+   */
+  async getSubtitleDefaults() {
+    const prefs = await this.getDisplayPrefsCustomPrefs();
+    if (!prefs) return null;
+    const raw = prefs[SUBTITLE_DEFAULTS_PREF_KEY];
+    if (!raw) return {};
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return {};
+    }
+  }
+
+  async saveSubtitleDefaults(map) {
+    return this.saveDisplayPrefsCustomPrefs(SUBTITLE_DEFAULTS_PREF_KEY, map);
   }
 
   /**

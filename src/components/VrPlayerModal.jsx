@@ -9,7 +9,9 @@ import VolumeControl from './VolumeControl';
 import SleepTimerButton from './SleepTimerButton';
 import { useVolumeControl } from '../hooks/useVolumeControl';
 import { useMediaPlaybackInfo } from '../hooks/useMediaPlaybackInfo';
-import { useSubtitleTracks } from '../hooks/useSubtitleTracks';
+import { useSubtitleTracks, filterTextSubtitleStreams } from '../hooks/useSubtitleTracks';
+import { getDefaultSubtitleIndex } from '../utils/subtitleHelper';
+import { getDefaultSubtitle } from '../utils/subtitleDefaults';
 import { isNativePlayerAvailable } from '../utils/nativePlayerBridge';
 import { PLAYBACK_SPEED_OPTIONS } from '../utils/qualityPresets';
 import { getPlaybackDefaults } from '../utils/playbackDefaults';
@@ -863,6 +865,15 @@ export default function VrPlayerModal({
         onSubtitleDownloaded={(updatedPlayback, subIdx) => {
           if (updatedPlayback) setPlaybackData(updatedPlayback);
           selectSubtitle(subIdx);
+        }}
+        onSubtitleDeleted={(updatedPlayback, deletedIdx) => {
+          if (updatedPlayback) setPlaybackData(updatedPlayback);
+          if (deletedIdx === selectedSubtitleIndex) {
+            const streams = filterTextSubtitleStreams(
+              updatedPlayback?.MediaSources?.[0]?.MediaStreams || updatedPlayback?.MediaStreams || []
+            );
+            selectSubtitle(getDefaultSubtitleIndex(item, streams, getDefaultSubtitle(item?.Id)));
+          }
         }}
         onClose={() => setShowSubtitleModal(false)}
       />

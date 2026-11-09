@@ -4,7 +4,9 @@ import { useExternalPlayer } from '../hooks/useExternalPlayer';
 import { useTouchGestures } from '../hooks/useTouchGestures';
 import { useVolumeControl } from '../hooks/useVolumeControl';
 import { useMediaPlaybackInfo } from '../hooks/useMediaPlaybackInfo';
-import { useSubtitleTracks } from '../hooks/useSubtitleTracks';
+import { useSubtitleTracks, filterTextSubtitleStreams } from '../hooks/useSubtitleTracks';
+import { getDefaultSubtitleIndex } from '../utils/subtitleHelper';
+import { getDefaultSubtitle } from '../utils/subtitleDefaults';
 import { useViewport } from '../hooks/useViewport';
 import TrickplayScrubberThumbnail from './TrickplayScrubberThumbnail';
 import SubtitleBadgeChip from './SubtitleBadgeChip';
@@ -1873,6 +1875,15 @@ export default function VideoPlayerModal({
         onSubtitleDownloaded={(updatedPlayback, subIdx) => {
           if (updatedPlayback) setPlaybackData(updatedPlayback);
           selectSubtitle(subIdx);
+        }}
+        onSubtitleDeleted={(updatedPlayback, deletedIdx) => {
+          if (updatedPlayback) setPlaybackData(updatedPlayback);
+          if (deletedIdx === selectedSubtitleIndex) {
+            const streams = filterTextSubtitleStreams(
+              updatedPlayback?.MediaSources?.[0]?.MediaStreams || updatedPlayback?.MediaStreams || []
+            );
+            selectSubtitle(getDefaultSubtitleIndex(item, streams, getDefaultSubtitle(item?.Id)));
+          }
         }}
         onClose={() => setShowSubtitleModal(false)}
       />

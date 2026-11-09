@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { hasHardcodedChineseSubtitles, getDefaultSubtitleIndex, detectChineseVariant } from '../subtitleHelper';
+import {
+  hasHardcodedChineseSubtitles, getDefaultSubtitleIndex, detectChineseVariant,
+  buildSubtitleDefaultKey, matchStoredDefault
+} from '../subtitleHelper';
 
 describe('subtitleHelper hardsub detection and stream selection', () => {
   it('detects hardcoded Chinese subtitles by file name suffix (-C, _C, [C], (C), -UC, _UC, etc.)', () => {
@@ -67,5 +70,82 @@ describe('detectChineseVariant simplified/traditional detection', () => {
 
   it('does not misfire on release names containing GBR', () => {
     expect(detectChineseVariant({ Title: 'Fight.Back.to.School.1991.GBR.BluRay', Language: 'zho' })).toBe(null);
+  });
+});
+
+describe('buildSubtitleDefaultKey fingerprint', () => {
+  it('external streams key by file basename', () => {
+    const s = { Index: 3, Type: 'Subtitle', IsExternal: true, Path: '/media/movie.zh.2.srt' };
+    expect(buildSubtitleDefaultKey(s)).toBe('ext:movie.zh.2.srt');
+  });
+
+  it('embedded streams key by index+displayTitle+language', () => {
+    const s = { Index: 1, Type: 'Subtitle', DisplayTitle: 'Chinese', Language: 'chi' };
+    expect(buildSubtitleDefaultKey(s)).toBe('emb:1|Chinese|chi');
+  });
+
+  it('accepts the persisted default record shape (external lowercase field)', () => {
+    const rec = { index: 3, external: true, path: 'movie.zh.2.srt', displayTitle: 'Chinese', language: 'chi' };
+    const stream = { Index: 3, Type: 'Subtitle', IsExternal: true, Path: '/media/movie.zh.2.srt', DisplayTitle: 'Chinese', Language: 'chi' };
+    expect(buildSubtitleDefaultKey(rec)).toBe(buildSubtitleDefaultKey(stream));
+  });
+});
+
+describe('matchStoredDefault', () => {
+  const streams = [
+    { Index: 2, Type: 'Subtitle', IsExternal: true, Path: '/media/movie.zh.srt', DisplayTitle: 'Chinese', Language: 'chi' },
+    { Index: 3, Type: 'Subtitle', IsExternal: true, Path: '/media/movie.zh.2.srt', DisplayTitle: 'Chinese', Language: 'chi' },
+    { Index: 5, Type: 'Subtitle', DisplayTitle: 'English', Language: 'eng' }
+  ];
+
+  it('finds the external track by path basename even after index shift', () => {
+    // 删除前面的轨道后 Jellyfin 重编号：原来 index=5 的 .zh.2.srt 现在是 3
+    const rec = { index: 5, external: true, path: 'movie.zh.2.srt', displayTitle: 'Chinese', language: 'chi' };
+    expect(matchStoredDefault(rec, streams)?.Index).toBe(3);
+  });
+
+  it('finds embedded tracks by index+displayTitle', () => {
+    const rec = { index: 5, external: false, displayTitle: 'English', language: 'eng' };
+    expect(matchStoredDefault(rec, streams)?.Index).toBe(5);
+  });
+
+  it('returns null when fingerprint no longer matches (track deleted)', () => {
+    const rec = { index: 9, external: true, path: 'gone.zh.srt', displayTitle: 'Chinese', language: 'chi' };
+    expect(matchStoredDefault(rec, streams)).toBe(null);
+  });
+
+  it('returns null for empty stored or empty streams', () => {
+    expect(matchStoredDefault(null, streams)).toBe(null);
+    const rec = { index: 3, external: true, path: 'movie.zh.2.srt', displayTitle: 'Chinese', language: 'chi' };
+    expect(matchStoredDefault(rec, [])).toBe(null);
+  });
+});
+
+describe('getDefaultSubtitleIndex with explicit stored default', () => {
+  const item = { Name: 'FC2-PPV-123456' };
+  const streams = [
+    { Index: 1, Type: 'Subtitle', Language: 'chi', Title: 'Chinese', IsDefault: true },
+    { Index: 2, Type: 'Subtitle', IsExternal: true, Language: 'chi', Path: '/media/movie.zh.2.srt' }
+  ];
+
+  it('explicit stored default overrides the IsDefault heuristic', () => {
+    const rec = { index: 2, external: true, path: 'movie.zh.2.srt', displayTitle: '', language: 'chi' };
+    expect(getDefaultSubtitleIndex(item, streams, rec)).toBe(2);
+  });
+
+  it('explicit stored default overrides the hardsub no-subtitle guard', () => {
+    const hardsubItem = { Name: 'FC2-PPV-123456-C' };
+    const rec = { index: 1, external: true, path: 'movie.zh.srt', displayTitle: 'Chinese', language: 'chi' };
+    expect(getDefaultSubtitleIndex(hardsubItem, streams, rec)).toBe(1);
+  });
+
+  it('falls back to heuristic when the fingerprint misses', () => {
+    const rec = { index: 9, external: true, path: 'gone.zh.srt', displayTitle: '', language: 'chi' };
+    expect(getDefaultSubtitleIndex(item, streams, rec)).toBe(1);
+  });
+
+  it('stays backward compatible without the third argument', () => {
+    expect(getDefaultSubtitleIndex(item, streams)).toBe(1);
+    expect(getDefaultSubtitleIndex(item, streams, null)).toBe(1);
   });
 });

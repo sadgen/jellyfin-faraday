@@ -123,11 +123,52 @@ export function rankRemoteSubtitles(results = [], item = {}) {
 }
 
 /**
- * Select the best default subtitle stream if hardcoded Chinese subtitles are not present.
+ * 默认轨指纹键：外部轨按文件名基名（Jellyfin 删轨重编号后仍稳定），
+ * 内嵌轨按 index+DisplayTitle+语言 组合。
+ * 兼容两种入参：MediaStream（PascalCase 字段）与持久化的默认轨记录
+ * （external/path/displayTitle 小写字段，见 subtitleDefaults.js）——两者拼出同一形态的键。
  */
-export function getDefaultSubtitleIndex(item, subtitleStreams = []) {
+export function buildSubtitleDefaultKey(stream) {
+  if (!stream) return '';
+  const idx = stream.Index ?? stream.index;
+  if (stream.IsExternal || stream.external) {
+    const p = stream.Path || stream.path || '';
+    return `ext:${p ? p.split(/[\\/]/).pop() : `#${idx}`}`;
+  }
+  const title = stream.DisplayTitle || stream.displayTitle || stream.Title || '';
+  const lang = stream.Language || stream.language || '';
+  return `emb:${idx}|${title}|${lang}`;
+}
+
+/**
+ * 用持久化的默认轨指纹在当前流列表里找回对应轨道。
+ * 顺序：指纹精确匹配（外部轨=文件名、内嵌轨=index+标题+语言）→
+ * 同 index 且标题一致的兜底；都失败返回 null（调用方回退启发式）。
+ */
+export function matchStoredDefault(stored, subtitleStreams = []) {
+  if (!stored || !subtitleStreams || subtitleStreams.length === 0) return null;
+  const key = buildSubtitleDefaultKey(stored);
+  if (key) {
+    const byKey = subtitleStreams.find(s => buildSubtitleDefaultKey(s) === key);
+    if (byKey) return byKey;
+  }
+  return subtitleStreams.find(s =>
+    s.Index === stored.index &&
+    (s.DisplayTitle || s.Title || '') === (stored.displayTitle || '')
+  ) || null;
+}
+
+/**
+ * Select the best default subtitle stream if hardcoded Chinese subtitles are not present.
+ * storedDefault（可选）：用户显式指定的默认轨指纹，命中时优先于一切启发式
+ * （含硬字幕防双字幕——显式意图最高）。
+ */
+export function getDefaultSubtitleIndex(item, subtitleStreams = [], storedDefault = null) {
   if (!subtitleStreams || subtitleStreams.length === 0) return -1;
-  
+
+  const matched = matchStoredDefault(storedDefault, subtitleStreams);
+  if (matched) return matched.Index;
+
   if (hasHardcodedChineseSubtitles(item)) {
     return -1; // Default do not load
   }

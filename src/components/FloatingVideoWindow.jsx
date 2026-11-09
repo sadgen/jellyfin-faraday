@@ -75,11 +75,33 @@ export default function FloatingVideoWindow({
   onUpdateItem,
   onDeleteItem,
   onSwitchItem,
-  onPlayingChange
+  onPlayingChange,
+  // 双窗联动（迷你窗不传，全部缺省关闭）
+  isSynced = false,
+  syncSeekCommand,
+  syncPlayCommand,
+  onSyncSeek,
+  onSyncPlay,
+  onSyncToggle
 }) {
   const { id, slotIndex, item } = windowData;
   // 铺满模式：本窗放大到页面可用区域最大（点击窗内铺满按钮触发，同时关闭其他浮窗）
   const isMaximized = !!windowData.isMaximized;
+
+  // 双窗联动：props 经 ref 镜像供 useCallback 闭包读取（wheel/scrubber 等记忆化
+  // 回调里的 performSeek 不因 isSynced 翻转而陈旧漏报）
+  const isSyncedRef = useRef(false);
+  isSyncedRef.current = isSynced;
+  const onSyncSeekRef = useRef(null);
+  onSyncSeekRef.current = onSyncSeek;
+  const onSyncPlayRef = useRef(null);
+  onSyncPlayRef.current = onSyncPlay;
+  const syncSeekAppliedSeqRef = useRef(0);
+  const syncPlayAppliedSeqRef = useRef(0);
+  // 联动上报的 from 基准：滚轮序列起点 / 进度条拖动起点 / 手机滑动 seek 起点
+  const wheelBaseTimeRef = useRef(null);
+  const scrubberDragFromRef = useRef(null);
+  const swipeFromTimeRef = useRef(null);
 
   // 视频宽高比（loadedmetadata/resize 时取自视频元素），铺满模式按它自适应宽度避免黑边。
   // HLS 渐进式加载中分辨率可能多次变化，必须同时监听媒体元素的 resize 事件
@@ -499,6 +521,27 @@ export default function FloatingVideoWindow({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [windowData.cardPaused]);
 
+  // 双窗联动：接收配对窗的播放/暂停命令（seq 去重；直接操作 video，不经 togglePlay，
+  // 天然无回声上报）
+  useEffect(() => {
+    const cmd = syncPlayCommand;
+    if (!cmd || cmd.seq === syncPlayAppliedSeqRef.current) return;
+    syncPlayAppliedSeqRef.current = cmd.seq;
+    const video = videoRef.current;
+    if (!video) return;
+    if (cmd.paused) {
+      if (!video.paused) {
+        video.pause();
+        setIsPlaying(false);
+      }
+    } else if (video.paused) {
+      startPausedRef.current = false;
+      video.play().catch(() => {});
+      setIsPlaying(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [syncPlayCommand?.seq]);
+
   // 播放状态上报（卡片按钮图标）：isPlaying 变化即回写
   useEffect(() => {
     onPlayingChange?.(item?.Id, isPlaying);
@@ -620,6 +663,35 @@ export default function FloatingVideoWindow({
   if (!seekLockRef.current) {
     seekLockRef.current = createSeekLock({ videoElRef: videoRef });
   }
+
+  // 双窗联动 seek 统一提交口：上锁 + controller.seek + 联动上报（from=手势起点，
+  // to=提交目标）。接收端直接 arm+seek 不走这里，无回声。fromTime 缺省时不上报。
+  const performSeek = (target, fromTime) => {
+    seekLockRef.current.arm(target);
+    sessionControllerRef.current?.seek(target);
+    if (isSyncedRef.current && onSyncSeekRef.current && fromTime !== null && fromTime !== undefined) {
+      onSyncSeekRef.current(id, fromTime, target);
+    }
+  };
+
+  // 双窗联动：接收配对窗的 seek 命令（seq 去重；相对同步——把对方的位移 delta
+  // 平移到本窗当前位置，基准与双击步进一致取在途 seek 目标）
+  useEffect(() => {
+    const cmd = syncSeekCommand;
+    if (!cmd || cmd.seq === syncSeekAppliedSeqRef.current) return;
+    syncSeekAppliedSeqRef.current = cmd.seq;
+    const video = videoRef.current;
+    if (!video || !video.duration) return;
+    const delta = cmd.to - cmd.from;
+    const pendingTarget = seekLockRef.current.getPendingTarget();
+    const baseTime = pendingTarget !== null ? pendingTarget : video.currentTime;
+    const target = Math.max(0, Math.min(video.duration, baseTime + delta));
+    seekLockRef.current.arm(target);
+    setProgress((target / video.duration) * 100);
+    setCurrentTimeText(formatTime(target));
+    sessionControllerRef.current?.seek(target);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [syncSeekCommand?.seq]);
 
   // Playback reporting & PlayCount Tracking
   const hasCountedPlayRef = useRef(false);
@@ -751,11 +823,16 @@ export default function FloatingVideoWindow({
     onLongPressDragEnd: () => {
       setIsDragging(false);
     },
+    // 手机滑动 seek：起点在首个预览时记录（此时视频尚未移动），提交时作为联动 delta 的 from
     onSeek: (target) => {
-      seekLockRef.current.arm(target);
-      sessionControllerRef.current?.seek(target);
+      const fromTime = swipeFromTimeRef.current ?? videoRef.current?.currentTime ?? null;
+      swipeFromTimeRef.current = null;
+      performSeek(target, fromTime);
     },
     onSeekPreview: (targetTime, percent) => {
+      if (swipeFromTimeRef.current === null) {
+        swipeFromTimeRef.current = videoRef.current?.currentTime ?? null;
+      }
       setHoverScrubberTime(targetTime);
       setHoverScrubberPercent(percent);
       setIsWheelSeeking(true);
@@ -767,6 +844,7 @@ export default function FloatingVideoWindow({
       }
     },
     onSeekPreviewEnd: () => {
+      swipeFromTimeRef.current = null;
       setTimeout(() => {
         setHoverScrubberTime(null);
         setIsWheelSeeking(false);
@@ -804,10 +882,9 @@ export default function FloatingVideoWindow({
       const pendingTarget = seekLockRef.current.getPendingTarget();
       const baseTime = pendingTarget !== null ? pendingTarget : (video.currentTime || 0);
       const next = Math.max(0, Math.min(video.duration, baseTime + direction * getSeekStepSeconds(seekSpeed)));
-      seekLockRef.current.arm(next);
+      performSeek(next, baseTime);
       setProgress((next / video.duration) * 100);
       setCurrentTimeText(formatTime(next));
-      sessionControllerRef.current?.seek(next);
     },
     normalSpeed: playbackSpeed,
     onSpeedChange: (speed) => {
@@ -1329,10 +1406,13 @@ export default function FloatingVideoWindow({
 
     // seek 在途时以在途目标为基准（video.currentTime 尚停留在旧位置，
     // 用它累加会让连续滚轮的目标点计算回跳）
+    const isFreshWheelSeq = wheelSeekingTimeRef.current === null;
     const pendingTarget = seekLockRef.current.getPendingTarget();
     const baseTime = wheelSeekingTimeRef.current !== null
       ? wheelSeekingTimeRef.current
       : pendingTarget !== null ? pendingTarget : video.currentTime;
+    // 联动上报 from = 本轮滚动的起点（序列首格时的基准）
+    if (isFreshWheelSeq) wheelBaseTimeRef.current = baseTime;
     const nextTime = Math.max(0, Math.min(duration, baseTime + delta));
 
     wheelSeekingTimeRef.current = nextTime;
@@ -1358,9 +1438,9 @@ export default function FloatingVideoWindow({
       setIsWheelSeeking(false);
       setHoverScrubberTime(null);
       if (commitTime !== null) {
-        seekLockRef.current.arm(commitTime);
-        sessionControllerRef.current?.seek(commitTime);
+        performSeek(commitTime, wheelBaseTimeRef.current);
       }
+      wheelBaseTimeRef.current = null;
     }, 400);
   }, [seekSpeed]);
 
@@ -1386,6 +1466,8 @@ export default function FloatingVideoWindow({
     e.preventDefault();
     e.stopPropagation();
     isDraggingScrubberRef.current = true;
+    // 联动上报 from = 拖动起点（拖动期间视频继续播，起点取按下那一刻）
+    scrubberDragFromRef.current = videoRef.current?.currentTime ?? null;
     updateScrubberPreview(e.clientX);
 
     const handleWindowMouseMove = (moveEvent) => {
@@ -1400,8 +1482,8 @@ export default function FloatingVideoWindow({
         updateScrubberPreview(upEvent.clientX);
         const commitTarget = scrubberDragTimeRef.current;
         if (commitTarget !== null && commitTarget !== undefined) {
-          seekLockRef.current.arm(commitTarget);
-          sessionControllerRef.current?.seek(commitTarget);
+          performSeek(commitTarget, scrubberDragFromRef.current);
+          scrubberDragFromRef.current = null;
         }
       }
       window.removeEventListener('mousemove', handleWindowMouseMove);
@@ -1415,6 +1497,8 @@ export default function FloatingVideoWindow({
   const handleScrubberTouchStart = useCallback((e) => {
     if (e.touches.length !== 1) return;
     isDraggingScrubberRef.current = true;
+    // 联动上报 from = 拖动起点
+    scrubberDragFromRef.current = videoRef.current?.currentTime ?? null;
     updateScrubberPreview(e.touches[0].clientX);
   }, [updateScrubberPreview]);
 
@@ -1431,8 +1515,8 @@ export default function FloatingVideoWindow({
       isDraggingScrubberRef.current = false;
       const commitTarget = scrubberDragTimeRef.current;
       if (commitTarget !== null && commitTarget !== undefined) {
-        seekLockRef.current.arm(commitTarget);
-        sessionControllerRef.current?.seek(commitTarget);
+        performSeek(commitTarget, scrubberDragFromRef.current);
+        scrubberDragFromRef.current = null;
       }
       setTimeout(() => setHoverScrubberTime(null), 800);
     }
@@ -1465,6 +1549,11 @@ export default function FloatingVideoWindow({
     } else {
       video.pause();
       setIsPlaying(false);
+    }
+    // 双窗联动：播放/暂停上报 App 中继到配对窗（⏯/触摸点击/封面点播都收口到这里；
+    // 接收端不经 togglePlay，无回声）
+    if (isSyncedRef.current && onSyncPlayRef.current) {
+      onSyncPlayRef.current(id, video.paused);
     }
   };
 
@@ -1895,6 +1984,17 @@ export default function FloatingVideoWindow({
         onTouchStart={handleTouchStartHeader}
         className="px-2 py-1.5 border-t border-white/5 bg-slate-950/95 rounded-b-2xl flex items-center gap-1.5 cursor-move text-xs select-none"
       >
+        {isSynced && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onSyncToggle?.(); }}
+            onMouseDown={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
+            className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-950/90 border border-emerald-400/90 text-emerald-300 text-[10px] font-mono font-bold flex-shrink-0"
+            title="🔗 双窗联动中：快进快退与播放暂停相对同步，点击解除"
+          >
+            <span>🔗 联动</span>
+          </button>
+        )}
         {playbackDefaults.patrolMode && (
           <div
             className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-cyan-950/90 border border-cyan-400/90 text-cyan-300 text-[10px] font-mono font-bold flex-shrink-0 animate-pulse"

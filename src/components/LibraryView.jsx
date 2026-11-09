@@ -24,7 +24,7 @@ import {
   ArrowUpDown, X, RefreshCw, Layers, LayoutGrid,
   Grid, List, MoreVertical, Calendar,
   Users, Tag, Check, ChevronRight, ChevronDown,
-  SlidersHorizontal, Info, RotateCcw, History, Zap, ShieldAlert, Sparkles, Wand2, Shuffle, Settings } from 'lucide-react';
+  SlidersHorizontal, Info, RotateCcw, History, Zap, ShieldAlert, Sparkles, Wand2, Shuffle, Settings, Link2 } from 'lucide-react';
 import { nativePlayerBridge, isNativePlayerAvailable } from '../utils/nativePlayerBridge';
 
 const SUB_TABS = [
@@ -1381,6 +1381,7 @@ export default function LibraryView({
   onOpenSettings,
   onPlayRandomItem,
   onPlaySingleItem,
+  onOpenSyncedPair,
   onOpenFloatingWindow,
   onPlayModal,
   onPlayVr,
@@ -2166,6 +2167,15 @@ export default function LibraryView({
     if (targetItems.length === 0) return;
     setDeleteTargetItem(targetItems);
   }, [selectedItemIds, items]);
+
+  // 双窗联动播放：恰好选 2 部时把两者以浮窗打开并建立同步（相对快进快退 + 播放暂停联动）
+  const handleOpenSyncedPairFromSelection = useCallback(() => {
+    if (!onOpenSyncedPair || selectedItemIds.size !== 2) return;
+    const targetItems = items.filter(x => selectedItemIds.has(x.Id)).slice(0, 2);
+    if (targetItems.length !== 2) return;
+    handleClearSelection();
+    onOpenSyncedPair(targetItems[0], targetItems[1]);
+  }, [onOpenSyncedPair, selectedItemIds, items, handleClearSelection]);
 
   // Delete item: trigger custom modal
   const handleDelete = useCallback((item) => {
@@ -4053,6 +4063,23 @@ export default function LibraryView({
             className="px-2.5 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-gray-200 hover:text-white transition font-medium"
           >
             {isAllVisibleSelected ? '取消全选' : `全选当前 (${displayItems.length})`}
+          </button>
+
+          {/* 双窗联动播放：恰好选 2 部时可用 */}
+          <button
+            onClick={handleOpenSyncedPairFromSelection}
+            disabled={selectedItemIds.size !== 2 || !onOpenSyncedPair}
+            className={`px-3 py-1.5 rounded-xl font-bold flex items-center gap-1.5 transition ${
+              selectedItemIds.size === 2 && onOpenSyncedPair
+                ? 'bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 shadow-sm'
+                : 'bg-white/5 border border-white/10 text-gray-500 cursor-not-allowed'
+            }`}
+            title={selectedItemIds.size === 2 && onOpenSyncedPair
+              ? '以双浮窗打开所选 2 部并联动（快进快退与播放暂停相对同步）'
+              : '双窗联动播放：请恰好选择 2 部'}
+          >
+            <Link2 size={13} />
+            <span>双窗联动播放</span>
           </button>
 
           {/* Batch Add Favorites */}

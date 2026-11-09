@@ -340,34 +340,41 @@ export default function App() {
   // ==================== FLOATING 3-WINDOW PIP SYSTEM ====================
   // 安卓壳 v1 为单实例原生播放：网页浮窗窗格画面会被原生层接管（互相顶替），
   // 多窗同播属 v2 多实例范围，入口直接降级提示
+  // 双窗联动需要同步拿到窗 id：改为 ref 镜像同步推导 + 直接下发推导结果
+  // （同一 tick 连开两窗时第二次调用能看到第一次的结果；镜像 effect 仍兜底同步）
   const handleOpenFloatingWindow = useCallback((item, startSecond = null) => {
-    if (!item?.Id) return;
-    setFloatingWindows(prev => {
-      // If already playing in one of the windows, bring it to front
-      const existing = prev.find(w => w.item.Id === item.Id);
-      if (existing) {
-        return prev.map(w => w.id === existing.id ? { ...w, startSecond, timestamp: Date.now() } : w);
-      }
+    if (!item?.Id) return null;
+    const prev = floatingWindowsRef.current;
 
-      if (prev.length < 3) {
-        const occupiedSlots = prev.map(w => w.slotIndex);
-        const targetSlot = [0, 1, 2].find(s => !occupiedSlots.includes(s)) ?? prev.length;
-        // 手机上单开浮窗默认三屏取中铺满（窗口挂 autoCrop 标记，多窗补齐不触发；
-        // 全局设置选「普通浮窗」时不取中）
-        const autoCrop = phoneAutoCrop();
-        return [
-          ...prev,
-          {
-            id: `win-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-            slotIndex: targetSlot,
-            item,
-            startSecond,
-            timestamp: Date.now(),
-            autoCrop
-          }
-        ];
-      }
+    // If already playing in one of the windows, bring it to front
+    const existing = prev.find(w => w.item.Id === item.Id);
+    if (existing) {
+      const reused = prev.map(w => w.id === existing.id ? { ...w, startSecond, timestamp: Date.now() } : w);
+      floatingWindowsRef.current = reused;
+      setFloatingWindows(reused);
+      return existing.id;
+    }
 
+    const newId = `win-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    let next;
+    if (prev.length < 3) {
+      const occupiedSlots = prev.map(w => w.slotIndex);
+      const targetSlot = [0, 1, 2].find(s => !occupiedSlots.includes(s)) ?? prev.length;
+      // 手机上单开浮窗默认三屏取中铺满（窗口挂 autoCrop 标记，多窗补齐不触发；
+      // 全局设置选「普通浮窗」时不取中）
+      const autoCrop = phoneAutoCrop();
+      next = [
+        ...prev,
+        {
+          id: newId,
+          slotIndex: targetSlot,
+          item,
+          startSecond,
+          timestamp: Date.now(),
+          autoCrop
+        }
+      ];
+    } else {
       // If all 3 slots full: remove oldest window, shift following windows forward (下一个顶上来), and add new item to tail slot 2
       const sortedByTime = [...prev].sort((a, b) => a.timestamp - b.timestamp);
       const oldest = sortedByTime[0];
@@ -379,10 +386,10 @@ export default function App() {
         return w;
       });
 
-      return [
+      next = [
         ...shifted,
         {
-          id: `win-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          id: newId,
           slotIndex: 2,
           item,
           startSecond,
@@ -390,7 +397,10 @@ export default function App() {
           autoCrop: phoneAutoCrop()
         }
       ];
-    });
+    }
+    floatingWindowsRef.current = next;
+    setFloatingWindows(next);
+    return newId;
   }, []);
 
   // 桌面壳（desktop-faraday）多窗口入口：按 itemId 打开页面浮窗，
@@ -507,28 +517,27 @@ export default function App() {
   }, []);
 
   // Single item playback handler (Direct floating window playback)
+  // 返回窗 id（Series 解析失败落详情页等场景返回 null）——双窗联动配对用
   const handlePlaySingleItem = useCallback(async (item, startSecond = null) => {
-    if (!item) return;
+    if (!item) return null;
     if (item.Type === 'Series') {
       try {
         const nextUps = await jellyfin.getNextUp(item.Id, 1);
         if (nextUps && nextUps.length > 0 && nextUps[0].SeriesId === item.Id) {
-          handleOpenFloatingWindow(nextUps[0], startSecond);
-          return;
+          return handleOpenFloatingWindow(nextUps[0], startSecond);
         }
         const eps = await jellyfin.getEpisodes(item.Id);
         if (eps && eps.length > 0) {
           const unplayedEp = eps.find(e => !e.UserData?.Played) || eps[0];
-          handleOpenFloatingWindow(unplayedEp, startSecond);
-          return;
+          return handleOpenFloatingWindow(unplayedEp, startSecond);
         }
       } catch (e) {
         console.warn('Failed to resolve episode for series playback:', e);
       }
       setDetailItem(item);
-      return;
+      return null;
     }
-    handleOpenFloatingWindow(item, startSecond);
+    return handleOpenFloatingWindow(item, startSecond);
   }, [handleOpenFloatingWindow]);
 
   // Full-screen / modal player playback handler
@@ -743,6 +752,52 @@ export default function App() {
   const floatingWindowsRef = useRef([]);
   const prevWinCountRef = useRef(0);
   useEffect(() => { floatingWindowsRef.current = floatingWindows; }, [floatingWindows]);
+
+  // ==================== 双窗联动（相对同步快进快退 + 播放/暂停联动） ====================
+  // null=未联动；否则 { ids:[idA,idB], seekSeq, seekCmds:{[winId]:{seq,from,to}}, playSeq, playCmds:{[winId]:{seq,paused}} }
+  // 窗间互不知晓：窗 → App 中继 → 经命令字段下发到配对窗（组件端 seq 去重接收）
+  const [syncState, setSyncState] = useState(null);
+
+  const handleSyncToggleOff = useCallback(() => setSyncState(null), []);
+
+  const handleSyncSeek = useCallback((fromWinId, fromTime, toTime) => {
+    setSyncState(prev => {
+      if (!prev || !prev.ids.includes(fromWinId)) return prev;
+      const partnerId = prev.ids.find(x => x !== fromWinId);
+      const seq = prev.seekSeq + 1;
+      return { ...prev, seekSeq: seq, seekCmds: { ...prev.seekCmds, [partnerId]: { seq, from: fromTime, to: toTime } } };
+    });
+  }, []);
+
+  const handleSyncPlay = useCallback((fromWinId, paused) => {
+    setSyncState(prev => {
+      if (!prev || !prev.ids.includes(fromWinId)) return prev;
+      const partnerId = prev.ids.find(x => x !== fromWinId);
+      const seq = prev.playSeq + 1;
+      return { ...prev, playSeq: seq, playCmds: { ...prev.playCmds, [partnerId]: { seq, paused } } };
+    });
+  }, []);
+
+  // 多选批量栏入口：把所选 2 部以浮窗打开并建立联动
+  const handleOpenSyncedPair = useCallback(async (itemA, itemB) => {
+    const idA = await handlePlaySingleItem(itemA);
+    const idB = await handlePlaySingleItem(itemB);
+    // Series 落详情页（null）或两部解析到同一集：不建联动，窗照常按既有行为打开
+    if (!idA || !idB || idA === idB) {
+      console.warn('双窗联动未建立：', { idA, idB });
+      return;
+    }
+    setSyncState({ ids: [idA, idB], seekSeq: 0, seekCmds: {}, playSeq: 0, playCmds: {} });
+  }, [handlePlaySingleItem]);
+
+  // 联动解除兜底：配对窗任一消失（关闭/铺满挤掉其余窗/删除）即解除；
+  // ⏭ 换片不改窗 id，联动保留
+  useEffect(() => {
+    if (!syncState) return;
+    const aliveIds = new Set(floatingWindows.map(w => w.id));
+    if (!syncState.ids.every(x => aliveIds.has(x))) setSyncState(null);
+  }, [floatingWindows, syncState]);
+
   const winHistoryPushedRef = useRef(0);
   const ignoreWinPopRef = useRef(false);
   const closingViaPopRef = useRef(false);
@@ -1072,6 +1127,7 @@ export default function App() {
           onOpenSettings={() => setIsSettingsModalOpen(true)}
             onPlayRandomItem={handlePlayRandomItem}
             onPlaySingleItem={handlePlaySingleItem}
+            onOpenSyncedPair={handleOpenSyncedPair}
             onOpenFloatingWindow={handleOpenFloatingWindow}
             onPlayModal={handlePlayModal}
             onPlayVr={handlePlayVr}
@@ -1105,6 +1161,12 @@ export default function App() {
           onUpdateItem={handleUpdateItem}
           onDeleteItem={handleDeleteItem}
           onSwitchItem={handleSwitchWindowItem}
+          syncedIds={syncState?.ids || null}
+          syncSeekCommands={syncState?.seekCmds || null}
+          syncPlayCommands={syncState?.playCmds || null}
+          onSyncSeek={handleSyncSeek}
+          onSyncPlay={handleSyncPlay}
+          onSyncToggle={handleSyncToggleOff}
         />
 
         {/* 海报卡迷你浮窗（媒体库卡片播放按钮；独立于常规三窗系统） */}

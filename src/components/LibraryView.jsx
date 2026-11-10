@@ -1639,18 +1639,20 @@ export default function LibraryView({
     return detectDuplicateMedia(items);
   }, [items]);
 
-  // 重复影片组共同时间（仅日期主排序启用）：重复版本成对相邻、按组共同时间占位——
-  // 最新优先(date_desc)取组内最新成员的那天，最早优先(date_asc)取组内最早成员的那天；
-  // 组内先后由 sortMediaItems 的 own 层处理（date_desc 时最新版本在前）
-  const dupGroupDateMap = useMemo(() => {
-    if (sortMethod !== 'date_desc' && sortMethod !== 'date_asc') return null;
+  // 重复影片组共同时间/年份（仅日期与年份主排序启用）：重复版本成对相邻、按组共同键占位——
+  // desc 取组内最新成员那天/年份，asc 取组内最早那天/年份；
+  // 组内先后由 sortMediaItems 的 own 层处理（desc 时最新版本在前）
+  const dupGroupTimeMap = useMemo(() => {
+    const isDate = sortMethod === 'date_desc' || sortMethod === 'date_asc';
+    const isYear = sortMethod === 'year_desc' || sortMethod === 'year_asc';
+    if (!isDate && !isYear) return null;
     if (!duplicateGroups || duplicateGroups.length === 0) return null;
-    const wantMax = sortMethod === 'date_desc';
+    const wantMax = sortMethod === 'date_desc' || sortMethod === 'year_desc';
     const m = new Map();
     duplicateGroups.forEach(g => {
       let common = null;
       for (const it of g.items) {
-        const t = dayKeyOf(it.DateCreated);
+        const t = isDate ? dayKeyOf(it.DateCreated) : (it.ProductionYear || 0);
         if (common === null || (wantMax ? t > common : t < common)) common = t;
       }
       for (const it of g.items) m.set(it.Id, common);
@@ -1659,7 +1661,7 @@ export default function LibraryView({
   }, [duplicateGroups, sortMethod]);
 
   // 文件夹视图同样响应顶部排序选择（子文件夹与视频文件分区各自按当前排序展示）
-  const sortedFolderItems = useMemo(() => sortMediaItems(folderItems, sortMethod, null, dupGroupDateMap), [folderItems, sortMethod, dupGroupDateMap]);
+  const sortedFolderItems = useMemo(() => sortMediaItems(folderItems, sortMethod, null, dupGroupTimeMap), [folderItems, sortMethod, dupGroupTimeMap]);
 
   // 当切换库视图时，重置文件夹面包屑栈
   useEffect(() => {
@@ -1902,7 +1904,7 @@ export default function LibraryView({
 
     // 4. 健康排查子标签页
     if (activeSubTab === 'health') {
-      return sortMediaItems(brokenItems, sortMethod, null, dupGroupDateMap);
+      return sortMediaItems(brokenItems, sortMethod, null, dupGroupTimeMap);
     }
 
     // 5. 自制分段切片智能聚合（在影片主视图且开启聚合时）
@@ -1912,8 +1914,8 @@ export default function LibraryView({
 
     // 6. 保证最终展示列表严格按当前 sortMethod 排序（解决按演员/关键词搜索时服务端按匹配度打乱排序的问题）；
     //    日期主排序下重复影片按组共同时间成对相邻（洗版对占同一位次、组内新版本在前）
-    return sortMediaItems(result, sortMethod, null, dupGroupDateMap);
-  }, [items, activeSubTab, duplicateItemIds, brokenItems, showDuplicatesOnly, applyCommonFilters, enableStacking, sortMethod, dupGroupDateMap]);
+    return sortMediaItems(result, sortMethod, null, dupGroupTimeMap);
+  }, [items, activeSubTab, duplicateItemIds, brokenItems, showDuplicatesOnly, applyCommonFilters, enableStacking, sortMethod, dupGroupTimeMap]);
 
   // 文件夹视图下的随机池 = 当前文件夹（含子文件夹）视频 ∩ 同一套状态/收藏/次数筛选
   const folderFilteredPool = useMemo(

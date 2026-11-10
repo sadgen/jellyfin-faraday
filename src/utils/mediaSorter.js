@@ -44,23 +44,32 @@ const SORT_COMPARATORS = {
  * 排序入口。
  * @param secondaryMethod 次级排序字段：主排序比较相等（并列）时用它分先后，
  *                        null/与主排序相同则不启用（保持原顺序兜底）
- * @param dateKeyMap      重复影片组共同时间（Map<条目Id, 组时间戳>）：仅 date_asc/date_desc
- *                        主排序生效。组内成员以共同时间参与排序使重复版本相邻成对，
- *                        组内并列再按各自真实时间分先后（date_desc 时最新版本在前）；
- *                        由调用方按「date_desc 取组内最新 / date_asc 取组内最早」预计算
+ * @param groupKeyMap     重复影片组共同时间/年份（Map<条目Id, 组键>）：仅 date_asc/desc、
+ *                        year_asc/desc 主排序生效。组内成员以共同键参与排序使重复版本
+ *                        相邻成对，组内并列再按各自真实值分先后（desc 时最新版本在前）；
+ *                        由调用方按「desc 取组内最新 / asc 取组内最早」预计算
  */
-export function sortMediaItems(items, sortMethod = 'date_desc', secondaryMethod = null, dateKeyMap = null) {
+export function sortMediaItems(items, sortMethod = 'date_desc', secondaryMethod = null, groupKeyMap = null) {
   if (!items || !Array.isArray(items)) return [];
   const copy = [...items];
   let primary;
 
-  if ((sortMethod === 'date_desc' || sortMethod === 'date_asc') && dateKeyMap && dateKeyMap.size > 0) {
+  if ((sortMethod === 'date_desc' || sortMethod === 'date_asc') && groupKeyMap && groupKeyMap.size > 0) {
     const eff = it => {
-      const v = dateKeyMap.get(it.Id);
+      const v = groupKeyMap.get(it.Id);
       return v !== undefined ? v : dayKey(it.DateCreated);
     };
     const own = it => new Date(it.DateCreated || 0).getTime();
     primary = sortMethod === 'date_desc'
+      ? (a, b) => eff(b) - eff(a) || own(b) - own(a)
+      : (a, b) => eff(a) - eff(b) || own(a) - own(b);
+  } else if ((sortMethod === 'year_desc' || sortMethod === 'year_asc') && groupKeyMap && groupKeyMap.size > 0) {
+    const eff = it => {
+      const v = groupKeyMap.get(it.Id);
+      return v !== undefined ? v : (it.ProductionYear || 0);
+    };
+    const own = it => it.ProductionYear || 0;
+    primary = sortMethod === 'year_desc'
       ? (a, b) => eff(b) - eff(a) || own(b) - own(a)
       : (a, b) => eff(a) - eff(b) || own(a) - own(b);
   } else {

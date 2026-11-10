@@ -52,10 +52,11 @@ export default function SettingsModal({
             <div>
               <h2 className="text-lg font-bold text-white">看板设置</h2>
               <p className="text-xs text-gray-400">Jellyfin Faraday 系统与本地缓存管理</p>
-              {/* 安卓壳注入的构建号（window.__FARADAY_BUILD，浏览器/桌面端无此值）——
-                  release 附件反复替换、外观无法区分，设置页自证装的哪个包 */}
-              {typeof window !== 'undefined' && window.__FARADAY_BUILD && (
-                <p className="text-[10px] text-gray-500 mt-0.5">App 版本 {window.__FARADAY_BUILD}</p>
+              {/* 构建号（window.__FARADAY_BUILD__，YYYYMMDDHHMMSS 每次构建唯一）——
+                  排障自证浏览器实际加载的哪份构建（安卓壳 release 附件外观无法区分，
+                  手机端验证部署也靠它：设置页有此行=新包，没有=旧缓存） */}
+              {typeof window !== 'undefined' && window.__FARADAY_BUILD__ && (
+                <p className="text-[10px] text-gray-500 mt-0.5">构建 {window.__FARADAY_BUILD__}</p>
               )}
             </div>
           </div>

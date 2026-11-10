@@ -28,6 +28,7 @@ import { AlertCircle, Loader2, CheckCircle2, XCircle } from 'lucide-react';
 
 const STORAGE_KEY_VIEW = 'jf_last_selected_view';
 const STORAGE_KEY_SORT = 'jf_faraday_sort_method';
+const STORAGE_KEY_SORT2 = 'jf_faraday_sort_method_2';
 
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(jellyfin.auth.isConfigured);
@@ -52,6 +53,11 @@ export default function App() {
 
   const [sortMethod, setSortMethod] = useState(() => {
     return localStorage.getItem(STORAGE_KEY_SORT) || 'date_desc';
+  });
+
+  // 次级排序：主排序并列时再按此字段分先后（'none' = 不启用）
+  const [secondarySortMethod, setSecondarySortMethod] = useState(() => {
+    return localStorage.getItem(STORAGE_KEY_SORT2) || 'none';
   });
 
   const [searchKeyword, setSearchKeyword] = useState('');
@@ -200,6 +206,12 @@ export default function App() {
     setSortMethod(sort);
     localStorage.setItem(STORAGE_KEY_SORT, sort);
     setMediaItems(prev => sortMediaItems(prev, sort));
+  };
+
+  // 次级排序只影响前端展示排序（displayItems 重排），无需重新拉库
+  const handleSecondarySortChange = (sort) => {
+    setSecondarySortMethod(sort);
+    localStorage.setItem(STORAGE_KEY_SORT2, sort);
   };
 
   // 竞态守卫与跨渲染引用（声明在 hydration effect 之前，供其内部读取）
@@ -765,7 +777,17 @@ export default function App() {
       if (!prev || !prev.ids.includes(fromWinId)) return prev;
       const partnerId = prev.ids.find(x => x !== fromWinId);
       const seq = prev.seekSeq + 1;
-      return { ...prev, seekSeq: seq, seekCmds: { ...prev.seekCmds, [partnerId]: { seq, from: fromTime, to: toTime } } };
+      return { ...prev, seekSeq: seq, seekCmds: { ...prev.seekCmds, [partnerId]: { seq, from: fromTime, to: toTime, mode: 'relative' } } };
+    });
+  }, []);
+
+  // 对齐进度：点击某窗的 🔗 按钮，把另一窗直接跳到该窗当前位置（绝对时间点）
+  const handleSyncAlign = useCallback((fromWinId, time) => {
+    setSyncState(prev => {
+      if (!prev || !prev.ids.includes(fromWinId)) return prev;
+      const partnerId = prev.ids.find(x => x !== fromWinId);
+      const seq = prev.seekSeq + 1;
+      return { ...prev, seekSeq: seq, seekCmds: { ...prev.seekCmds, [partnerId]: { seq, from: 0, to: time, mode: 'absolute' } } };
     });
   }, []);
 
@@ -1113,6 +1135,8 @@ export default function App() {
             onStatusFilterChange={setStatusFilter}
             sortMethod={sortMethod}
             onSortMethodChange={handleSortMethodChange}
+            secondarySortMethod={secondarySortMethod}
+            onSecondarySortChange={handleSecondarySortChange}
             selectedGenre={selectedGenre}
             onSelectGenre={setSelectedGenre}
             selectedYear={selectedYear}
@@ -1167,6 +1191,7 @@ export default function App() {
           onSyncSeek={handleSyncSeek}
           onSyncPlay={handleSyncPlay}
           onSyncToggle={handleSyncToggleOff}
+          onSyncAlign={handleSyncAlign}
         />
 
         {/* 海报卡迷你浮窗（媒体库卡片播放按钮；独立于常规三窗系统） */}

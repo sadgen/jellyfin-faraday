@@ -1367,6 +1367,8 @@ export default function LibraryView({
   statusFilter,
   onStatusFilterChange,
   sortMethod,
+  secondarySortMethod,
+  onSecondarySortChange,
   onSortMethodChange,
   selectedGenre,
   onSelectGenre,
@@ -1631,7 +1633,7 @@ export default function LibraryView({
   const folderPoolReqIdRef = useRef(0);
 
   // 文件夹视图同样响应顶部排序选择（子文件夹与视频文件分区各自按当前排序展示）
-  const sortedFolderItems = useMemo(() => sortMediaItems(folderItems, sortMethod), [folderItems, sortMethod]);
+  const sortedFolderItems = useMemo(() => sortMediaItems(folderItems, sortMethod, secondarySortMethod), [folderItems, sortMethod, secondarySortMethod]);
 
   // 当切换库视图时，重置文件夹面包屑栈
   useEffect(() => {
@@ -1879,7 +1881,7 @@ export default function LibraryView({
 
     // 4. 健康排查子标签页
     if (activeSubTab === 'health') {
-      return sortMediaItems(brokenItems, sortMethod);
+      return sortMediaItems(brokenItems, sortMethod, secondarySortMethod);
     }
 
     // 5. 自制分段切片智能聚合（在影片主视图且开启聚合时）
@@ -1887,9 +1889,10 @@ export default function LibraryView({
       result = stackMediaItems(result);
     }
 
-    // 6. 保证最终展示列表严格按当前 sortMethod 排序（解决按演员/关键词搜索时服务端按匹配度打乱排序的问题）
-    return sortMediaItems(result, sortMethod);
-  }, [items, activeSubTab, duplicateItemIds, brokenItems, showDuplicatesOnly, applyCommonFilters, enableStacking, sortMethod]);
+    // 6. 保证最终展示列表严格按当前 sortMethod 排序（解决按演员/关键词搜索时服务端按匹配度打乱排序的问题）；
+    //    主排序并列时再按次级排序分先后
+    return sortMediaItems(result, sortMethod, secondarySortMethod);
+  }, [items, activeSubTab, duplicateItemIds, brokenItems, showDuplicatesOnly, applyCommonFilters, enableStacking, sortMethod, secondarySortMethod]);
 
   // 文件夹视图下的随机池 = 当前文件夹（含子文件夹）视频 ∩ 同一套状态/收藏/次数筛选
   const folderFilteredPool = useMemo(
@@ -3216,6 +3219,21 @@ export default function LibraryView({
               className="bg-transparent text-gray-200 focus:outline-none cursor-pointer pr-1"
             >
               {SORT_OPTIONS.map(opt => (
+                <option key={opt.id} value={opt.id} className="bg-slate-900 text-white">
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+            {/* 次级排序：主排序并列（如同日添加、同评分）时再按此字段分先后 */}
+            <span className="text-gray-500 border-l border-white/10 pl-1">次</span>
+            <select
+              value={secondarySortMethod && secondarySortMethod !== sortMethod ? secondarySortMethod : 'none'}
+              onChange={(e) => onSecondarySortChange(e.target.value)}
+              className="bg-transparent text-gray-200 focus:outline-none cursor-pointer pr-1"
+              title="次级排序：先按左侧主排序，主排序并列时再按此字段分先后"
+            >
+              <option value="none" className="bg-slate-900 text-white">无</option>
+              {SORT_OPTIONS.filter(opt => opt.id !== 'random' && opt.id !== sortMethod).map(opt => (
                 <option key={opt.id} value={opt.id} className="bg-slate-900 text-white">
                   {opt.label}
                 </option>

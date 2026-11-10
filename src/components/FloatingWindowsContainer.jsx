@@ -20,7 +20,8 @@ export default function FloatingWindowsContainer({
   syncPlayCommands = null,
   onSyncSeek,
   onSyncPlay,
-  onSyncToggle
+  onSyncToggle,
+  onSyncAlign
 }) {
   if (!windows || windows.length === 0) return null;
 
@@ -48,6 +49,7 @@ export default function FloatingWindowsContainer({
             onSyncSeek={onSyncSeek}
             onSyncPlay={onSyncPlay}
             onSyncToggle={onSyncToggle}
+            onSyncAlign={onSyncAlign}
           />
         </div>
       ))}

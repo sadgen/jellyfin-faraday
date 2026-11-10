@@ -794,6 +794,13 @@ export default function App() {
   // 多选批量栏入口：把所选 2 部以浮窗打开并建立联动（手机上跳过取中铺满，
   // 否则独占形态会挤掉配对窗）
   const handleOpenSyncedPair = useCallback(async (itemA, itemB) => {
+    // 先清掉所有已存在浮窗：若已有单开窗在播（手机默认取中铺满独占形态），
+    // 复用旧窗会保留其独占形态、新窗被压在后面 = 「联动打不开两个窗口」；
+    // 联动永远是干净的两窗舞台
+    if (floatingWindowsRef.current.length > 0) {
+      floatingWindowsRef.current = [];
+      setFloatingWindows([]);
+    }
     const pairOpts = { noAutoCrop: true };
     const idA = await handlePlaySingleItem(itemA, null, pairOpts);
     const idB = await handlePlaySingleItem(itemB, null, pairOpts);

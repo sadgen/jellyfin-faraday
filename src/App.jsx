@@ -28,7 +28,6 @@ import { AlertCircle, Loader2, CheckCircle2, XCircle } from 'lucide-react';
 
 const STORAGE_KEY_VIEW = 'jf_last_selected_view';
 const STORAGE_KEY_SORT = 'jf_faraday_sort_method';
-const STORAGE_KEY_SORT2 = 'jf_faraday_sort_method_2';
 
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(jellyfin.auth.isConfigured);
@@ -53,11 +52,6 @@ export default function App() {
 
   const [sortMethod, setSortMethod] = useState(() => {
     return localStorage.getItem(STORAGE_KEY_SORT) || 'date_desc';
-  });
-
-  // 次级排序：主排序并列时再按此字段分先后（'none' = 不启用）
-  const [secondarySortMethod, setSecondarySortMethod] = useState(() => {
-    return localStorage.getItem(STORAGE_KEY_SORT2) || 'none';
   });
 
   const [searchKeyword, setSearchKeyword] = useState('');
@@ -206,12 +200,6 @@ export default function App() {
     setSortMethod(sort);
     localStorage.setItem(STORAGE_KEY_SORT, sort);
     setMediaItems(prev => sortMediaItems(prev, sort));
-  };
-
-  // 次级排序只影响前端展示排序（displayItems 重排），无需重新拉库
-  const handleSecondarySortChange = (sort) => {
-    setSecondarySortMethod(sort);
-    localStorage.setItem(STORAGE_KEY_SORT2, sort);
   };
 
   // 竞态守卫与跨渲染引用（声明在 hydration effect 之前，供其内部读取）
@@ -1140,8 +1128,6 @@ export default function App() {
             onStatusFilterChange={setStatusFilter}
             sortMethod={sortMethod}
             onSortMethodChange={handleSortMethodChange}
-            secondarySortMethod={secondarySortMethod}
-            onSecondarySortChange={handleSecondarySortChange}
             selectedGenre={selectedGenre}
             onSelectGenre={setSelectedGenre}
             selectedYear={selectedYear}

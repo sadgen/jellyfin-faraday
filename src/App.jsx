@@ -354,7 +354,7 @@ export default function App() {
   // 多窗同播属 v2 多实例范围，入口直接降级提示
   // 双窗联动需要同步拿到窗 id：改为 ref 镜像同步推导 + 直接下发推导结果
   // （同一 tick 连开两窗时第二次调用能看到第一次的结果；镜像 effect 仍兜底同步）
-  const handleOpenFloatingWindow = useCallback((item, startSecond = null) => {
+  const handleOpenFloatingWindow = useCallback((item, startSecond = null, openOpts = null) => {
     if (!item?.Id) return null;
     const prev = floatingWindowsRef.current;
 
@@ -368,13 +368,16 @@ export default function App() {
     }
 
     const newId = `win-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    // 双窗联动开窗必须跳过 autoCrop：手机上取中铺满是独占形态（挂载即关掉其他窗），
+    // 会把刚配对的另一窗挤掉导致联动自动解除
+    const noAutoCrop = !!openOpts?.noAutoCrop;
     let next;
     if (prev.length < 3) {
       const occupiedSlots = prev.map(w => w.slotIndex);
       const targetSlot = [0, 1, 2].find(s => !occupiedSlots.includes(s)) ?? prev.length;
       // 手机上单开浮窗默认三屏取中铺满（窗口挂 autoCrop 标记，多窗补齐不触发；
       // 全局设置选「普通浮窗」时不取中）
-      const autoCrop = phoneAutoCrop();
+      const autoCrop = noAutoCrop ? false : phoneAutoCrop();
       next = [
         ...prev,
         {
@@ -406,7 +409,7 @@ export default function App() {
           item,
           startSecond,
           timestamp: Date.now(),
-          autoCrop: phoneAutoCrop()
+          autoCrop: noAutoCrop ? false : phoneAutoCrop()
         }
       ];
     }
@@ -530,18 +533,18 @@ export default function App() {
 
   // Single item playback handler (Direct floating window playback)
   // 返回窗 id（Series 解析失败落详情页等场景返回 null）——双窗联动配对用
-  const handlePlaySingleItem = useCallback(async (item, startSecond = null) => {
+  const handlePlaySingleItem = useCallback(async (item, startSecond = null, openOpts = null) => {
     if (!item) return null;
     if (item.Type === 'Series') {
       try {
         const nextUps = await jellyfin.getNextUp(item.Id, 1);
         if (nextUps && nextUps.length > 0 && nextUps[0].SeriesId === item.Id) {
-          return handleOpenFloatingWindow(nextUps[0], startSecond);
+          return handleOpenFloatingWindow(nextUps[0], startSecond, openOpts);
         }
         const eps = await jellyfin.getEpisodes(item.Id);
         if (eps && eps.length > 0) {
           const unplayedEp = eps.find(e => !e.UserData?.Played) || eps[0];
-          return handleOpenFloatingWindow(unplayedEp, startSecond);
+          return handleOpenFloatingWindow(unplayedEp, startSecond, openOpts);
         }
       } catch (e) {
         console.warn('Failed to resolve episode for series playback:', e);
@@ -549,7 +552,7 @@ export default function App() {
       setDetailItem(item);
       return null;
     }
-    return handleOpenFloatingWindow(item, startSecond);
+    return handleOpenFloatingWindow(item, startSecond, openOpts);
   }, [handleOpenFloatingWindow]);
 
   // Full-screen / modal player playback handler
@@ -800,10 +803,12 @@ export default function App() {
     });
   }, []);
 
-  // 多选批量栏入口：把所选 2 部以浮窗打开并建立联动
+  // 多选批量栏入口：把所选 2 部以浮窗打开并建立联动（手机上跳过取中铺满，
+  // 否则独占形态会挤掉配对窗）
   const handleOpenSyncedPair = useCallback(async (itemA, itemB) => {
-    const idA = await handlePlaySingleItem(itemA);
-    const idB = await handlePlaySingleItem(itemB);
+    const pairOpts = { noAutoCrop: true };
+    const idA = await handlePlaySingleItem(itemA, null, pairOpts);
+    const idB = await handlePlaySingleItem(itemB, null, pairOpts);
     // Series 落详情页（null）或两部解析到同一集：不建联动，窗照常按既有行为打开
     if (!idA || !idB || idA === idB) {
       console.warn('双窗联动未建立：', { idA, idB });

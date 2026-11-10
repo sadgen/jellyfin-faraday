@@ -16,10 +16,18 @@ function getRandomKey(id) {
   return key;
 }
 
+// 日期按「天」粒度参与排序：DateCreated 精确到秒、直接比较几乎永不相等，
+// 次级排序在按日期的主排序下将永远无法生效；按天取整后「同一天添加的再按
+// 次级字段分先后」才成立（无次级时稳定排序保持原有相对顺序，行为不变）
+function dayKey(v) {
+  const d = new Date(v || 0);
+  return Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
 // 各排序字段的比较器（比较器表驱动，供主/次级排序组合复用）
 const SORT_COMPARATORS = {
-  date_desc: (a, b) => new Date(b.DateCreated || 0) - new Date(a.DateCreated || 0),
-  date_asc: (a, b) => new Date(a.DateCreated || 0) - new Date(b.DateCreated || 0),
+  date_desc: (a, b) => dayKey(b.DateCreated) - dayKey(a.DateCreated),
+  date_asc: (a, b) => dayKey(a.DateCreated) - dayKey(b.DateCreated),
   name_asc: (a, b) => (a.SortName || a.Name || '').localeCompare(b.SortName || b.Name || '', 'zh-CN'),
   name_desc: (a, b) => (b.SortName || b.Name || '').localeCompare(a.SortName || a.Name || '', 'zh-CN'),
   rating_desc: (a, b) => (b.CommunityRating || 0) - (a.CommunityRating || 0),

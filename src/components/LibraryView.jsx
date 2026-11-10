@@ -706,12 +706,13 @@ const MediaCard = memo(function MediaCard({
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
-        // 触摸擦洗仅保留在背板（剧照）卡：海报卡已移除（与长按多选冲突，
-        // 2026-11-10 用户拍板删除；海报 trickplay 入口=右下角常显按钮）
-        onTouchStart={isBackdrop ? handleCoverTouchMove : undefined}
-        onTouchMove={isBackdrop ? handleCoverTouchMove : undefined}
-        onTouchEnd={isBackdrop ? handleCoverTouchEnd : undefined}
-        onTouchCancel={isBackdrop ? handleCoverTouchEnd : undefined}
+        // 触摸擦洗全部移除（2026-11-10 用户拍板：与长按多选冲突；剧照布局曾保留
+        // 框内擦洗，同样抢长按手势=手机端🔗看不到的根源，一并删除；
+        // trickplay 入口=右下角常显按钮，桌面悬停/右键不受影响）
+        onTouchStart={undefined}
+        onTouchMove={undefined}
+        onTouchEnd={undefined}
+        onTouchCancel={undefined}
       >
         {/* Static Poster Artwork（垫底占位层：完全无封面图 tag 时显示 Trickplay 第 0 帧，
             其余情况显示胶卷图标等待 img 加载覆盖；有封面时不用雪碧图垫底以省流量） */}

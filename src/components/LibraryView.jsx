@@ -182,9 +182,14 @@ const MediaCard = memo(function MediaCard({
   const touchScrubRef = useRef({ started: false, scrubbing: false, canceled: false, startX: 0, startY: 0, startPercent: 0 });
   // 最近一次提交时的原始触点百分比（迟滞死区的比较基准）
   const touchPercentRef = useRef(0);
+  // 最后一次 pointerdown 的来源类型：安卓长按触发 contextmenu 时区分触摸/鼠标右键
+  const lastPointerTypeRef = useRef('mouse');
 
   const handlePointerDown = useCallback((e) => {
     if (e.button !== undefined && e.button !== 0) return;
+    // 记录最后 pointer 来源：安卓长按会触发 contextmenu（见 handleCoverContextMenu），
+    // 触摸来源的 contextmenu 不启动自动预览
+    lastPointerTypeRef.current = e.pointerType || 'mouse';
     startPosRef.current = { x: e.clientX, y: e.clientY };
     isLongPressActiveRef.current = false;
     if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
@@ -223,9 +228,13 @@ const MediaCard = memo(function MediaCard({
   }, []);
 
   // 右键缩略图/海报：从鼠标当前位置开始自动播放 trickplay（再右键一次停止）。
-  // 不弹浏览器菜单；自动预览与悬停解耦——鼠标移开继续播，换卡不受影响
+  // 不弹浏览器菜单；自动预览与悬停解耦——鼠标移开继续播，换卡不受影响。
+  // 仅限真实鼠标右键：安卓长按也会触发 contextmenu（右键语义），若同样启动
+  // 自动预览 = 「长按固定显示 trickplay」，与长按多选 800ms 正面冲突
+  // （2026-11-10 用户拍板删除的正是这个；点按预览/横滑擦洗/悬停预览均保留）
   const handleCoverContextMenu = useCallback((e) => {
     e.preventDefault();
+    if (lastPointerTypeRef.current === 'touch') return;
     const rect = e.currentTarget.getBoundingClientRect();
     if (!rect.width) return;
     const percent = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
@@ -371,10 +380,9 @@ const MediaCard = memo(function MediaCard({
     setIsNearTop(rect.top < 300);
   }, [durationSec]);
 
-  // 悬停预览必须走 pointer 事件并按 pointerType 过滤：安卓触摸长按/点按松手后
-  // 浏览器会发射"模拟 mousemove"（无对应 pointer 事件），若挂 onMouseMove 会在
-  // 没有真实鼠标的设备上弹出预览且永不关闭（无 mouseleave）——长按多选松手后
-  // 凭空出现 trickplay 的根源（2026-11-10）
+  // 悬停预览按 pointerType 过滤：桌面真实鼠标（pointerType='mouse'）正常悬停预览；
+  // 触摸松手后的模拟 mousemove 无对应 pointer 事件，被天然挡掉（否则长按/点按
+  // 松手后会残留一张永不关闭的静态预览=「固定显示 trickplay」的一部分）
   const handleCoverPointerMove = useCallback((e) => {
     if (e.pointerType !== 'mouse') return;
     handleCoverMouseMove(e);
@@ -715,13 +723,10 @@ const MediaCard = memo(function MediaCard({
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
-        // 触摸擦洗全部移除（2026-11-10 用户拍板：与长按多选冲突；剧照布局曾保留
-        // 框内擦洗，同样抢长按手势=手机端🔗看不到的根源，一并删除；
-        // trickplay 入口=右下角常显按钮，桌面悬停/右键不受影响）
-        onTouchStart={undefined}
-        onTouchMove={undefined}
-        onTouchEnd={undefined}
-        onTouchCancel={undefined}
+        onTouchStart={handleCoverTouchMove}
+        onTouchMove={handleCoverTouchMove}
+        onTouchEnd={handleCoverTouchEnd}
+        onTouchCancel={handleCoverTouchEnd}
       >
         {/* Static Poster Artwork（垫底占位层：完全无封面图 tag 时显示 Trickplay 第 0 帧，
             其余情况显示胶卷图标等待 img 加载覆盖；有封面时不用雪碧图垫底以省流量） */}

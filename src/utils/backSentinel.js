@@ -47,6 +47,10 @@ if (typeof window !== 'undefined' && !window.__faradaySentinelInstalled) {
   window.addEventListener('popstate', () => {
     if (suppressNext) {
       suppressNext = false;
+      // 通知浮窗后退处理器同样忽略本次程序性 pop（App 的 onPopState 是独立监听，
+      // 不吞会误判为用户后退：多选清场+开双窗联动时 popstate 落在开窗之后，
+      // 把刚开的最新窗关掉 = 「联动只打开一个窗口」的根因，2026-11-10）
+      window.__faradaySuppressWinPopOnce = true;
       return;
     }
     const top = layerStack.pop();

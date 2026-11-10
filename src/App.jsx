@@ -859,6 +859,13 @@ export default function App() {
 
   useEffect(() => {
     const onPopState = () => {
+      // 返回哨兵协调器的程序性 pop（consumeSentinel 的 history.go(-1)）：协调器已
+      // 置 __faradaySuppressWinPopOnce，本处理器同样忽略（竞态：多选清场+开双窗
+      // 联动时 popstate 落在开窗之后会误关最新窗，2026-11-10）
+      if (window.__faradaySuppressWinPopOnce) {
+        window.__faradaySuppressWinPopOnce = false;
+        return;
+      }
       if (ignoreWinPopRef.current) {
         ignoreWinPopRef.current = false;
         return;

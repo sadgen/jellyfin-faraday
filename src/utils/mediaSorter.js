@@ -19,7 +19,7 @@ function getRandomKey(id) {
 // 日期按「天」粒度参与排序：DateCreated 精确到秒、直接比较几乎永不相等，
 // 次级排序在按日期的主排序下将永远无法生效；按天取整后「同一天添加的再按
 // 次级字段分先后」才成立（无次级时稳定排序保持原有相对顺序，行为不变）
-function dayKey(v) {
+export function dayKey(v) {
   const d = new Date(v || 0);
   return Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
 }
@@ -44,11 +44,29 @@ const SORT_COMPARATORS = {
  * 排序入口。
  * @param secondaryMethod 次级排序字段：主排序比较相等（并列）时用它分先后，
  *                        null/与主排序相同则不启用（保持原顺序兜底）
+ * @param dateKeyMap      重复影片组共同时间（Map<条目Id, 组时间戳>）：仅 date_asc/date_desc
+ *                        主排序生效。组内成员以共同时间参与排序使重复版本相邻成对，
+ *                        组内并列再按各自真实时间分先后（date_desc 时最新版本在前）；
+ *                        由调用方按「date_desc 取组内最新 / date_asc 取组内最早」预计算
  */
-export function sortMediaItems(items, sortMethod = 'date_desc', secondaryMethod = null) {
+export function sortMediaItems(items, sortMethod = 'date_desc', secondaryMethod = null, dateKeyMap = null) {
   if (!items || !Array.isArray(items)) return [];
   const copy = [...items];
-  const primary = SORT_COMPARATORS[sortMethod];
+  let primary;
+
+  if ((sortMethod === 'date_desc' || sortMethod === 'date_asc') && dateKeyMap && dateKeyMap.size > 0) {
+    const eff = it => {
+      const v = dateKeyMap.get(it.Id);
+      return v !== undefined ? v : dayKey(it.DateCreated);
+    };
+    const own = it => new Date(it.DateCreated || 0).getTime();
+    primary = sortMethod === 'date_desc'
+      ? (a, b) => eff(b) - eff(a) || own(b) - own(a)
+      : (a, b) => eff(a) - eff(b) || own(a) - own(b);
+  } else {
+    primary = SORT_COMPARATORS[sortMethod];
+  }
+
   if (!primary) return copy;
   const secondary = (secondaryMethod && secondaryMethod !== sortMethod)
     ? SORT_COMPARATORS[secondaryMethod]

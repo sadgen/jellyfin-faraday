@@ -6,7 +6,7 @@ import { detectDuplicateMedia } from '../utils/duplicateChecker';
 import { scanLibraryHealth } from '../utils/healthInspector';
 import { aggregateActors } from '../utils/actorAggregator';
 import { stackMediaItems } from '../utils/mediaStacking';
-import { sortMediaItems } from '../utils/mediaSorter';
+import { sortMediaItems, dayKey as dayKeyOf } from '../utils/mediaSorter';
 import { useViewport } from '../hooks/useViewport';
 import { getPlaybackDefaults, setPlaybackDefaults, QUALITY_OPTIONS, SPEED_PRESETS, PATROL_INTERVALS, GYRO_SWEEP_OPTIONS, MOBILE_OPEN_MODE_OPTIONS } from '../utils/playbackDefaults';
 import { SEEK_SPEED_OPTIONS, getStoredSeekSpeed, setStoredSeekSpeed } from '../utils/seekSettings';
@@ -1632,8 +1632,32 @@ export default function LibraryView({
   const [folderPoolItems, setFolderPoolItems] = useState([]);
   const folderPoolReqIdRef = useRef(0);
 
+  // Duplicate detection across current items
+  const { duplicateItemIds, duplicateCount, duplicateGroups } = useMemo(() => {
+    return detectDuplicateMedia(items);
+  }, [items]);
+
+  // 重复影片组共同时间（仅日期主排序启用）：重复版本成对相邻、按组共同时间占位——
+  // 最新优先(date_desc)取组内最新成员的那天，最早优先(date_asc)取组内最早成员的那天；
+  // 组内先后由 sortMediaItems 的 own 层处理（date_desc 时最新版本在前）
+  const dupGroupDateMap = useMemo(() => {
+    if (sortMethod !== 'date_desc' && sortMethod !== 'date_asc') return null;
+    if (!duplicateGroups || duplicateGroups.length === 0) return null;
+    const wantMax = sortMethod === 'date_desc';
+    const m = new Map();
+    duplicateGroups.forEach(g => {
+      let common = null;
+      for (const it of g.items) {
+        const t = dayKeyOf(it.DateCreated);
+        if (common === null || (wantMax ? t > common : t < common)) common = t;
+      }
+      for (const it of g.items) m.set(it.Id, common);
+    });
+    return m;
+  }, [duplicateGroups, sortMethod]);
+
   // 文件夹视图同样响应顶部排序选择（子文件夹与视频文件分区各自按当前排序展示）
-  const sortedFolderItems = useMemo(() => sortMediaItems(folderItems, sortMethod, secondarySortMethod), [folderItems, sortMethod, secondarySortMethod]);
+  const sortedFolderItems = useMemo(() => sortMediaItems(folderItems, sortMethod, secondarySortMethod, dupGroupDateMap), [folderItems, sortMethod, secondarySortMethod, dupGroupDateMap]);
 
   // 当切换库视图时，重置文件夹面包屑栈
   useEffect(() => {
@@ -1725,11 +1749,6 @@ export default function LibraryView({
   useEffect(() => {
     setVisibleCount(80);
   }, [selectedViewId, statusFilter, favoriteFilter, playCountFilter, selectedGenre, selectedYear, selectedLetter, showDuplicatesOnly, searchKeyword, activeSubTab]);
-
-  // Duplicate detection across current items
-  const { duplicateItemIds, duplicateCount } = useMemo(() => {
-    return detectDuplicateMedia(items);
-  }, [items]);
 
   // Health inspection across current items (损坏截断/下载中断坏文件检测)
   const { brokenItems, brokenCount } = useMemo(() => {
@@ -1881,7 +1900,7 @@ export default function LibraryView({
 
     // 4. 健康排查子标签页
     if (activeSubTab === 'health') {
-      return sortMediaItems(brokenItems, sortMethod, secondarySortMethod);
+      return sortMediaItems(brokenItems, sortMethod, secondarySortMethod, dupGroupDateMap);
     }
 
     // 5. 自制分段切片智能聚合（在影片主视图且开启聚合时）
@@ -1890,9 +1909,9 @@ export default function LibraryView({
     }
 
     // 6. 保证最终展示列表严格按当前 sortMethod 排序（解决按演员/关键词搜索时服务端按匹配度打乱排序的问题）；
-    //    主排序并列时再按次级排序分先后
-    return sortMediaItems(result, sortMethod, secondarySortMethod);
-  }, [items, activeSubTab, duplicateItemIds, brokenItems, showDuplicatesOnly, applyCommonFilters, enableStacking, sortMethod, secondarySortMethod]);
+    //    主排序并列时再按次级排序分先后；日期主排序下重复影片按组共同时间成对相邻
+    return sortMediaItems(result, sortMethod, secondarySortMethod, dupGroupDateMap);
+  }, [items, activeSubTab, duplicateItemIds, brokenItems, showDuplicatesOnly, applyCommonFilters, enableStacking, sortMethod, secondarySortMethod, dupGroupDateMap]);
 
   // 文件夹视图下的随机池 = 当前文件夹（含子文件夹）视频 ∩ 同一套状态/收藏/次数筛选
   const folderFilteredPool = useMemo(

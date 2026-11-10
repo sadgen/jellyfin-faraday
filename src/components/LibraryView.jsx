@@ -371,6 +371,15 @@ const MediaCard = memo(function MediaCard({
     setIsNearTop(rect.top < 300);
   }, [durationSec]);
 
+  // 悬停预览必须走 pointer 事件并按 pointerType 过滤：安卓触摸长按/点按松手后
+  // 浏览器会发射"模拟 mousemove"（无对应 pointer 事件），若挂 onMouseMove 会在
+  // 没有真实鼠标的设备上弹出预览且永不关闭（无 mouseleave）——长按多选松手后
+  // 凭空出现 trickplay 的根源（2026-11-10）
+  const handleCoverPointerMove = useCallback((e) => {
+    if (e.pointerType !== 'mouse') return;
+    handleCoverMouseMove(e);
+  }, [handleCoverMouseMove]);
+
   // Touch tracking for mobile devices (trickplay follows finger)
   // 手机手指易颤：竖版海报把整部片长压在一百多像素宽度上，1px 抖动就是几分钟跳帧。
   // 策略：位移<10px 视为点按（保留按位置起播）；垂直位移占优视为滚动网格并取消本次；
@@ -700,7 +709,7 @@ const MediaCard = memo(function MediaCard({
         onClick={handleCardClick}
         onAuxClick={handleCardAuxClick}
         onMouseDown={handleCardMouseDown}
-        onMouseMove={handleCoverMouseMove}
+        onPointerMove={handleCoverPointerMove}
         onContextMenu={handleCoverContextMenu}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}

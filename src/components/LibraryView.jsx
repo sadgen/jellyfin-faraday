@@ -382,11 +382,13 @@ const MediaCard = memo(function MediaCard({
 
   // 悬停预览按 pointerType 过滤：桌面真实鼠标（pointerType='mouse'）正常悬停预览；
   // 触摸松手后的模拟 mousemove 无对应 pointer 事件，被天然挡掉（否则长按/点按
-  // 松手后会残留一张永不关闭的静态预览=「固定显示 trickplay」的一部分）
+  // 松手后会残留一张永不关闭的静态预览=「固定显示 trickplay」的一部分）。
+  // 同时合并长按位移取消（原独立 onPointerMove={handlePointerMove}）——同 JSX 元素
+  // 写两个 onPointerMove 属性会静默后者覆盖前者（esbuild 无警告），曾致悬停预览整体失效
   const handleCoverPointerMove = useCallback((e) => {
-    if (e.pointerType !== 'mouse') return;
-    handleCoverMouseMove(e);
-  }, [handleCoverMouseMove]);
+    handlePointerMove(e);
+    if (e.pointerType === 'mouse') handleCoverMouseMove(e);
+  }, [handlePointerMove, handleCoverMouseMove]);
 
   // Touch tracking for mobile devices (trickplay follows finger)
   // 手机手指易颤：竖版海报把整部片长压在一百多像素宽度上，1px 抖动就是几分钟跳帧。
@@ -720,7 +722,6 @@ const MediaCard = memo(function MediaCard({
         onPointerMove={handleCoverPointerMove}
         onContextMenu={handleCoverContextMenu}
         onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
         onTouchStart={handleCoverTouchMove}

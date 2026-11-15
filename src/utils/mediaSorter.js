@@ -16,24 +16,19 @@ function getRandomKey(id) {
   return key;
 }
 
-// 日期按「天」粒度参与排序：DateCreated 精确到秒、直接比较几乎永不相等，
-// 次级排序在按日期的主排序下将永远无法生效；按天取整后「同一天添加的再按
-// 次级字段分先后」才成立（无次级时稳定排序保持原有相对顺序，行为不变）
-export function dayKey(v) {
-  const d = new Date(v || 0);
-  return Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
-}
+const createdAt = it => new Date(it.DateCreated || 0).getTime();
+const yearOf = it => it.ProductionYear || 0;
 
-// 各排序字段的比较器（比较器表驱动，供主/次级排序组合复用）
+// 各排序字段的比较器（普通视图：严格按字段值排序，不做任何分组/取整）
 const SORT_COMPARATORS = {
-  date_desc: (a, b) => dayKey(b.DateCreated) - dayKey(a.DateCreated),
-  date_asc: (a, b) => dayKey(a.DateCreated) - dayKey(b.DateCreated),
+  date_desc: (a, b) => createdAt(b) - createdAt(a),
+  date_asc: (a, b) => createdAt(a) - createdAt(b),
   name_asc: (a, b) => (a.SortName || a.Name || '').localeCompare(b.SortName || b.Name || '', 'zh-CN'),
   name_desc: (a, b) => (b.SortName || b.Name || '').localeCompare(a.SortName || a.Name || '', 'zh-CN'),
   rating_desc: (a, b) => (b.CommunityRating || 0) - (a.CommunityRating || 0),
   rating_asc: (a, b) => (a.CommunityRating || 0) - (b.CommunityRating || 0),
-  year_desc: (a, b) => (b.ProductionYear || 0) - (a.ProductionYear || 0),
-  year_asc: (a, b) => (a.ProductionYear || 0) - (b.ProductionYear || 0),
+  year_desc: (a, b) => yearOf(b) - yearOf(a),
+  year_asc: (a, b) => yearOf(a) - yearOf(b),
   playcount_desc: (a, b) => (b.UserData?.PlayCount || 0) - (a.UserData?.PlayCount || 0),
   playcount_asc: (a, b) => (a.UserData?.PlayCount || 0) - (b.UserData?.PlayCount || 0),
   runtime_desc: (a, b) => (b.RunTimeTicks || 0) - (a.RunTimeTicks || 0),
@@ -41,45 +36,63 @@ const SORT_COMPARATORS = {
 };
 
 /**
- * 排序入口。
- * @param secondaryMethod 次级排序字段：主排序比较相等（并列）时用它分先后，
- *                        null/与主排序相同则不启用（保持原顺序兜底）
- * @param groupKeyMap     重复影片组共同时间/年份（Map<条目Id, 组键>）：仅 date_asc/desc、
- *                        year_asc/desc 主排序生效。组内成员以共同键参与排序使重复版本
- *                        相邻成对，组内并列再按各自真实值分先后（desc 时最新版本在前）；
- *                        由调用方按「desc 取组内最新 / asc 取组内最早」预计算
+ * 普通排序入口：按真实字段值排（日期精确到秒），不做重复组占位。
  */
-export function sortMediaItems(items, sortMethod = 'date_desc', secondaryMethod = null, groupKeyMap = null) {
+export function sortMediaItems(items, sortMethod = 'date_desc') {
   if (!items || !Array.isArray(items)) return [];
-  const copy = [...items];
-  let primary;
+  const primary = SORT_COMPARATORS[sortMethod];
+  if (!primary) return [...items];
+  return [...items].sort(primary);
+}
 
-  if ((sortMethod === 'date_desc' || sortMethod === 'date_asc') && groupKeyMap && groupKeyMap.size > 0) {
-    const eff = it => {
-      const v = groupKeyMap.get(it.Id);
-      return v !== undefined ? v : dayKey(it.DateCreated);
-    };
-    const own = it => new Date(it.DateCreated || 0).getTime();
-    primary = sortMethod === 'date_desc'
-      ? (a, b) => eff(b) - eff(a) || own(b) - own(a)
-      : (a, b) => eff(a) - eff(b) || own(a) - own(b);
-  } else if ((sortMethod === 'year_desc' || sortMethod === 'year_asc') && groupKeyMap && groupKeyMap.size > 0) {
-    const eff = it => {
-      const v = groupKeyMap.get(it.Id);
-      return v !== undefined ? v : (it.ProductionYear || 0);
-    };
-    const own = it => it.ProductionYear || 0;
-    primary = sortMethod === 'year_desc'
-      ? (a, b) => eff(b) - eff(a) || own(b) - own(a)
-      : (a, b) => eff(a) - eff(b) || own(a) - own(b);
-  } else {
-    primary = SORT_COMPARATORS[sortMethod];
+/**
+ * 重复筛选视图专用（「查重清理」标签页 / 开启「仅显示重复」时）。
+ * 把每个重复组当成一个整体块参与日期或年份排序，保证同组始终相邻：
+ * - 组占位：最新排序取组内最新日期/年份，最早排序取组内最旧
+ * - 组内顺序：最新排序新版在前，最早排序旧版在前
+ * - 非重复条目按自身日期/年份参与；其它排序字段直接回退普通排序
+ * @param duplicateGroups detectDuplicateMedia() 的产物 [{ code, items }]
+ */
+export function sortMediaItemsByDuplicateGroups(items, sortMethod = 'date_desc', duplicateGroups = []) {
+  if (!items || !Array.isArray(items)) return [];
+
+  const isDate = sortMethod === 'date_desc' || sortMethod === 'date_asc';
+  const isYear = sortMethod === 'year_desc' || sortMethod === 'year_asc';
+  if ((!isDate && !isYear) || !duplicateGroups || duplicateGroups.length === 0) {
+    return sortMediaItems(items, sortMethod);
   }
 
-  if (!primary) return copy;
-  const secondary = (secondaryMethod && secondaryMethod !== sortMethod)
-    ? SORT_COMPARATORS[secondaryMethod]
-    : null;
-  if (!secondary) return copy.sort(primary);
-  return copy.sort((a, b) => primary(a, b) || secondary(a, b));
+  const desc = sortMethod.endsWith('_desc');
+  const valueOf = isDate ? createdAt : yearOf;
+
+  // 当前列表实际存在的成员才参与组块（搜索/筛选后可能只剩部分成员）
+  const presentIds = new Set(items.map(it => it.Id));
+  const groupOfItem = new Map();
+  duplicateGroups.forEach(g => {
+    const members = g.items.filter(it => presentIds.has(it.Id));
+    if (members.length > 1) members.forEach(it => groupOfItem.set(it.Id, g));
+  });
+
+  // 按输入顺序组装「组块」与「单个条目」，输入顺序兜底并列时的稳定性
+  const units = [];
+  const builtGroups = new Set();
+  items.forEach(it => {
+    const group = groupOfItem.get(it.Id);
+    if (!group) {
+      units.push({ key: valueOf(it), items: [it] });
+      return;
+    }
+    if (builtGroups.has(group)) return;
+    builtGroups.add(group);
+
+    const members = group.items.filter(x => groupOfItem.get(x.Id) === group);
+    members.sort((a, b) => desc ? valueOf(b) - valueOf(a) : valueOf(a) - valueOf(b));
+    const key = desc
+      ? Math.max(...members.map(valueOf))
+      : Math.min(...members.map(valueOf));
+    units.push({ key, items: members });
+  });
+
+  units.sort((a, b) => desc ? b.key - a.key : a.key - b.key);
+  return units.flatMap(unit => unit.items);
 }

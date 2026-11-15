@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sortMediaItems } from '../mediaSorter';
+import { sortMediaItems, sortMediaItemsByDuplicateGroups } from '../mediaSorter';
 
 describe('mediaSorter sorting utilities', () => {
   const items = [
@@ -54,5 +54,65 @@ describe('mediaSorter sorting utilities', () => {
     const after = sortMediaItems(extended, 'random').map(i => i.Id);
     const before = after.filter(id => id !== '60' && id !== '61');
     expect(before).toEqual(first);
+  });
+
+  it('sorts normal view by exact DateCreated (no day grouping)', () => {
+    const sameDay = [
+      { Id: 'a', DateCreated: '2026-11-10T09:00:00Z' },
+      { Id: 'b', DateCreated: '2026-11-10T11:00:00Z' },
+      { Id: 'c', DateCreated: '2026-11-10T08:00:00Z' }
+    ];
+    expect(sortMediaItems(sameDay, 'date_desc').map(i => i.Id)).toEqual(['b', 'a', 'c']);
+    expect(sortMediaItems(sameDay, 'date_asc').map(i => i.Id)).toEqual(['c', 'a', 'b']);
+  });
+});
+
+describe('sortMediaItemsByDuplicateGroups (重复筛选视图)', () => {
+  const D = t => `2026-11-10T${t}:00Z`;
+  const items = [
+    { Id: 'A旧', DateCreated: '2024-01-01T00:00:00Z' },
+    { Id: 'A新', DateCreated: D('09:00') },
+    { Id: 'B旧', DateCreated: '2023-05-05T00:00:00Z' },
+    { Id: 'B新', DateCreated: D('07:00') },
+    { Id: '普通1', DateCreated: D('10:00') },
+    { Id: '普通2', DateCreated: D('08:00') }
+  ];
+  const groups = [
+    { code: 'A', items: [items[0], items[1]] },
+    { code: 'B', items: [items[2], items[3]] }
+  ];
+
+  it('keeps every duplicate group contiguous even with same-day items and multiple groups', () => {
+    const desc = sortMediaItemsByDuplicateGroups(items, 'date_desc', groups).map(i => i.Id);
+    expect(desc).toEqual(['普通1', 'A新', 'A旧', '普通2', 'B新', 'B旧']);
+
+    const asc = sortMediaItemsByDuplicateGroups(items, 'date_asc', groups).map(i => i.Id);
+    expect(asc).toEqual(['B旧', 'B新', 'A旧', 'A新', '普通2', '普通1']);
+  });
+
+  it('places a group by its newest member (desc) / oldest member (asc)', () => {
+    const desc = sortMediaItemsByDuplicateGroups(items, 'date_desc', groups);
+    // A 组按 A新 的 09:00 占位，排在 10:00 与 08:00 之间
+    expect(desc.findIndex(i => i.Id === 'A新')).toBe(1);
+    expect(desc.findIndex(i => i.Id === 'A旧')).toBe(2);
+
+    const asc = sortMediaItemsByDuplicateGroups(items, 'date_asc', groups);
+    // B 组按 B旧 的 2023 占位，整体最靠前
+    expect(asc.slice(0, 2).map(i => i.Id)).toEqual(['B旧', 'B新']);
+  });
+
+  it('yields the same result as plain sorting when no group has 2+ members present', () => {
+    const singleOnly = [
+      { Id: 'A旧', DateCreated: '2024-01-01T00:00:00Z' },
+      { Id: '普通', DateCreated: '2025-01-01T00:00:00Z' }
+    ];
+    expect(sortMediaItemsByDuplicateGroups(singleOnly, 'date_desc', groups))
+      .toEqual(sortMediaItems(singleOnly, 'date_desc'));
+  });
+
+  it('falls back to plain sorting for non-date/year sort methods', () => {
+    const named = items.map((it, idx) => ({ ...it, Name: `N${idx}` }));
+    expect(sortMediaItemsByDuplicateGroups(named, 'name_asc', groups))
+      .toEqual(sortMediaItems(named, 'name_asc'));
   });
 });

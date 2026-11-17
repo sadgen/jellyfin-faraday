@@ -1,10 +1,11 @@
 /**
  * JAV 字幕/版本角标判定（2026-10-29 用户拍板的组合规则）
  *
- * 前缀：文件名 -LTX → L；-U / -UC → U
+ * 前缀：文件名 -LTX / (LTX) → L；-U / -UC → U
  * 后缀：中文字幕 → 追加 C
  *   - 硬字幕：只能靠文件名后缀 -C / -CH / -UC（含紧贴番号数字的 …ch，如 MIKR-089ch）
  *   - 软字幕：条目存在字幕流（MediaStreams 或 HasSubtitles）
+ *   - 新命名把 LTX 放在括号里，判断 C 时先剥掉 " (LTX)"
  * 全空 → Raw
  * 共六种结果：L / U / LC / UC / C / Raw
  *
@@ -14,7 +15,7 @@
 
 // 番号样式：字母数字段（须含字母，容纳 FC2 / 300MIUM）+ 可选 -PPV + 连字符 + 2~8 位数字
 const JAV_CODE_RE = /^(?=[A-Za-z0-9-]*[A-Za-z])[A-Za-z0-9]{2,10}(?:-PPV)?-\d{2,8}/i;
-const SUFFIX_L_RE = /-ltx$/i;
+const SUFFIX_L_RE = /(?:-ltx|\s*\(ltx\))$/i;
 const SUFFIX_U_RE = /-(u|uc)$/i;
 // 硬字幕：连字符后缀 -C/-CH/-UC，或紧贴数字的 glued ch（MIKR-089ch）
 const SUFFIX_C_RE = /-(c|ch|uc)$|\dch$/i;
@@ -41,7 +42,9 @@ export function getSubtitleBadge(item) {
   if (!name || !JAV_CODE_RE.test(name)) return null;
 
   const prefix = SUFFIX_L_RE.test(name) ? 'L' : SUFFIX_U_RE.test(name) ? 'U' : '';
-  const hasC = SUFFIX_C_RE.test(name) || hasSubtitleStream(item);
+  // " (LTX)" 在末尾时先剥掉，后面的 -C/-UC 才能被 SUFFIX_C_RE 看到
+  const baseName = name.replace(/\s*\(ltx\)$/i, '');
+  const hasC = SUFFIX_C_RE.test(baseName) || hasSubtitleStream(item);
 
   if (prefix) return { label: hasC ? `${prefix}C` : prefix };
   if (hasC) return { label: 'C' };

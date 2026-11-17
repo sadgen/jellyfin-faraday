@@ -16,6 +16,14 @@ describe('getSubtitleBadge 组合规则', () => {
     ).toBe('LC');
   });
 
+  it('新命名 (LTX)：独立括号后缀，C/UC 仍要正确叠加', () => {
+    expect(getSubtitleBadge(mk('ABC-123 (LTX)')).label).toBe('L');
+    expect(getSubtitleBadge(mk('ABC-123-C (LTX)')).label).toBe('LC');
+    // UC + LTX 语义矛盾，库里不存在；真出现也按 L 优先，不单列
+    expect(getSubtitleBadge(mk('ABC-123 (LTX)', { HasSubtitles: true })).label).toBe('LC');
+    expect(getSubtitleBadge(mk('ABC-123-C (LTX)', { HasSubtitles: true })).label).toBe('LC');
+  });
+
   it('U / UC：无码前缀', () => {
     expect(getSubtitleBadge(mk('ABC-123-U')).label).toBe('U');
     expect(getSubtitleBadge(mk('ABC-123-UC')).label).toBe('UC'); // UC 同时给出 U 前缀与硬字幕 C

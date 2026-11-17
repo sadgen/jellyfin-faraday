@@ -32,7 +32,7 @@ import {
   X, ExternalLink, Star, Eye, EyeOff, Image as ImageIcon,
   Glasses, Trash2, FastForward, Sun, Zap, Gauge, RefreshCw, Subtitles, Film,
   Tag, Scaling, FlipHorizontal, MoreVertical, SlidersHorizontal, Crop, RectangleHorizontal
-, RotateCcw , ChevronDown , History , Unlink , Layers } from 'lucide-react';
+, RotateCcw , ChevronDown , History , Unlink , Link2 } from 'lucide-react';
 import { listMediaVersions, selectMediaSource, describeMediaVersion, formatVersionSize } from '../utils/mediaVersions';
 
 function formatTime(seconds) {
@@ -77,20 +77,21 @@ export default function FloatingVideoWindow({
   onDeleteItem,
   onSwitchItem,
   onPlayingChange,
-  // 双窗联动（迷你窗不传，全部缺省关闭）
+  // 链接组（N 窗联动；迷你窗不传，全部缺省关闭）
   isSynced = false,
+  syncedCount = 0,
   syncSeekCommand,
   syncPlayCommand,
   onSyncSeek,
   onSyncPlay,
   onSyncToggle,
-  onSyncAlign
+  onSyncPosition
 }) {
   const { id, slotIndex, item } = windowData;
   // 铺满模式：本窗放大到页面可用区域最大（点击窗内铺满按钮触发，同时关闭其他浮窗）
   const isMaximized = !!windowData.isMaximized;
 
-  // 双窗联动：props 经 ref 镜像供 useCallback 闭包读取（wheel/scrubber 等记忆化
+  // 链接组：props 经 ref 镜像供 useCallback 闭包读取（wheel/scrubber 等记忆化
   // 回调里的 performSeek 不因 isSynced 翻转而陈旧漏报）
   const isSyncedRef = useRef(false);
   isSyncedRef.current = isSynced;
@@ -98,8 +99,12 @@ export default function FloatingVideoWindow({
   onSyncSeekRef.current = onSyncSeek;
   const onSyncPlayRef = useRef(null);
   onSyncPlayRef.current = onSyncPlay;
-  const onSyncAlignRef = useRef(null);
-  onSyncAlignRef.current = onSyncAlign;
+  const onSyncToggleRef = useRef(null);
+  onSyncToggleRef.current = onSyncToggle;
+  const onSyncPositionRef = useRef(null);
+  onSyncPositionRef.current = onSyncPosition;
+  // 位置上报节流（~1s）：链接中把本窗进度喂给 App，供后续加入的窗对齐
+  const lastSyncPosReportRef = useRef(0);
   const syncSeekAppliedSeqRef = useRef(0);
   const syncPlayAppliedSeqRef = useRef(0);
   // 联动上报的 from 基准：滚轮序列起点 / 进度条拖动起点 / 手机滑动 seek 起点
@@ -691,15 +696,16 @@ export default function FloatingVideoWindow({
     }
   };
 
-  // 双窗联动：接收配对窗的 seek 命令（seq 去重）。mode='relative'（默认）：把对方的
+  // 链接组：接收其他成员窗的 seek 命令（seq 去重）。mode='relative'（默认）：把对方的
   // 位移 delta 平移到本窗当前位置，基准与双击步进一致取在途 seek 目标；
-  // mode='absolute'（对齐进度）：直接跳到 cmd.to 指定时间点
+  // mode='absolute'（加入链接时的对齐）：直接跳到 cmd.to 指定时间点。
+  // 元数据未就绪（duration=0）时不消费 seq：等 duration 到位（rawDuration 变化）本命令仍生效
   useEffect(() => {
     const cmd = syncSeekCommand;
     if (!cmd || cmd.seq === syncSeekAppliedSeqRef.current) return;
-    syncSeekAppliedSeqRef.current = cmd.seq;
     const video = videoRef.current;
     if (!video || !video.duration) return;
+    syncSeekAppliedSeqRef.current = cmd.seq;
     let target;
     if (cmd.mode === 'absolute') {
       target = Math.max(0, Math.min(video.duration, cmd.to));
@@ -714,11 +720,24 @@ export default function FloatingVideoWindow({
     setCurrentTimeText(formatTime(target));
     sessionControllerRef.current?.seek(target);
     if (cmd.mode === 'absolute') {
-      setSmoothToast('已对齐至对方窗进度');
+      if (cmd.reason === 'join') {
+        setSmoothToast('🔗 已链接：对齐到基准窗进度');
+      } else {
+        setSmoothToast('已对齐至对方窗进度');
+      }
       setTimeout(() => setSmoothToast(''), 2200);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [syncSeekCommand?.seq]);
+  }, [syncSeekCommand?.seq, rawDuration]);
+
+  // 链接状态翻转即补一次位置上报：暂停中的窗不触发 timeupdate，
+  // 基准窗暂停时后加入的窗也要能拿到它的进度
+  useEffect(() => {
+    if (isSynced && onSyncPositionRef.current && videoRef.current) {
+      onSyncPositionRef.current(id, videoRef.current.currentTime);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSynced, id]);
 
   // Playback reporting & PlayCount Tracking
   const hasCountedPlayRef = useRef(false);
@@ -1241,6 +1260,14 @@ export default function FloatingVideoWindow({
   const handleTimeUpdate = () => {
     const video = videoRef.current;
     if (!video || !video.duration || isDraggingScrubberRef.current) return;
+    // 链接组位置上报（节流 ~1s）：后续点链接的窗据此直接对齐基准窗进度
+    if (isSyncedRef.current && onSyncPositionRef.current) {
+      const now = Date.now();
+      if (now - lastSyncPosReportRef.current > 1000) {
+        lastSyncPosReportRef.current = now;
+        onSyncPositionRef.current(id, video.currentTime);
+      }
+    }
     setRawDuration(video.duration);
     // Seek 锁生效期间视频仍在旧位置，timeupdate 不得刷新进度条
     if (seekLockRef.current.isActive()) return;
@@ -2039,33 +2066,13 @@ export default function FloatingVideoWindow({
 
       </div>
 
-      {/* 标题栏（视频下方）：拖动窗口 + 分段 + 滚动标题 + 下一个/关闭 */}
+      {/* 标题栏（视频下方）：拖动窗口 + 分段 + 链接开关 + 滚动标题 + 下一个/关闭 */}
       <div
         ref={headerRef}
         onMouseDown={startWindowDrag}
         onTouchStart={handleTouchStartHeader}
         className="px-2 py-1.5 border-t border-white/5 bg-slate-950/95 rounded-b-2xl flex items-center gap-1.5 cursor-move text-xs select-none"
       >
-        {isSynced && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              // 点击 = 把另一窗进度对齐到本窗当前位置（本窗为基准）
-              const t = videoRef.current?.currentTime;
-              if (t !== null && t !== undefined && onSyncAlignRef.current) {
-                onSyncAlignRef.current(id, t);
-                setSmoothToast('已对齐：对方窗将跳到本窗进度');
-                setTimeout(() => setSmoothToast(''), 2000);
-              }
-            }}
-            onMouseDown={(e) => e.stopPropagation()}
-            onTouchStart={(e) => e.stopPropagation()}
-            className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-950/90 border border-emerald-400/90 text-emerald-300 hover:bg-emerald-500/25 text-[10px] font-mono font-bold flex-shrink-0 transition"
-            title="🔗 双窗联动中：点击将另一窗进度对齐到本窗当前位置（⋮ 菜单可解除联动）"
-          >
-            <span>🔗 对齐进度</span>
-          </button>
-        )}
         {playbackDefaults.patrolMode && (
           <div
             className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-cyan-950/90 border border-cyan-400/90 text-cyan-300 text-[10px] font-mono font-bold flex-shrink-0 animate-pulse"
@@ -2096,6 +2103,23 @@ export default function FloatingVideoWindow({
         )}
         {/* JAV 字幕/版本角标（标题最左侧） */}
         <SubtitleBadgeChip item={item} />
+        {/* 链接组开关（LC 角标右侧、标题左侧）：点开加入链接组（首个加入无变化，
+        后续加入直接对齐基准窗进度）；再点解除本窗链接 */}
+        <button
+          onClick={(e) => { e.stopPropagation(); onSyncToggleRef.current?.(id); }}
+          onMouseDown={(e) => e.stopPropagation()}
+          onTouchStart={(e) => e.stopPropagation()}
+          className={`p-1 rounded transition flex-shrink-0 ${
+            isSynced
+              ? 'text-emerald-300 bg-emerald-500/20 hover:bg-emerald-500/30'
+              : 'text-gray-500 hover:text-emerald-300 hover:bg-white/10'
+          }`}
+          title={isSynced
+            ? `已链接（${syncedCount} 窗联动中）：点击解除本窗链接`
+            : '链接联动播放：与其他已链接窗口同步播放/暂停与快进快退（加入即对齐基准窗进度）'}
+        >
+          {isSynced ? <Unlink size={14} /> : <Link2 size={14} />}
+        </button>
         {/* 播放次数（标题最左侧，仅数字） */}
         {!!item?.UserData?.PlayCount && (
           <span
@@ -2214,15 +2238,6 @@ export default function FloatingVideoWindow({
                             <Crop size={12} />
                             <span>三屏取中</span>
                           </button>
-                          {isSynced && (
-                            <button
-                              onClick={() => { onSyncToggle?.(); setShowMoreMenu(false); }}
-                              className="py-1.5 px-1 rounded-lg text-[10px] text-center transition flex items-center justify-center gap-1 border bg-slate-800 text-gray-300 hover:bg-red-500/20 hover:text-red-300 border-white/10"
-                            >
-                              <Unlink size={12} />
-                              <span>解除联动</span>
-                            </button>
-                          )}
                           {isMobileViewport && (
                             <button
                               onClick={handleLandscapeToggle}

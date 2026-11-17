@@ -24,6 +24,11 @@ import ItemDetailModal from './components/ItemDetailModal';
 import StatsModal from './components/StatsModal';
 import ErrorBoundary from './components/ErrorBoundary';
 import { isNativePlayerAvailable } from './utils/nativePlayerBridge';
+import {
+  toggleLinkMembership,
+  relayRelativeSeek,
+  relayPlayPause
+} from './utils/windowLinkGroup';
 import { AlertCircle, Loader2, CheckCircle2, XCircle } from 'lucide-react';
 
 const STORAGE_KEY_VIEW = 'jf_last_selected_view';
@@ -340,24 +345,13 @@ export default function App() {
   // ==================== FLOATING 3-WINDOW PIP SYSTEM ====================
   // 安卓壳 v1 为单实例原生播放：网页浮窗窗格画面会被原生层接管（互相顶替），
   // 多窗同播属 v2 多实例范围，入口直接降级提示
-  // 双窗联动需要同步拿到窗 id：改为 ref 镜像同步推导 + 直接下发推导结果
-  // （同一 tick 连开两窗时第二次调用能看到第一次的结果；镜像 effect 仍兜底同步）
+  // 返回窗 id（同一 tick 连开多窗时 ref 镜像同步推导，第二次调用能看到第一次的结果）
   const handleOpenFloatingWindow = useCallback((item, startSecond = null, openOpts = null) => {
     if (!item?.Id) return null;
     const prev = floatingWindowsRef.current;
 
-    // If already playing in one of the windows, bring it to front
-    const existing = prev.find(w => w.item.Id === item.Id);
-    if (existing) {
-      const reused = prev.map(w => w.id === existing.id ? { ...w, startSecond, timestamp: Date.now() } : w);
-      floatingWindowsRef.current = reused;
-      setFloatingWindows(reused);
-      return existing.id;
-    }
-
     const newId = `win-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    // 双窗联动开窗必须跳过 autoCrop：手机上取中铺满是独占形态（挂载即关掉其他窗），
-    // 会把刚配对的另一窗挤掉导致联动自动解除
+    // openOpts.noAutoCrop：跳过手机默认取中铺满（独占形态挂载即关掉其他窗）
     const noAutoCrop = !!openOpts?.noAutoCrop;
     let next;
     if (prev.length < 3) {
@@ -756,68 +750,45 @@ export default function App() {
   const prevWinCountRef = useRef(0);
   useEffect(() => { floatingWindowsRef.current = floatingWindows; }, [floatingWindows]);
 
-  // ==================== 双窗联动（相对同步快进快退 + 播放/暂停联动） ====================
-  // null=未联动；否则 { ids:[idA,idB], seekSeq, seekCmds:{[winId]:{seq,from,to}}, playSeq, playCmds:{[winId]:{seq,paused}} }
-  // 窗间互不知晓：窗 → App 中继 → 经命令字段下发到配对窗（组件端 seq 去重接收）
+  // ==================== 浮窗链接组（N 窗联动：播放/暂停 + 相对快进快退） ====================
+  // null=无链接组；否则 windowLinkGroup 形态 { ids:[加入顺序，ids[0]=基准窗], seekSeq,
+  // seekCmds, playSeq, playCmds }。窗间互不知晓：窗 → App 中继 → 命令字段下发到
+  // 其余成员（组件端 seq 去重接收）。规则：第一个点链接的窗不变（成为基准），
+  // 后续加入的直接对齐基准窗当前进度；点按钮再取消 = 退出链接组。
   const [syncState, setSyncState] = useState(null);
+  // 各窗最近一次上报的播放位置（ref：只读不渲染，加入链接时取基准窗进度用）
+  const syncPositionsRef = useRef({});
 
-  const handleSyncToggleOff = useCallback(() => setSyncState(null), []);
-
-  const handleSyncSeek = useCallback((fromWinId, fromTime, toTime) => {
-    setSyncState(prev => {
-      if (!prev || !prev.ids.includes(fromWinId)) return prev;
-      const partnerId = prev.ids.find(x => x !== fromWinId);
-      const seq = prev.seekSeq + 1;
-      return { ...prev, seekSeq: seq, seekCmds: { ...prev.seekCmds, [partnerId]: { seq, from: fromTime, to: toTime, mode: 'relative' } } };
-    });
+  // 链接开关（浮窗标题栏链接按钮）：加入/退出链接组
+  const handleSyncToggle = useCallback((winId) => {
+    setSyncState(prev => toggleLinkMembership(prev, winId, syncPositionsRef.current[prev?.ids[0]]));
   }, []);
 
-  // 对齐进度：点击某窗的 🔗 按钮，把另一窗直接跳到该窗当前位置（绝对时间点）
-  const handleSyncAlign = useCallback((fromWinId, time) => {
-    setSyncState(prev => {
-      if (!prev || !prev.ids.includes(fromWinId)) return prev;
-      const partnerId = prev.ids.find(x => x !== fromWinId);
-      const seq = prev.seekSeq + 1;
-      return { ...prev, seekSeq: seq, seekCmds: { ...prev.seekCmds, [partnerId]: { seq, from: 0, to: time, mode: 'absolute' } } };
-    });
+  // 链接中各窗的播放位置上报（timeupdate 节流 ~1s，仅链接中上报）
+  const handleSyncPosition = useCallback((winId, time) => {
+    syncPositionsRef.current[winId] = time;
+  }, []);
+
+  const handleSyncSeek = useCallback((fromWinId, fromTime, toTime) => {
+    setSyncState(prev => relayRelativeSeek(prev, fromWinId, fromTime, toTime));
   }, []);
 
   const handleSyncPlay = useCallback((fromWinId, paused) => {
-    setSyncState(prev => {
-      if (!prev || !prev.ids.includes(fromWinId)) return prev;
-      const partnerId = prev.ids.find(x => x !== fromWinId);
-      const seq = prev.playSeq + 1;
-      return { ...prev, playSeq: seq, playCmds: { ...prev.playCmds, [partnerId]: { seq, paused } } };
-    });
+    setSyncState(prev => relayPlayPause(prev, fromWinId, paused));
   }, []);
 
-  // 多选批量栏入口：把所选 2 部以浮窗打开并建立联动（手机上跳过取中铺满，
-  // 否则独占形态会挤掉配对窗）
-  const handleOpenSyncedPair = useCallback(async (itemA, itemB) => {
-    // 先清掉所有已存在浮窗：若已有单开窗在播（手机默认取中铺满独占形态），
-    // 复用旧窗会保留其独占形态、新窗被压在后面 = 「联动打不开两个窗口」；
-    // 联动永远是干净的两窗舞台
-    if (floatingWindowsRef.current.length > 0) {
-      floatingWindowsRef.current = [];
-      setFloatingWindows([]);
-    }
-    const pairOpts = { noAutoCrop: true };
-    const idA = await handlePlaySingleItem(itemA, null, pairOpts);
-    const idB = await handlePlaySingleItem(itemB, null, pairOpts);
-    // Series 落详情页（null）或两部解析到同一集：不建联动，窗照常按既有行为打开
-    if (!idA || !idB || idA === idB) {
-      console.warn('双窗联动未建立：', { idA, idB });
-      return;
-    }
-    setSyncState({ ids: [idA, idB], seekSeq: 0, seekCmds: {}, playSeq: 0, playCmds: {} });
-  }, [handlePlaySingleItem]);
-
-  // 联动解除兜底：配对窗任一消失（关闭/铺满挤掉其余窗/删除）即解除；
-  // ⏭ 换片不改窗 id，联动保留
+  // 链接组修剪兜底：任一成员窗消失（关闭/挤掉/删除）即退出链接组，组空即散；
+  // ⏭ 换片不改窗 id，链接保留。顺带清理位置表里已消失的窗
   useEffect(() => {
     if (!syncState) return;
     const aliveIds = new Set(floatingWindows.map(w => w.id));
-    if (!syncState.ids.every(x => aliveIds.has(x))) setSyncState(null);
+    const alive = syncState.ids.filter(x => aliveIds.has(x));
+    if (alive.length !== syncState.ids.length) {
+      setSyncState(alive.length ? { ...syncState, ids: alive } : null);
+    }
+    for (const winId of Object.keys(syncPositionsRef.current)) {
+      if (!aliveIds.has(winId)) delete syncPositionsRef.current[winId];
+    }
   }, [floatingWindows, syncState]);
 
   const winHistoryPushedRef = useRef(0);
@@ -1156,7 +1127,6 @@ export default function App() {
           onOpenSettings={() => setIsSettingsModalOpen(true)}
             onPlayRandomItem={handlePlayRandomItem}
             onPlaySingleItem={handlePlaySingleItem}
-            onOpenSyncedPair={handleOpenSyncedPair}
             onOpenFloatingWindow={handleOpenFloatingWindow}
             onPlayModal={handlePlayModal}
             onPlayVr={handlePlayVr}
@@ -1195,8 +1165,8 @@ export default function App() {
           syncPlayCommands={syncState?.playCmds || null}
           onSyncSeek={handleSyncSeek}
           onSyncPlay={handleSyncPlay}
-          onSyncToggle={handleSyncToggleOff}
-          onSyncAlign={handleSyncAlign}
+          onSyncToggle={handleSyncToggle}
+          onSyncPosition={handleSyncPosition}
         />
 
         {/* 海报卡迷你浮窗（媒体库卡片播放按钮；独立于常规三窗系统） */}

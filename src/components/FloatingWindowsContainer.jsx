@@ -14,14 +14,14 @@ export default function FloatingWindowsContainer({
   onDeleteItem,
   onSwitchItem,
   onPlayingChange,
-  // 双窗联动（迷你窗容器不传，全部缺省关闭）
+  // 浮窗链接组（N 窗联动；迷你窗容器不传，全部缺省关闭）
   syncedIds = null,
   syncSeekCommands = null,
   syncPlayCommands = null,
   onSyncSeek,
   onSyncPlay,
   onSyncToggle,
-  onSyncAlign
+  onSyncPosition
 }) {
   if (!windows || windows.length === 0) return null;
 
@@ -44,12 +44,13 @@ export default function FloatingWindowsContainer({
             onSwitchItem={onSwitchItem}
             onPlayingChange={onPlayingChange}
             isSynced={!!syncedIds?.includes(win.id)}
+            syncedCount={syncedIds?.length || 0}
             syncSeekCommand={syncSeekCommands?.[win.id] || null}
             syncPlayCommand={syncPlayCommands?.[win.id] || null}
             onSyncSeek={onSyncSeek}
             onSyncPlay={onSyncPlay}
             onSyncToggle={onSyncToggle}
-            onSyncAlign={onSyncAlign}
+            onSyncPosition={onSyncPosition}
           />
         </div>
       ))}

@@ -15,28 +15,32 @@ function imageBase() {
  * Parse Trickplay info from item details or MediaSources
  * preferredWidth 缺省为 null = 使用清单中实际存在的最高档位
  * （服务端多档时任意场景都拿最清晰的档；单档服务器自动回退到唯一档）
+ * preferredSourceId = 多版本条目的当前版本：trickplay 资产按版本各自的
+ * MediaSource 生成，切换版本后清单与 URL 都必须跟随该版本
  */
-export function getTrickplayInfo(item, { preferredWidth = null } = {}) {
+export function getTrickplayInfo(item, { preferredWidth = null, preferredSourceId = null } = {}) {
   const defaultAr = (item?.Width && item?.Height && item.Height > 0)
     ? (item.Width / item.Height)
     : (item?.PrimaryImageAspectRatio && item.PrimaryImageAspectRatio > 0 ? item.PrimaryImageAspectRatio : (16 / 9));
   const defaultIsVertical = defaultAr < 0.9;
 
-  const defaultRet = { 
-    width: preferredWidth, 
+  const defaultRet = {
+    width: preferredWidth,
     height: Math.round(preferredWidth / defaultAr),
     aspectRatio: defaultAr,
     isVertical: defaultIsVertical,
-    interval: 10, 
-    id: item?.Id || null, 
-    cols: 10, 
+    interval: 10,
+    id: item?.Id || null,
+    cols: 10,
     rows: 10,
-    hasTrickplay: false 
+    hasTrickplay: false
   };
-  
+
   if (!item) return defaultRet;
 
-  const mediaSource = item.MediaSources?.[0];
+  const mediaSource =
+    (preferredSourceId && (item.MediaSources || []).find(s => s?.Id === preferredSourceId)) ||
+    item.MediaSources?.[0];
   const manifests = mediaSource?.Trickplay || mediaSource?.TrickPlay || mediaSource?.trickplay || item.Trickplay || item.TrickPlay;
   const id = mediaSource?.Id || item.Id || null;
 

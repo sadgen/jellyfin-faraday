@@ -11,15 +11,16 @@ export default function TrickplayScrubberThumbnail({
   mode = 'scrubber',  // 'scrubber' (relative to scrubber bar) | 'window' (relative to whole floating window)
   spaceBelow = null,  // window 模式：窗口下沿以下的视口剩余像素
   spaceAbove = null,  // window 模式：窗口上沿以上的可用像素（已扣除顶栏）
-  windowLeft = 0      // window 模式：窗口在视口内的横向偏移（跟随钳制按视口计算时需要）
+  windowLeft = 0,     // window 模式：窗口在视口内的横向偏移（跟随钳制按视口计算时需要）
+  mediaSourceId = null // 多版本条目：跟随当前播放版本取各自的 trickplay 清单
 }) {
   const tpInfo = useMemo(() => {
-    return getTrickplayInfo(item);
-  }, [item]);
+    return getTrickplayInfo(item, { preferredSourceId: mediaSourceId });
+  }, [item, mediaSourceId]);
 
   const style = useMemo(() => {
-    return getTrickplayStyle(item, hoverTime);
-  }, [item, hoverTime]);
+    return getTrickplayStyle(item, hoverTime, { preferredSourceId: mediaSourceId });
+  }, [item, hoverTime, mediaSourceId]);
 
   const formatTime = (seconds) => {
     if (!seconds || isNaN(seconds)) return '00:00';

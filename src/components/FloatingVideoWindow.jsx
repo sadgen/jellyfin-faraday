@@ -32,7 +32,8 @@ import {
   X, ExternalLink, Star, Eye, EyeOff, Image as ImageIcon,
   Glasses, Trash2, FastForward, Sun, Zap, Gauge, RefreshCw, Subtitles, Film,
   Tag, Scaling, FlipHorizontal, MoreVertical, SlidersHorizontal, Crop, RectangleHorizontal
-, RotateCcw , ChevronDown , History , Unlink } from 'lucide-react';
+, RotateCcw , ChevronDown , History , Unlink , Layers } from 'lucide-react';
+import { listMediaVersions, selectMediaSource, describeMediaVersion, formatVersionSize } from '../utils/mediaVersions';
 
 function formatTime(seconds) {
   if (!seconds || isNaN(seconds)) return '00:00';
@@ -573,9 +574,22 @@ export default function FloatingVideoWindow({
   // 音量控制（浮窗默认静音启动，音量等级记忆并随播放上报）
   const { volume, setVolume, isMuted, setIsMuted, toggleMute } = useVolumeControl(videoRef, { initialMuted: true });
 
+  // 多版本条目（`标题 - 版本名` 合并，如 AV1-10bit / HEVC8）：当前播放版本。
+  // ref 镜像给一次性闭包（onAutoDirectFallback / handleReloadStream）读取最新值；
+  // 切版本交接进度给主播放 effect（versionSwitchPosRef），音/字幕轨随版本重置
+  const [selectedVersionId, setSelectedVersionId] = useState(null);
+  const selectedVersionIdRef = useRef(null);
+  selectedVersionIdRef.current = selectedVersionId;
+  const versionSwitchPosRef = useRef(null);
+  useEffect(() => {
+    setSelectedVersionId(null);
+    selectedVersionIdRef.current = null;
+    versionSwitchPosRef.current = null;
+  }, [item?.Id, currentPartId]);
+
   // 字幕流管理（共享 hook：提取文本字幕流 + 硬字幕识别默认选择 + textTracks 同步）
   const { subtitleStreams, mediaSourceId, selectedSubtitleIndex, selectSubtitle, syncSubtitleModes } =
-    useSubtitleTracks({ item, playbackData, videoRef });
+    useSubtitleTracks({ item, playbackData, videoRef, preferredMediaSourceId: selectedVersionId });
 
   // 字幕快捷开关：记录最近一次选中的字幕轨，关闭后再点一键恢复
   const lastSubtitleIndexRef = useRef(-1);
@@ -781,7 +795,7 @@ export default function FloatingVideoWindow({
         setTimeout(() => setSmoothToast(''), 4500);
         sessionControllerRef.current?.loadStream({
           itemId: currentPartId,
-          mediaSourceId: currentPartId,
+          mediaSourceId: selectedVersionIdRef.current || currentPartId,
           streamQuality: defaultQuality,
           initialSeekTime: videoRef.current?.currentTime || 0,
           playbackSpeed: playbackSpeedRef.current,
@@ -987,6 +1001,17 @@ export default function FloatingVideoWindow({
 
   const currentPlayingPart = partsList[currentPartIndex] || item;
 
+  // 版本列表：多版本条目（`标题 - 版本名` 合并）跟随当前播放分段；
+  // 单版本条目长度 1，版本入口不显示
+  const mediaVersions = useMemo(
+    () => listMediaVersions(playbackData, item),
+    [playbackData, item]
+  );
+  const activeVersion = useMemo(
+    () => selectMediaSource(playbackData?.MediaSources || item?.MediaSources, selectedVersionId),
+    [playbackData, item, selectedVersionId]
+  );
+
   // 进度条缩略图必须使用"当前播放分段"的条目数据：主条目用 item，
   // 其他分段用拉取到的分段详情（分段详情到达前暂无 trickplay 帧，
   // 避免错误沿用第一个切片的画面导致帧与时间对应错位）
@@ -1059,13 +1084,20 @@ export default function FloatingVideoWindow({
     if (!videoEl) return;
     controller.attachVideo(videoEl);
 
+    // 版本切换交接进度：优先于续播/智能起播（切版本 = 同一部片换个格式继续看）
+    const versionSwitchPos = versionSwitchPosRef.current;
+    versionSwitchPosRef.current = null;
+    const isVersionSwitchSeek = versionSwitchPos !== null && versionSwitchPos > 0;
+
     // Determine initial seek time: Trickplay click time > server resumeTicks > smartStart > 0
-    let initialSeekTime = calculateSmartStartTime(currentPlayingPart, {
-      explicitStartSecond: windowData.startSecond,
-      smartStartEnabled: playbackDefaultsRef.current.smartStart
-    });
-    const isExplicitSeek = windowData.startSecond !== undefined && windowData.startSecond !== null;
-    const isResumeSeek = !!currentPlayingPart.UserData?.PlaybackPositionTicks;
+    let initialSeekTime = isVersionSwitchSeek
+      ? versionSwitchPos
+      : calculateSmartStartTime(currentPlayingPart, {
+          explicitStartSecond: windowData.startSecond,
+          smartStartEnabled: playbackDefaultsRef.current.smartStart
+        });
+    const isExplicitSeek = isVersionSwitchSeek || (windowData.startSecond !== undefined && windowData.startSecond !== null);
+    const isResumeSeek = isVersionSwitchSeek || !!currentPlayingPart.UserData?.PlaybackPositionTicks;
 
     // Auto-detect VR Video format (pure 2D vs 3D-to-2D vs true VR)
     // 换片重置手动退出标记
@@ -1112,7 +1144,7 @@ export default function FloatingVideoWindow({
     controller
       .loadStream({
         itemId: currentPartId,
-        mediaSourceId: currentPartId,
+        mediaSourceId: selectedVersionId || currentPartId,
         streamQuality: streamQualityRef.current,
         initialSeekTime,
         playbackSpeed: playbackSpeedRef.current,
@@ -1129,7 +1161,7 @@ export default function FloatingVideoWindow({
       videoEl.removeEventListener('loadedmetadata', onLoadedMetadata);
       controller.destroy();
     };
-  }, [currentPartId, windowData.startSecond]);
+  }, [currentPartId, windowData.startSecond, selectedVersionId]);
 
   // Reload Video Stream & Metadata (to fetch newly downloaded subtitles)
   const handleReloadStream = useCallback(async (customPlaybackData = null) => {
@@ -1147,7 +1179,7 @@ export default function FloatingVideoWindow({
     if (sessionControllerRef.current) {
       await sessionControllerRef.current.loadStream({
         itemId: currentPartId,
-        mediaSourceId: currentPartId,
+        mediaSourceId: selectedVersionIdRef.current || currentPartId,
         streamQuality: streamQualityRef.current,
         initialSeekTime: currentPos,
         playbackSpeed: playbackSpeedRef.current,
@@ -1190,6 +1222,21 @@ export default function FloatingVideoWindow({
       setTimeout(() => setSmoothToast(''), 3000);
     }
   }, [currentPartId]);
+
+  // 切换版本（多版本条目）：交接进度给主播放 effect（selectedVersionId 变化驱动
+  // 效果重跑），换流全程保持进度/画质/音量；音/字幕轨随版本重置
+  const handleChangeVersion = useCallback((source) => {
+    if (!source?.Id) return;
+    const currentSourceId = selectedVersionIdRef.current || mediaVersions[0]?.Id || item?.Id;
+    if (source.Id === currentSourceId) return;
+    versionSwitchPosRef.current = videoRef.current?.currentTime || 0;
+    selectedVersionIdRef.current = source.Id;
+    setSelectedVersionId(source.Id);
+    setShowMoreMenu(false);
+    const label = describeMediaVersion(source);
+    setSmoothToast(`💿 已切换版本: ${label}（保持进度）`);
+    setTimeout(() => setSmoothToast(''), 3200);
+  }, [mediaVersions, item?.Id]);
 
   const handleTimeUpdate = () => {
     const video = videoRef.current;
@@ -1730,6 +1777,7 @@ export default function FloatingVideoWindow({
       {!(cropFill || isMaximized) && (
         <TrickplayScrubberThumbnail
           item={trickplayItem}
+          mediaSourceId={currentPartId === item?.Id ? selectedVersionId : null}
           hoverTime={hoverScrubberTime}
           hoverPercent={hoverScrubberPercent}
           containerWidth={layout.width}
@@ -1956,6 +2004,7 @@ export default function FloatingVideoWindow({
           {(cropFill || isMaximized) && (
             <TrickplayScrubberThumbnail
               item={trickplayItem}
+              mediaSourceId={currentPartId === item?.Id ? selectedVersionId : null}
               hoverTime={hoverScrubberTime}
               hoverPercent={hoverScrubberPercent}
               containerWidth={scrubberWidth}
@@ -2240,6 +2289,37 @@ export default function FloatingVideoWindow({
                         </button>
                       </div>
 
+                      {/* 0. 版本切换（多版本条目：`标题 - 版本名` 合并的 MediaSources） */}
+                      {mediaVersions.length > 1 && (
+                        <div className="flex flex-col gap-1 px-1">
+                          <span className="text-[10px] text-cyan-300 font-bold">💿 版本（保持进度）</span>
+                          <div className="grid grid-cols-2 gap-1">
+                            {mediaVersions.map(source => {
+                              const active = source.Id === (selectedVersionId || mediaVersions[0]?.Id);
+                              return (
+                                <button
+                                  key={source.Id}
+                                  onClick={() => handleChangeVersion(source)}
+                                  className={`py-1 px-1.5 rounded-lg text-[10px] text-center transition ${
+                                    active
+                                      ? 'bg-cyan-400 text-slate-950 font-bold shadow'
+                                      : 'bg-slate-800 text-gray-300 hover:bg-slate-700 border border-white/10'
+                                  }`}
+                                  title={source.Path || describeMediaVersion(source)}
+                                >
+                                  <span className="block truncate">{describeMediaVersion(source)}</span>
+                                  {formatVersionSize(source) && (
+                                    <span className={`block text-[9px] font-mono ${active ? 'text-slate-900/80' : 'text-gray-500'}`}>
+                                      {formatVersionSize(source)}
+                                    </span>
+                                  )}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
                       {/* 1. 画质与清晰度 */}
                       <div className="flex flex-col gap-1 px-1">
                         <span className="text-[10px] text-cyan-300 font-bold">🎥 播放画质</span>
@@ -2523,6 +2603,7 @@ export default function FloatingVideoWindow({
       <SubtitleModal
         isOpen={showSubtitleModal}
         item={item}
+        mediaSourceId={selectedVersionId || null}
         currentSubtitleIndex={selectedSubtitleIndex}
         onSelectSubtitle={(idx) => selectSubtitle(idx)}
         onSubtitleDownloaded={(updatedPlayback, subIdx) => {

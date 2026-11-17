@@ -30,8 +30,9 @@ import {
   Play, Pause, Maximize,
   Star, Eye, EyeOff, ExternalLink, X, Film,
   SkipForward, SkipBack, Sun, Zap, FastForward, Glasses, Trash2, Gauge,
-  Subtitles, Music, Keyboard, ChevronRight, Tag, Scaling, FlipHorizontal, ListVideo, RefreshCw, Flag
+  Subtitles, Music, Keyboard, ChevronRight, Tag, Scaling, FlipHorizontal, ListVideo, RefreshCw, Flag, Layers
 } from 'lucide-react';
+import { listMediaVersions, selectMediaSource, describeMediaVersion, formatVersionSize } from '../utils/mediaVersions';
 
 function formatTime(seconds) {
   if (!seconds || isNaN(seconds)) return '00:00';
@@ -259,11 +260,31 @@ export default function VideoPlayerModal({
     });
   }
 
+  // 多版本条目（`标题 - 版本名` 合并，如 AV1-10bit / HEVC8）：当前播放版本。
+  // null = 主版本（MediaSources[0]）；切换保持进度与画质档，音/字幕轨随版本重置
+  const [selectedVersionId, setSelectedVersionId] = useState(null);
+  const [showVersionMenu, setShowVersionMenu] = useState(false);
+  // 版本切换时的进度交接：主播放 effect 消费一次，作为 initialSeekTime 起播
+  const versionSwitchPosRef = useRef(null);
+  useEffect(() => {
+    setSelectedVersionId(null);
+    setShowVersionMenu(false);
+    versionSwitchPosRef.current = null;
+  }, [item?.Id]);
+
   // 音轨 / 字幕 / 音量 / PlaybackInfo（共享 hooks）
   const { playbackData, setPlaybackData } = useMediaPlaybackInfo(item?.Id);
   const { volume, setVolume, isMuted, setIsMuted, toggleMute } = useVolumeControl(videoRef);
   const { subtitleStreams, mediaSourceId, selectedSubtitleIndex, selectSubtitle, syncSubtitleModes } =
-    useSubtitleTracks({ item, playbackData, videoRef });
+    useSubtitleTracks({ item, playbackData, videoRef, preferredMediaSourceId: selectedVersionId });
+  const mediaVersions = useMemo(
+    () => listMediaVersions(playbackData, item),
+    [playbackData, item]
+  );
+  const activeVersion = useMemo(
+    () => selectMediaSource(playbackData?.MediaSources || item?.MediaSources, selectedVersionId),
+    [playbackData, item, selectedVersionId]
+  );
 
   // track 重建后的模式回同步（重挂载的新 <track> 初始 disabled，等 commit 后置 hidden）
   useEffect(() => {
@@ -273,12 +294,12 @@ export default function VideoPlayerModal({
   }, [streamEpoch, syncSubtitleModes]);
   const viewport = useViewport();
 
-  // 音轨流（多音轨视频切换，如 双语配音 / 导演评论）
+  // 音轨流（多音轨视频切换，如 双语配音 / 导演评论）——跟随当前选中版本
   const audioStreams = useMemo(() => {
-    const ms = playbackData?.MediaSources?.[0] || item?.MediaSources?.[0];
+    const ms = selectMediaSource(playbackData?.MediaSources || item?.MediaSources, selectedVersionId);
     const streams = ms?.MediaStreams || playbackData?.MediaStreams || item?.MediaStreams || [];
     return streams.filter(s => s.Type === 'Audio');
-  }, [playbackData, item]);
+  }, [playbackData, item, selectedVersionId]);
   const [selectedAudioStreamIndex, setSelectedAudioStreamIndex] = useState(null);
 
   // 下一集预取（剧集连播）
@@ -678,13 +699,20 @@ export default function VideoPlayerModal({
 
     hasCountedPlayRef.current = false;
 
+    // 版本切换交接进度：优先于续播/智能起播（切版本 = 同一部片换个格式继续看）
+    const versionSwitchPos = versionSwitchPosRef.current;
+    versionSwitchPosRef.current = null;
+    const isVersionSwitchSeek = versionSwitchPos !== null && versionSwitchPos > 0;
+
     // Determine initial seek time: Trickplay click time > server resumeTicks > smartStart > 0
-    let initialSeekTime = calculateSmartStartTime(item, {
-      explicitStartSecond: item.startSecond,
-      smartStartEnabled: playbackDefaultsRef.current.smartStart
-    });
-    const isExplicitSeek = item.startSecond !== undefined && item.startSecond !== null;
-    const isResumeSeek = !!item.UserData?.PlaybackPositionTicks;
+    let initialSeekTime = isVersionSwitchSeek
+      ? versionSwitchPos
+      : calculateSmartStartTime(item, {
+          explicitStartSecond: item.startSecond,
+          smartStartEnabled: playbackDefaultsRef.current.smartStart
+        });
+    const isExplicitSeek = isVersionSwitchSeek || (item.startSecond !== undefined && item.startSecond !== null);
+    const isResumeSeek = isVersionSwitchSeek || !!item.UserData?.PlaybackPositionTicks;
 
     const onLoadedMetadata = () => {
       let targetSeek = initialSeekTime;
@@ -771,6 +799,22 @@ export default function VideoPlayerModal({
     setSmoothToast(`🎵 已切换音轨: ${trackName}（转码播放）`);
     setTimeout(() => setSmoothToast(''), 3000);
   }, [item?.Id]);
+
+  // 切换版本（多版本条目）：换 MediaSource 拉流，进度/画质/音量全保留，
+  // 音轨与字幕轨随版本重置（流索引属于各自版本的 MediaStreams）。
+  // 实际换流由主播放 effect 完成（mediaSourceId 变化驱动），此处只交接进度
+  const changeMediaVersion = useCallback((source) => {
+    if (!source?.Id) return;
+    const currentSourceId = selectedVersionId || mediaVersions[0]?.Id || item?.Id;
+    if (source.Id === currentSourceId) return;
+    versionSwitchPosRef.current = videoRef.current?.currentTime || 0;
+    setSelectedAudioStreamIndex(null);
+    setSelectedVersionId(source.Id);
+    setShowVersionMenu(false);
+    const label = describeMediaVersion(source);
+    setSmoothToast(`💿 已切换版本: ${label}（保持进度）`);
+    setTimeout(() => setSmoothToast(''), 3200);
+  }, [selectedVersionId, mediaVersions, item?.Id]);
 
   // Video Ended -> increment play count, then next episode (with countdown) or next item
   const handleEnded = () => {
@@ -1410,6 +1454,7 @@ export default function VideoPlayerModal({
           <div className="relative w-full">
             <TrickplayScrubberThumbnail
               item={item}
+              mediaSourceId={selectedVersionId}
               hoverTime={hoverScrubberTime}
               hoverPercent={hoverScrubberPercent}
               containerWidth={scrubberWidth}
@@ -1715,6 +1760,58 @@ export default function VideoPlayerModal({
                 )}
               </div>
 
+              {/* 多版本条目：版本切换（`标题 - 版本名` 合并的 MediaSources） */}
+              {mediaVersions.length > 1 && (
+                <div className="relative">
+                  <button
+                    onClick={() => setShowVersionMenu(!showVersionMenu)}
+                    className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl border text-xs font-bold transition ${
+                      selectedVersionId
+                        ? 'bg-cyan-500/30 text-cyan-300 border-cyan-400/50 shadow-sm shadow-cyan-500/30'
+                        : 'bg-black/40 border-white/5 text-gray-300 hover:text-cyan-300 hover:bg-white/10'
+                    }`}
+                    title="切换版本（同部影片的不同格式）"
+                  >
+                    <Layers size={14} className={selectedVersionId ? 'text-cyan-400' : ''} />
+                    <span className="max-w-[90px] truncate">
+                      {describeMediaVersion(activeVersion) || '版本'}
+                    </span>
+                  </button>
+
+                  {showVersionMenu && (
+                    <div
+                      data-native-overlap="modal"
+                      className="absolute right-0 bottom-10 w-52 glass-panel rounded-xl shadow-2xl py-1 z-50 text-xs text-gray-200 divide-y divide-white/5 animate-in fade-in zoom-in-95 duration-100"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <div className="px-3 py-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                        选择版本（保持进度）
+                      </div>
+                      {mediaVersions.map(source => {
+                        const active = source.Id === (selectedVersionId || mediaVersions[0]?.Id);
+                        return (
+                          <button
+                            key={source.Id}
+                            onClick={() => changeMediaVersion(source)}
+                            className={`w-full px-3 py-1.5 text-left flex items-center justify-between gap-2 transition ${
+                              active ? 'bg-cyan-500/20 text-cyan-300 font-bold' : 'hover:bg-white/10 text-gray-300'
+                            }`}
+                          >
+                            <span className="truncate">{describeMediaVersion(source)}</span>
+                            <span className="flex items-center gap-1.5 flex-shrink-0">
+                              {formatVersionSize(source) && (
+                                <span className="font-mono text-[10px] text-gray-400">{formatVersionSize(source)}</span>
+                              )}
+                              {active && <span className="text-cyan-400 text-xs">✓</span>}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div className="relative">
                 <button
                   onClick={() => setShowQualityMenu(!showQualityMenu)}
@@ -1870,6 +1967,7 @@ export default function VideoPlayerModal({
       <SubtitleModal
         isOpen={showSubtitleModal}
         item={item}
+        mediaSourceId={selectedVersionId || null}
         currentSubtitleIndex={selectedSubtitleIndex}
         onSelectSubtitle={(idx) => selectSubtitle(idx)}
         onSubtitleDownloaded={(updatedPlayback, subIdx) => {

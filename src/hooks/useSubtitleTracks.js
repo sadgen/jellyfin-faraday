@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { getDefaultSubtitleIndex } from '../utils/subtitleHelper';
+import { selectMediaSource } from '../utils/mediaVersions';
 import {
   getDefaultSubtitle,
   subscribeSubtitleDefaultChanges,
@@ -21,12 +22,16 @@ export function filterTextSubtitleStreams(streams = []) {
 /**
  * 共享字幕流管理 Hook：
  * - 从 PlaybackInfo / item 提取文本字幕流
+ * - preferredMediaSourceId 指定多版本条目的当前版本，缺省回落主版本
  * - 默认选轨：用户显式指定的默认轨（subtitleDefaults，全设备同步）优先，
  *   否则按硬字幕识别 + IsDefault/中文优先启发式
  * - 将选中状态同步到 video.textTracks（选中 hidden，由 SubtitleOverlay 接管渲染）
  */
-export function useSubtitleTracks({ item, playbackData, videoRef }) {
-  const mediaSource = playbackData?.MediaSources?.[0] || item?.MediaSources?.[0];
+export function useSubtitleTracks({ item, playbackData, videoRef, preferredMediaSourceId = null }) {
+  const mediaSource =
+    selectMediaSource(playbackData?.MediaSources || item?.MediaSources, preferredMediaSourceId) ||
+    playbackData?.MediaSources?.[0] ||
+    item?.MediaSources?.[0];
   const mediaSourceId = mediaSource?.Id || item?.Id;
 
   const subtitleStreams = useMemo(() => {
@@ -59,10 +64,11 @@ export function useSubtitleTracks({ item, playbackData, videoRef }) {
     setSelectedSubtitleIndex(Number.isFinite(index) ? index : -1);
   }, []);
 
-  // 换片（同一播放面播下一集等）重置显式选择标记，让新片重新应用默认轨
+  // 换片（同一播放面播下一集等）或切版本重置显式选择标记，
+  // 让新片/新版本重新应用各自的默认轨
   useEffect(() => {
     userSelectedRef.current = false;
-  }, [item?.Id]);
+  }, [item?.Id, preferredMediaSourceId]);
 
   // 默认选轨：流首次非空（或默认轨指纹跨端更新且用户尚未显式选择）时应用。
   // 注意不能在每次 playbackData 更新时重算——下载新字幕回传的显式选轨会被打回。

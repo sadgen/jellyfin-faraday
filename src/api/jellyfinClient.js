@@ -754,10 +754,16 @@ export class JellyfinClient {
 
   /**
    * Get direct playable stream URL
+   * 多版本条目须带 MediaSourceId 定位具体版本；mediaSourceId 等于 itemId
+   * （单版本/主版本）时不带，保持既有 URL 形态逐字节不变
    */
-  getStreamUrl(itemId) {
+  getStreamUrl(itemId, mediaSourceId = null) {
     if (!this.auth.serverUrl || !itemId) return '';
-    return `${this.auth.serverUrl}/Videos/${itemId}/stream?static=true&ApiKey=${this.auth.token}&api_key=${this.auth.token}`;
+    let url = `${this.auth.serverUrl}/Videos/${itemId}/stream?static=true&ApiKey=${this.auth.token}&api_key=${this.auth.token}`;
+    if (mediaSourceId && mediaSourceId !== itemId) {
+      url += `&MediaSourceId=${encodeURIComponent(mediaSourceId)}`;
+    }
+    return url;
   }
 
   /**

@@ -577,3 +577,160 @@ describe('PlaybackSessionController', () => {
     expect(controller.playSessionId).toBeNull();
   });
 });
+
+describe('PlaybackSessionController multi-version (MediaSourceId)', () => {
+  let mockJellyfin;
+  let mockVideo;
+  let controller;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    isRemoteNetwork.mockResolvedValue(false);
+    isHevc10VideoStream.mockReturnValue(false);
+    canMsePlayVideoStream.mockReturnValue(true);
+    let sessionCounter = 100;
+    mockJellyfin = {
+      auth: { serverUrl: 'https://jf.example', token: 'test-token', userId: 'u1' },
+      createPlaySessionId: vi.fn(() => `test_session_${sessionCounter++}`),
+      getStreamUrl: vi.fn((itemId, mediaSourceId) => `https://jf.example/stream/${itemId}${mediaSourceId ? `?msid=${mediaSourceId}` : ''}`),
+      getSmoothHlsUrl: vi.fn((itemId, bitrate, opts) => `https://jf.example/hls/${itemId}?bitrate=${bitrate}&msid=${opts.mediaSourceId || itemId}`),
+      getRemuxHlsUrl: vi.fn((itemId, opts) => `https://jf.example/remux/${itemId}?codec=${opts.videoCodec}&msid=${opts.mediaSourceId || itemId}`),
+      getItemPlaybackInfo: vi.fn().mockResolvedValue({
+        MediaSources: [
+          { Id: 'item_primary', MediaStreams: [{ Type: 'Video', Codec: 'av1', BitDepth: 10 }] },
+          { Id: 'source_hevc10', MediaStreams: [{ Type: 'Video', Codec: 'hevc', Profile: 'Main 10', BitDepth: 10, CodecTag: 'hvc1' }] }
+        ]
+      }),
+      reportPlayback: vi.fn().mockResolvedValue(true),
+      stopTranscoding: vi.fn().mockResolvedValue(true)
+    };
+
+    const eventListeners = {};
+    mockVideo = {
+      src: '',
+      currentTime: 0,
+      playbackRate: 1,
+      muted: false,
+      volume: 1,
+      paused: false,
+      removeAttribute: vi.fn(),
+      load: vi.fn(),
+      play: vi.fn().mockResolvedValue(undefined),
+      canPlayType: vi.fn().mockReturnValue('maybe'),
+      buffered: createTimeRanges([[0, 20]]),
+      addEventListener: vi.fn((type, fn) => {
+        (eventListeners[type] = eventListeners[type] || []).push(fn);
+      }),
+      removeEventListener: vi.fn((type, fn) => {
+        eventListeners[type] = (eventListeners[type] || []).filter((f) => f !== fn);
+      })
+    };
+    mockVideo.fireEvent = (type) => {
+      (eventListeners[type] || []).slice().forEach((fn) => fn({ type }));
+    };
+
+    controller = new PlaybackSessionController({
+      jellyfinClient: mockJellyfin
+    });
+    controller.attachVideo(mockVideo);
+  });
+
+  afterEach(() => {
+    controller.destroy();
+    vi.advanceTimersByTime(SESSION_STOP_DRAIN_MS + 1);
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('direct play of a non-default version carries MediaSourceId in the stream URL', async () => {
+    await controller.loadStream({ itemId: 'item_primary', mediaSourceId: 'source_hevc10', streamQuality: 'direct' });
+
+    expect(mockJellyfin.getStreamUrl).toHaveBeenCalledWith('item_primary', 'source_hevc10');
+    expect(mockVideo.src).toBe('https://jf.example/stream/item_primary?msid=source_hevc10');
+  });
+
+  it('direct play of the primary version keeps the URL free of MediaSourceId', async () => {
+    await controller.loadStream({ itemId: 'item_primary', mediaSourceId: 'item_primary', streamQuality: 'direct' });
+
+    expect(mockJellyfin.getStreamUrl).toHaveBeenCalledWith('item_primary', null);
+    expect(mockVideo.src).toBe('https://jf.example/stream/item_primary');
+  });
+
+  it('HLS transcode of a non-default version carries MediaSourceId', async () => {
+    await controller.loadStream({ itemId: 'item_primary', mediaSourceId: 'source_hevc10', streamQuality: '4000000' });
+
+    expect(controller.playMethod).toBe('Transcode');
+    expect(mockJellyfin.getSmoothHlsUrl).toHaveBeenCalledWith(
+      'item_primary',
+      4000000,
+      expect.objectContaining({ mediaSourceId: 'source_hevc10' })
+    );
+  });
+
+  it('remux auto-routing inspects the SELECTED version (10-bit version remuxes, 8-bit version stays direct)', async () => {
+    isRemoteNetwork.mockResolvedValue(true);
+    // 与 streamRouting.isHevc10VideoStream 真实语义一致：hevc 编码且 10-bit 才命中
+    isHevc10VideoStream.mockImplementation((video) => video?.Codec === 'hevc' && video?.BitDepth === 10);
+
+    // 主版本 AV1 10-bit：isHevc10VideoStream 判 false（非 hevc）→ 直连
+    await controller.loadStream({ itemId: 'item_primary', mediaSourceId: 'item_primary', streamQuality: 'direct' });
+    expect(controller.playMethod).toBe('DirectPlay');
+    expect(isHevc10VideoStream).toHaveBeenCalledWith(expect.objectContaining({ Codec: 'av1' }));
+
+    // 第二版本 HEVC 10-bit：同一条目换源须重新探测并命中该版本的流
+    await controller.loadStream({ itemId: 'item_primary', mediaSourceId: 'source_hevc10', streamQuality: 'direct' });
+    expect(controller.playMethod).toBe('DirectStream');
+    expect(mockJellyfin.getRemuxHlsUrl).toHaveBeenCalledWith(
+      'item_primary',
+      expect.objectContaining({ videoCodec: 'hevc', mediaSourceId: 'source_hevc10' })
+    );
+    expect(isHevc10VideoStream).toHaveBeenCalledWith(expect.objectContaining({ Codec: 'hevc' }));
+  });
+
+  it('changeMediaSource keeps position and quality, resets per-version audio/subtitle indexes', async () => {
+    await controller.loadStream({ itemId: 'item_primary', mediaSourceId: 'item_primary', streamQuality: '4000000' });
+    controller.audioStreamIndex = 2;
+    controller.subtitleStreamIndex = 1;
+    mockVideo.currentTime = 321;
+
+    const oldSessionId = controller.playSessionId;
+    await controller.changeMediaSource('source_hevc10');
+    vi.advanceTimersByTime(SESSION_STOP_DRAIN_MS + 1);
+
+    expect(controller.mediaSourceId).toBe('source_hevc10');
+    expect(controller.streamQuality).toBe('4000000');
+    expect(controller.audioStreamIndex).toBeNull();
+    expect(controller.subtitleStreamIndex).toBeNull();
+    // 旧版本会话被停掉并带原进度
+    expect(mockJellyfin.stopTranscoding).toHaveBeenCalledWith(
+      'item_primary',
+      oldSessionId,
+      expect.objectContaining({ positionSec: 321 })
+    );
+    // 新 HLS 会话仍按当前画质档请求新版本
+    expect(mockJellyfin.getSmoothHlsUrl).toHaveBeenLastCalledWith(
+      'item_primary',
+      4000000,
+      expect.objectContaining({ mediaSourceId: 'source_hevc10' })
+    );
+  });
+
+  it('changeMediaSource is a no-op for the same or missing source id', async () => {
+    await controller.loadStream({ itemId: 'item_primary', mediaSourceId: 'item_primary', streamQuality: 'direct' });
+    mockJellyfin.getStreamUrl.mockClear();
+
+    await controller.changeMediaSource('item_primary');
+    await controller.changeMediaSource(null);
+    expect(mockJellyfin.getStreamUrl).not.toHaveBeenCalled();
+    expect(controller.playSessionId).toBeTruthy(); // 会话未被替换
+  });
+
+  it('reports playback events with the selected MediaSourceId', async () => {
+    await controller.loadStream({ itemId: 'item_primary', mediaSourceId: 'source_hevc10', streamQuality: 'direct' });
+    mockVideo.fireEvent('playing');
+
+    const startedCalls = mockJellyfin.reportPlayback.mock.calls.filter((c) => c[3] === 'Started');
+    expect(startedCalls).toHaveLength(1);
+    expect(startedCalls[0][4]).toMatchObject({ mediaSourceId: 'source_hevc10' });
+  });
+});

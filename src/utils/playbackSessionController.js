@@ -199,7 +199,7 @@ export class PlaybackSessionController {
           : 'Transcode';
       const streamUrl =
         this.playMethod === 'DirectPlay'
-          ? this.jellyfin.getStreamUrl(this.itemId)
+          ? this.jellyfin.getStreamUrl(this.itemId, this.mediaSourceId !== this.itemId ? this.mediaSourceId : null)
           : this.jellyfin.getSmoothHlsUrl(this.itemId, parseInt(streamQuality, 10) || 4000000, {
               playSessionId: this.playSessionId,
               mediaSourceId: this.mediaSourceId,
@@ -259,7 +259,10 @@ export class PlaybackSessionController {
         return;
       }
       this.playMethod = 'DirectPlay';
-      const directUrl = this.jellyfin.getStreamUrl(this.itemId);
+      const directUrl = this.jellyfin.getStreamUrl(
+        this.itemId,
+        this.mediaSourceId !== this.itemId ? this.mediaSourceId : null
+      );
 
       videoEl.removeAttribute('src');
       videoEl.src = directUrl;
@@ -323,7 +326,7 @@ export class PlaybackSessionController {
    * @returns {Promise<{itemId: string, useRemux: boolean, videoCodec: string|null}>}
    */
   async resolveDirectRoute(force = false) {
-    if (this._directRoute?.itemId === this.itemId) {
+    if (this._directRoute?.itemId === this.itemId && this._directRoute?.mediaSourceId === this.mediaSourceId) {
       return this._directRoute;
     }
     const serverUrl = this.jellyfin?.auth?.serverUrl;
@@ -333,7 +336,10 @@ export class PlaybackSessionController {
       const remote = serverUrl ? await isRemoteNetwork(serverUrl) : false;
       if (remote || force) {
         const info = await this.jellyfin.getItemPlaybackInfo(this.itemId);
-        const video = (info?.MediaSources?.[0]?.MediaStreams || []).find(s => s.Type === 'Video');
+        // 多版本条目：位深/编码判定必须针对当前选中版本，不能只看 MediaSources[0]
+        const sources = info?.MediaSources || [];
+        const source = sources.find(s => s?.Id === this.mediaSourceId) || sources[0];
+        const video = (source?.MediaStreams || []).find(s => s.Type === 'Video');
         const codec = String(video?.Codec || '').toLowerCase();
         const eligible = force
           ? codec === 'hevc' || codec === 'h264'
@@ -344,7 +350,7 @@ export class PlaybackSessionController {
         }
       }
     } catch {}
-    this._directRoute = { itemId: this.itemId, useRemux, videoCodec };
+    this._directRoute = { itemId: this.itemId, mediaSourceId: this.mediaSourceId, useRemux, videoCodec };
     return this._directRoute;
   }
 
@@ -516,6 +522,31 @@ export class PlaybackSessionController {
       streamQuality: targetQuality,
       audioStreamIndex: streamIndex,
       subtitleStreamIndex: this.subtitleStreamIndex,
+      initialSeekTime: currentPos,
+      playbackSpeed: currentSpeed,
+      isMuted,
+      volume
+    });
+  }
+
+  /**
+   * 切换版本（多版本条目的另一 MediaSource）：保持播放进度与画质档不变。
+   * 音/字幕流索引属于旧版本各自的 MediaStreams，换版本必须一并重置，
+   * 新版本的默认字幕轨由上层 useSubtitleTracks 随 mediaSourceId 变化重新应用。
+   */
+  async changeMediaSource(mediaSourceId) {
+    if (!mediaSourceId || this.mediaSourceId === mediaSourceId) return;
+    const currentPos = this.videoEl?.currentTime || this.lastReportedPosition || 0;
+    const currentSpeed = this.videoEl?.playbackRate || 1;
+    const isMuted = this.videoEl?.muted || false;
+    const volume = this.videoEl?.volume || 1;
+
+    await this.loadStream({
+      itemId: this.itemId,
+      mediaSourceId,
+      streamQuality: this.streamQuality,
+      audioStreamIndex: null,
+      subtitleStreamIndex: null,
       initialSeekTime: currentPos,
       playbackSpeed: currentSpeed,
       isMuted,

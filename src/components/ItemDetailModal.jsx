@@ -10,6 +10,7 @@ import { isRomanizedJunkRole } from '../utils/actorAggregator';
 import DeleteConfirmModal from './DeleteConfirmModal';
 import SubtitleBadgeChip from './SubtitleBadgeChip';
 import QuickTagSelector from './QuickTagSelector';
+import { listMediaVersions, describeMediaVersion, formatVersionSize } from '../utils/mediaVersions';
 
 function formatRuntime(ticks) {
   if (!ticks) return '';
@@ -114,6 +115,12 @@ export default function ItemDetailModal({
   }, [isOpen, item?.Id]);
 
   const current = details || item;
+  // 多版本条目（`标题 - 版本名` 合并）：列表展示各版本的格式与体积（只读，
+  // 切换在播放面的版本菜单里做，保持进度原地换流）
+  const mediaVersions = useMemo(
+    () => listMediaVersions(details, item),
+    [details, item]
+  );
   const isSeries = current?.Type === 'Series';
 
   // Series：拉取季度列表与该剧行的 NextUp（用于"继续追剧"直达下一集）
@@ -742,6 +749,23 @@ export default function ItemDetailModal({
                 <div className="flex flex-col">
                   <span className="text-gray-500">大小</span>
                   <span className="font-mono text-gray-200">{(current.MediaSources[0].Size / (1024 * 1024 * 1024)).toFixed(2)} GB</span>
+                </div>
+              )}
+              {mediaVersions.length > 1 && (
+                <div className="col-span-2 sm:col-span-3 flex flex-col">
+                  <span className="text-gray-500">版本（{mediaVersions.length}）</span>
+                  <div className="flex flex-wrap gap-1.5 mt-0.5">
+                    {mediaVersions.map(source => (
+                      <span
+                        key={source.Id}
+                        title={source.Path || describeMediaVersion(source)}
+                        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-800/80 border border-white/10 font-mono text-[10px] text-gray-200"
+                      >
+                        <span className="max-w-[140px] truncate">{describeMediaVersion(source)}</span>
+                        {formatVersionSize(source) && <span className="text-gray-500">{formatVersionSize(source)}</span>}
+                      </span>
+                    ))}
+                  </div>
                 </div>
               )}
               <div className="flex flex-col">

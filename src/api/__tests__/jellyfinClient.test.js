@@ -138,6 +138,27 @@ describe('JellyfinClient authentication and URL generation', () => {
     expect(a).not.toBe(b);
   });
 
+  it('getStreamUrl carries MediaSourceId only for non-primary versions', () => {
+    client.auth = {
+      serverUrl: 'https://jellyfin.example.com',
+      token: 'secret_token_123',
+      userId: 'user_1',
+      isConfigured: true
+    };
+
+    // 主版本（mediaSourceId === itemId）：URL 形态逐字节不变
+    const primary = client.getStreamUrl('item_1', 'item_1');
+    expect(primary).toBe('https://jellyfin.example.com/Videos/item_1/stream?static=true&ApiKey=secret_token_123&api_key=secret_token_123');
+
+    // 单版本旧调用形态（不传 mediaSourceId）
+    expect(client.getStreamUrl('item_1')).toBe(primary);
+
+    // 非主版本：追加 MediaSourceId 定位具体版本
+    const alt = client.getStreamUrl('item_1', 'source_abc');
+    expect(alt).toContain('MediaSourceId=source_abc');
+    expect(alt.startsWith('https://jellyfin.example.com/Videos/item_1/stream?static=true')).toBe(true);
+  });
+
   it('reportPlayback includes PlaySessionId, MediaSourceId, PlayMethod and other metadata', async () => {
     client.auth = {
       serverUrl: 'https://jellyfin.example.com',

@@ -18,6 +18,7 @@ import {
   getDefaultSubtitle, saveDefaultSubtitle, clearDefaultSubtitle,
   subscribeSubtitleDefaultChanges, syncSubtitleDefaultsWithServer
 } from '../utils/subtitleDefaults';
+import { selectMediaSource } from '../utils/mediaVersions';
 
 /**
  * 轮询 PlaybackInfo 直到出现新字幕流。
@@ -40,15 +41,19 @@ async function pollForNewSubtitle(itemId, findNewStream, { intervalMs = 500, tim
 
 /**
  * 从 PlaybackInfo 播放数据中摘除指定字幕流（乐观更新用，纯函数浅拷贝不改动原对象）。
+ * mediaSourceId 指定多版本条目的目标版本（缺省主版本）。
  */
-function stripSubtitleStreams(playback, removeSet) {
+function stripSubtitleStreams(playback, removeSet, mediaSourceId = null) {
   if (!playback || !(removeSet instanceof Set) || removeSet.size === 0) return playback;
   if (!playback.MediaSources?.length) return playback;
   const strip = (streams) => (streams || []).filter(s => !removeSet.has(s.Index));
+  const targetIdx = mediaSourceId
+    ? Math.max(0, playback.MediaSources.findIndex(s => s?.Id === mediaSourceId))
+    : 0;
   return {
     ...playback,
     MediaSources: playback.MediaSources.map((src, i) =>
-      i === 0 ? { ...src, MediaStreams: strip(src.MediaStreams) } : src),
+      i === targetIdx ? { ...src, MediaStreams: strip(src.MediaStreams) } : src),
     ...(playback.MediaStreams ? { MediaStreams: strip(playback.MediaStreams) } : {})
   };
 }
@@ -124,6 +129,7 @@ function formatDownloadTime(ts) {
 export default function SubtitleModal({
   isOpen,
   item,
+  mediaSourceId = null,
   currentSubtitleIndex = -1,
   onSelectSubtitle,
   onSubtitleDownloaded,
@@ -211,7 +217,10 @@ export default function SubtitleModal({
   }, [isOpen, item?.Id]);
 
   // Extract local subtitle streams (from fresh playbackData or item)
-  const mediaSource = playbackData?.MediaSources?.[0] || item?.MediaSources?.[0];
+  // 多版本条目：跟随当前播放版本取各自的字幕轨
+  const mediaSource = selectMediaSource(playbackData?.MediaSources || item?.MediaSources, mediaSourceId) ||
+    playbackData?.MediaSources?.[0] ||
+    item?.MediaSources?.[0];
   const mediaStreams = mediaSource?.MediaStreams || playbackData?.MediaStreams || item?.MediaStreams || [];
   const localSubtitles = mediaStreams.filter(s => s.Type === 'Subtitle' && !['pgssub', 'dvdsub', 'dvbsub'].includes(s.Codec?.toLowerCase()));
 
@@ -276,7 +285,8 @@ export default function SubtitleModal({
           !['pgssub', 'dvdsub', 'dvbsub'].includes(String(s.Codec || '').toLowerCase());
         const previousIndexes = new Set(localSubtitles.map(s => s.Index));
         const findNewStream = (playback) => {
-          const streams = playback?.MediaSources?.[0]?.MediaStreams || playback?.MediaStreams || [];
+          const src = selectMediaSource(playback?.MediaSources, mediaSourceId) || playback?.MediaSources?.[0];
+          const streams = src?.MediaStreams || playback?.MediaStreams || [];
           return streams.find(s => isTextSub(s) && !previousIndexes.has(s.Index)) || null;
         };
         const updatedPlayback = await pollForNewSubtitle(item.Id, findNewStream);
@@ -392,12 +402,13 @@ export default function SubtitleModal({
             continue;
           }
           if (!fresh) continue;
-          const streams = fresh?.MediaSources?.[0]?.MediaStreams || fresh?.MediaStreams || [];
+          const freshSrc = selectMediaSource(fresh?.MediaSources, mediaSourceId) || fresh?.MediaSources?.[0];
+          const streams = freshSrc?.MediaStreams || fresh?.MediaStreams || [];
           const present = new Set(streams.map(s => s.Index));
           for (const idx of [...pendingDeletedRef.current]) {
             if (!present.has(idx)) pendingDeletedRef.current.delete(idx);
           }
-          setPlaybackData(stripSubtitleStreams(fresh, pendingDeletedRef.current));
+          setPlaybackData(stripSubtitleStreams(fresh, pendingDeletedRef.current, mediaSourceId));
           if (pendingDeletedRef.current.size === 0) return;
         }
       } finally {
@@ -413,8 +424,9 @@ export default function SubtitleModal({
    */
   const detectDownloadedDuplicate = async (itemId, playback, newStream) => {
     try {
-      const srcId = playback?.MediaSources?.[0]?.Id || itemId;
-      const streams = playback?.MediaSources?.[0]?.MediaStreams || playback?.MediaStreams || [];
+      const src = selectMediaSource(playback?.MediaSources, mediaSourceId) || playback?.MediaSources?.[0];
+      const srcId = src?.Id || itemId;
+      const streams = src?.MediaStreams || playback?.MediaStreams || [];
       const others = streams.filter(s =>
         s && s.Type === 'Subtitle' && s.Index !== newStream.Index &&
         !['pgssub', 'dvdsub', 'dvbsub'].includes(String(s.Codec || '').toLowerCase())

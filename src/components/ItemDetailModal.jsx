@@ -728,10 +728,21 @@ export default function ItemDetailModal({
                 </div>
               )}
               {videoStream && (
-                <div className="flex flex-col">
-                  <span className="text-gray-500">视频</span>
+                <div className="flex flex-col col-span-2 sm:col-span-3">
+                  <span className="text-gray-500">视频格式</span>
                   <span className="font-mono text-gray-200">
-                    {videoStream.Codec?.toUpperCase()} {videoStream.Width && videoStream.Height ? `${videoStream.Width}×${videoStream.Height}` : ''}
+                    {[
+                      videoStream.Codec?.toUpperCase(),
+                      videoStream.Profile,
+                      videoStream.BitDepth ? `${videoStream.BitDepth}bit` : null,
+                      videoStream.Width && videoStream.Height ? `${videoStream.Width}×${videoStream.Height}` : null,
+                      videoStream.RealFrameRate ? `${Number(videoStream.RealFrameRate).toFixed(2)}fps` : null,
+                      videoStream.BitRate ? `${(videoStream.BitRate / 1e6).toFixed(2)} Mbps` : null,
+                      (videoStream.VideoRangeType || videoStream.VideoRange) &&
+                      (videoStream.VideoRangeType || videoStream.VideoRange) !== 'SDR'
+                        ? (videoStream.VideoRangeType || videoStream.VideoRange)
+                        : null
+                    ].filter(Boolean).join(' · ')}
                   </span>
                 </div>
               )}

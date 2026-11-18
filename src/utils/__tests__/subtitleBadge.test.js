@@ -88,4 +88,34 @@ describe('av1 尾缀 -a（2026-11-18 批量转码产物标记）', () => {
   it('MediaStreams 缺失 → 静默降级为不加（老数据兜底）', () => {
     expect(getSubtitleBadge(mk('ABC-123 (LTX)')).label).toBe('L');
   });
+
+  it('流信息只存在于 MediaSources[].MediaStreams 时同样识别（文件夹视图）', () => {
+    const viaSources = { MediaSources: [{ MediaStreams: [{ Type: 'Video', Codec: 'av1' }] }] };
+    expect(getSubtitleBadge(mk('ABC-123 (LTX)', viaSources)).label).toBe('L-a');
+    expect(
+      getSubtitleBadge(
+        mk('ABC-123', {
+          MediaSources: [
+            {
+              MediaStreams: [
+                { Type: 'Video', Codec: 'av1' },
+                { Type: 'Subtitle', Codec: 'subrip' }
+              ]
+            }
+          ]
+        })
+      ).label
+    ).toBe('C-a');
+  });
+
+  it('顶层 MediaStreams 为空数组时回退 MediaSources', () => {
+    expect(
+      getSubtitleBadge(
+        mk('ABC-123-C', {
+          MediaStreams: [],
+          MediaSources: [{ MediaStreams: [{ Type: 'Video', Codec: 'av1' }] }]
+        })
+      ).label
+    ).toBe('C-a');
+  });
 });

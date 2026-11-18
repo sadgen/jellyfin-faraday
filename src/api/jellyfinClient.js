@@ -340,7 +340,8 @@ export class JellyfinClient {
       IncludeItemTypes: includeItemTypes || 'Movie,Video,Episode',
       Recursive: 'true',
       // 列表查询只保留卡片渲染与查重所需字段：Path 为轻量直存字段（开销 <0.1s），用于精准去重防误判
-      Fields: 'Path,PrimaryImageAspectRatio,UserData,CommunityRating,DateCreated,RunTimeTicks,ProductionYear,OfficialRating,ParentId,ImageTags,Trickplay,ChildCount,RecursiveItemCount,SeriesName,SeasonName,IndexNumber,ParentIndexNumber',
+      // MediaStreams 供角标判定视频编码（av1 → -a 尾缀），实测全库查询 1.6s→2.7s
+      Fields: 'Path,PrimaryImageAspectRatio,UserData,CommunityRating,DateCreated,RunTimeTicks,ProductionYear,OfficialRating,ParentId,ImageTags,Trickplay,ChildCount,RecursiveItemCount,SeriesName,SeasonName,IndexNumber,ParentIndexNumber,MediaStreams',
       EnableImages: 'true',
       StartIndex: startIndex.toString()
     });

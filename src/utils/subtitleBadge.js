@@ -29,17 +29,22 @@ function fileNameOf(item) {
   return raw.split(/[\\/]/).pop().replace(/\.[A-Za-z0-9]{1,5}$/, '');
 }
 
+// 列表接口的 Fields 决定是否带流信息：主网格显式列 @jellyfinClient queryMediaPage，
+// 文件夹视图只回 MediaSources[].MediaStreams，故两级都取。
+function streamsOf(item) {
+  if (Array.isArray(item?.MediaStreams) && item.MediaStreams.length) return item.MediaStreams;
+  const nested = item?.MediaSources?.[0]?.MediaStreams;
+  return Array.isArray(nested) ? nested : [];
+}
+
 export function hasSubtitleStream(item) {
-  const streams = item?.MediaStreams;
-  if (Array.isArray(streams) && streams.some((s) => s?.Type === 'Subtitle')) return true;
+  if (streamsOf(item).some((s) => s?.Type === 'Subtitle')) return true;
   return item?.HasSubtitles === true;
 }
 
-// av1 尾缀（-a）：视频流编码为 av1 即命中；MediaStreams 缺失时静默降级为不加
+// av1 尾缀（-a）：视频流编码为 av1 即命中；无流信息时静默降级为不加
 function isAv1Video(item) {
-  const streams = item?.MediaStreams;
-  if (!Array.isArray(streams)) return false;
-  const v = streams.find((s) => s?.Type === 'Video');
+  const v = streamsOf(item).find((s) => s?.Type === 'Video');
   return (v?.Codec || '').toLowerCase() === 'av1';
 }
 

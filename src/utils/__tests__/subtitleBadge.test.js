@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getSubtitleBadge } from '../subtitleBadge';
+import { getSubtitleBadge, matchesBadgeFilter, getBadgeBits } from '../subtitleBadge';
 
 const mk = (name, extra = {}) => ({
   Name: name,
@@ -117,5 +117,60 @@ describe('av1 尾缀 -a（2026-11-18 批量转码产物标记）', () => {
         })
       ).label
     ).toBe('C-a');
+  });
+});
+
+describe('标签筛选 matchesBadgeFilter（多选取交集）', () => {
+  const av1 = { MediaStreams: [{ Type: 'Video', Codec: 'av1' }, { Type: 'Subtitle' }] };
+  const items = {
+    L: mk('ABC-123 (LTX)'),
+    LC: mk('ABC-123 (LTX)', { HasSubtitles: true }),
+    U: mk('ABC-123-U'),
+    UC: mk('ABC-123-UC'),
+    C: mk('ABC-123-C'),
+    Raw: mk('ABC-123'),
+    LCa: mk('ABC-123 (LTX)', { ...av1 }),
+    Rawa: mk('ABC-123', { MediaStreams: [{ Type: 'Video', Codec: 'av1' }] })
+  };
+  const hit = (keys, sel) => matchesBadgeFilter(items[keys], sel);
+
+  it('空选=不过滤', () => {
+    for (const k of Object.keys(items)) expect(hit(k, [])).toBe(true);
+  });
+
+  it('单选 L / U / C / Raw / AV1', () => {
+    expect(hit('L', ['L'])).toBe(true);
+    expect(hit('LC', ['L'])).toBe(true);
+    expect(hit('UC', ['L'])).toBe(false);
+    expect(hit('U', ['U'])).toBe(true);
+    expect(hit('C', ['C'])).toBe(true);
+    expect(hit('LCa', ['C'])).toBe(true);
+    expect(hit('L', ['C'])).toBe(false);
+    expect(hit('Raw', ['Raw'])).toBe(true);
+    expect(hit('C', ['Raw'])).toBe(false);
+    expect(hit('LCa', ['AV1'])).toBe(true);
+    expect(hit('L', ['AV1'])).toBe(false);
+    expect(hit('Rawa', ['AV1'])).toBe(true);
+  });
+
+  it('多选取交集：L+C 只剩 LC / LCa；Raw+C 为空', () => {
+    expect(hit('LC', ['L', 'C'])).toBe(true);
+    expect(hit('LCa', ['L', 'C'])).toBe(true);
+    expect(hit('L', ['L', 'C'])).toBe(false);
+    expect(hit('C', ['L', 'C'])).toBe(false);
+    expect(hit('LC', ['Raw', 'C'])).toBe(false);
+    expect(hit('LCa', ['L', 'C', 'AV1'])).toBe(true);
+    expect(hit('LC', ['L', 'C', 'AV1'])).toBe(false);
+  });
+
+  it('非番号条目在标签筛选下一律不出现', () => {
+    expect(matchesBadgeFilter(mk('Inception 2010', { HasSubtitles: true }), ['C'])).toBe(false);
+    expect(matchesBadgeFilter(mk('Inception 2010'), ['Raw'])).toBe(false);
+  });
+
+  it('getBadgeBits 与角标一致', () => {
+    expect(getBadgeBits(items.LCa)).toEqual({ L: true, U: false, C: true, Raw: false, AV1: true });
+    expect(getBadgeBits(items.UC)).toEqual({ L: false, U: true, C: true, Raw: false, AV1: false });
+    expect(getBadgeBits(mk('Inception 2010'))).toBeNull();
   });
 });

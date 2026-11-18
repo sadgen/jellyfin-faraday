@@ -16,6 +16,7 @@ import MobileActionSheet from './MobileActionSheet';
 import DeleteConfirmModal from './DeleteConfirmModal';
 import CardContextMenu from './CardContextMenu';
 import SubtitleBadgeChip from './SubtitleBadgeChip';
+import { BADGE_FILTER_OPTIONS, matchesBadgeFilter } from '../utils/subtitleBadge';
 import ServerSwitchMenu from './ServerSwitchMenu';
 import SeriesPage from './SeriesPage';
 import {
@@ -1478,6 +1479,11 @@ export default function LibraryView({
   }, [selectedViewId]);
   const [favoriteFilter, setFavoriteFilter] = useState('all');
   const [playCountFilter, setPlayCountFilter] = useState('all');
+  // 角标标签筛选：BADGE_FILTER_OPTIONS 的 key 数组，多选取交集（勾 L+C = 只看 LC）
+  const [badgeFilter, setBadgeFilter] = useState([]);
+  const toggleBadgeFilter = useCallback((key) => {
+    setBadgeFilter(prev => (prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]));
+  }, []);
   const [showDuplicatesOnly, setShowDuplicatesOnly] = useState(false);
   const [showMobileFilterMenu, setShowMobileFilterMenu] = useState(false);
   const mobileFilterBtnRef = useRef(null);
@@ -1611,6 +1617,7 @@ export default function LibraryView({
     (statusFilter || 'all') !== 'all' ||
     favoriteFilter !== 'all' ||
     playCountFilter !== 'all' ||
+    badgeFilter.length > 0 ||
     showDuplicatesOnly;
   
   // Secondary metadata state
@@ -1746,7 +1753,7 @@ export default function LibraryView({
 
   useEffect(() => {
     setVisibleCount(80);
-  }, [selectedViewId, statusFilter, favoriteFilter, playCountFilter, selectedGenre, selectedYear, selectedLetter, showDuplicatesOnly, searchKeyword, activeSubTab]);
+  }, [selectedViewId, statusFilter, favoriteFilter, playCountFilter, badgeFilter, selectedGenre, selectedYear, selectedLetter, showDuplicatesOnly, searchKeyword, activeSubTab]);
 
   // Health inspection across current items (损坏截断/下载中断坏文件检测)
   const { brokenItems, brokenCount } = useMemo(() => {
@@ -1878,8 +1885,13 @@ export default function LibraryView({
       result = result.filter(it => (it.UserData?.PlayCount || 0) >= 10);
     }
 
+    // 4. 角标标签筛选（L / U / C / Raw / AV1，多选取交集）
+    if (badgeFilter.length > 0) {
+      result = result.filter(it => matchesBadgeFilter(it, badgeFilter));
+    }
+
     return result;
-  }, [statusFilter, favoriteFilter, playCountFilter]);
+  }, [statusFilter, favoriteFilter, playCountFilter, badgeFilter]);
 
   // Display items with Play Count and Status filter support
   const displayItems = useMemo(() => {
@@ -3044,6 +3056,40 @@ export default function LibraryView({
                       </div>
                     </div>
 
+                    {/* 标签筛选（角标 L/C/U/Raw/AV1） */}
+                    <div className="flex flex-col gap-1">
+                      <span className="text-[9px] text-cyan-300 font-bold flex items-center justify-between">
+                        <span>标签（多选取交集）</span>
+                        {badgeFilter.length > 0 && (
+                          <button
+                            onClick={() => setBadgeFilter([])}
+                            className="text-[9px] text-gray-400 hover:text-white font-normal"
+                          >
+                            清空
+                          </button>
+                        )}
+                      </span>
+                      <div className="grid grid-cols-5 gap-1">
+                        {BADGE_FILTER_OPTIONS.map(opt => {
+                          const active = badgeFilter.includes(opt.key);
+                          return (
+                            <button
+                              key={opt.key}
+                              onClick={() => toggleBadgeFilter(opt.key)}
+                              title={opt.title}
+                              className={`py-1 rounded-md text-[10px] text-center transition ${
+                                active
+                                  ? 'bg-cyan-400 text-slate-950 font-extrabold shadow-sm shadow-cyan-400/40'
+                                  : 'bg-slate-800 text-gray-300 hover:bg-slate-700 border border-white/10'
+                              }`}
+                            >
+                              {opt.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
                     {/* 仅显示重复影片 */}
                     <div className="flex items-center justify-between pt-1 border-t border-white/10">
                       <span className="text-[10px] text-gray-200 font-medium flex items-center gap-1">
@@ -3161,6 +3207,38 @@ export default function LibraryView({
                   </span>
                 )}
               </button>
+
+              <div className="h-3.5 w-px bg-white/10 mx-0.5 flex-shrink-0" />
+
+              {/* 角标标签筛选（多选取交集：L+C = 只看 LC） */}
+              <div className="flex items-center gap-0.5">
+                {BADGE_FILTER_OPTIONS.map(opt => {
+                  const active = badgeFilter.includes(opt.key);
+                  return (
+                    <button
+                      key={opt.key}
+                      onClick={() => toggleBadgeFilter(opt.key)}
+                      className={`px-1.5 sm:px-2 py-1 rounded-lg transition flex-shrink-0 text-xs font-mono ${
+                        active
+                          ? 'bg-slate-700 text-cyan-300 font-bold shadow'
+                          : 'text-gray-400 hover:text-white'
+                      }`}
+                      title={`${opt.title}${active ? '（再次点击取消）' : ''}`}
+                    >
+                      {opt.label}
+                    </button>
+                  );
+                })}
+                {badgeFilter.length > 0 && (
+                  <button
+                    onClick={() => setBadgeFilter([])}
+                    className="px-1 py-1 rounded-lg text-gray-500 hover:text-white transition flex-shrink-0"
+                    title="清空标签筛选"
+                  >
+                    <X size={11} />
+                  </button>
+                )}
+              </div>
             </div>
           )}
 

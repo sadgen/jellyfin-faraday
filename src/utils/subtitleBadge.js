@@ -67,3 +67,38 @@ export function getSubtitleBadge(item) {
   if (isAv1Video(item)) label += '-a';
   return { label };
 }
+
+// 标签筛选用的可选项：L / U / C / Raw / AV1(-a)，与角标同一套判定。
+// 多选=取交集（勾 L+C 即 LC），勾 Raw 表示「无 L/U/C」。
+export const BADGE_FILTER_OPTIONS = [
+  { key: 'L', label: 'L', title: 'LTX 无码泄漏版' },
+  { key: 'U', label: 'U', title: '破解/无码版 (-U/-UC)' },
+  { key: 'C', label: 'C', title: '有中文字幕（硬字或字幕流）' },
+  { key: 'Raw', label: 'Raw', title: '无 L/U 也无中字（生肉）' },
+  { key: 'AV1', label: 'AV1', title: '已转码为 AV1（-a 尾缀）' }
+];
+
+export function getBadgeBits(item) {
+  const badge = getSubtitleBadge(item);
+  if (!badge) return null;
+  const isAv1 = badge.label.endsWith('-a');
+  const base = isAv1 ? badge.label.slice(0, -2) : badge.label;
+  return {
+    L: base.startsWith('L'),
+    U: base.startsWith('U'),
+    C: base.endsWith('C'),
+    Raw: base === 'Raw',
+    AV1: isAv1
+  };
+}
+
+/**
+ * @param {object} item
+ * @param {string[]} selected - BADGE_FILTER_OPTIONS 的 key 子集；空数组=不筛选
+ */
+export function matchesBadgeFilter(item, selected = []) {
+  if (!Array.isArray(selected) || selected.length === 0) return true;
+  const bits = getBadgeBits(item);
+  if (!bits) return false; // 非番号条目在标签筛选下一律不出现
+  return selected.every((k) => bits[k] === true);
+}

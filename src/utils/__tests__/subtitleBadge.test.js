@@ -68,3 +68,24 @@ describe('getSubtitleBadge 组合规则', () => {
     expect(getSubtitleBadge(mk('ABC-123-LTX', { MediaStreams: [], HasSubtitles: false })).label).toBe('L');
   });
 });
+
+describe('av1 尾缀 -a（2026-11-18 批量转码产物标记）', () => {
+  const av1 = { MediaStreams: [{ Type: 'Video', Codec: 'av1' }, { Type: 'Audio', Codec: 'aac' }] };
+  const hevc = { MediaStreams: [{ Type: 'Video', Codec: 'hevc' }] };
+
+  it('av1 视频流 → 基础标签追加 -a', () => {
+    expect(getSubtitleBadge(mk('ABC-123 (LTX)', { ...av1 })).label).toBe('L-a');
+    expect(getSubtitleBadge(mk('ABC-123-C (LTX)', { ...av1 })).label).toBe('LC-a');
+    expect(getSubtitleBadge(mk('ABC-123', { ...av1 })).label).toBe('Raw-a');
+    expect(getSubtitleBadge(mk('ABC-123-C', { ...av1 })).label).toBe('C-a');
+  });
+
+  it('非 av1 编码不加尾缀', () => {
+    expect(getSubtitleBadge(mk('ABC-123 (LTX)', { ...hevc })).label).toBe('L');
+    expect(getSubtitleBadge(mk('ABC-123', { ...hevc })).label).toBe('Raw');
+  });
+
+  it('MediaStreams 缺失 → 静默降级为不加（老数据兜底）', () => {
+    expect(getSubtitleBadge(mk('ABC-123 (LTX)')).label).toBe('L');
+  });
+});

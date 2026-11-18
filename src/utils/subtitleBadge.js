@@ -7,7 +7,8 @@
  *   - 软字幕：条目存在字幕流（MediaStreams 或 HasSubtitles）
  *   - 新命名把 LTX 放在括号里，判断 C 时先剥掉 " (LTX)"
  * 全空 → Raw
- * 共六种结果：L / U / LC / UC / C / Raw
+ * 尾缀（2026-11-18）：视频流编码为 av1（批量转码产物）→ 追加 -a，如 LC-a / L-a / Raw-a
+ * 基础六种：L / U / LC / UC / C / Raw（-a 为附加尾缀，不单列枚举）
  *
  * 非番号样式条目一律返回 null（8096 剧集/普通电影不误报）。
  * 判定一律以文件名（Path 基名）为准，Name（刮削后为「番号 标题」）仅作缺省兜底。
@@ -34,8 +35,16 @@ export function hasSubtitleStream(item) {
   return item?.HasSubtitles === true;
 }
 
+// av1 尾缀（-a）：视频流编码为 av1 即命中；MediaStreams 缺失时静默降级为不加
+function isAv1Video(item) {
+  const streams = item?.MediaStreams;
+  if (!Array.isArray(streams)) return false;
+  const v = streams.find((s) => s?.Type === 'Video');
+  return (v?.Codec || '').toLowerCase() === 'av1';
+}
+
 /**
- * @returns {{label: 'L'|'U'|'LC'|'UC'|'C'|'Raw'} | null} null = 非番号条目，不显示角标
+ * @returns {{label: string} | null} null = 非番号条目，不显示角标；label 可带 -a 尾缀
  */
 export function getSubtitleBadge(item) {
   const name = fileNameOf(item);
@@ -46,7 +55,10 @@ export function getSubtitleBadge(item) {
   const baseName = name.replace(/\s*\(ltx\)$/i, '');
   const hasC = SUFFIX_C_RE.test(baseName) || hasSubtitleStream(item);
 
-  if (prefix) return { label: hasC ? `${prefix}C` : prefix };
-  if (hasC) return { label: 'C' };
-  return { label: 'Raw' };
+  let label;
+  if (prefix) label = hasC ? `${prefix}C` : prefix;
+  else if (hasC) label = 'C';
+  else label = 'Raw';
+  if (isAv1Video(item)) label += '-a';
+  return { label };
 }

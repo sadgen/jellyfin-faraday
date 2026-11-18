@@ -84,3 +84,52 @@ describe('trickplay 竖屏 vs 横屏宽高比测试', () => {
     expect(info.aspectRatio).toBeCloseTo(720 / 1280, 2);
   });
 });
+
+describe('trickplay 多版本条目（Trickplay 按 MediaSourceId 分组）', () => {
+  beforeEach(() => {
+    jellyfin.auth.serverUrl = 'http://localhost:8096';
+  });
+
+  const srcA = '6176f54bfe5b1b9898aea253d6964c81';
+  const srcB = '45dbab6d04589da9a6ed983838562d5a';
+  const manifest = {
+    '560': {
+      Width: 560,
+      Height: 314,
+      TileWidth: 10,
+      TileHeight: 10,
+      ThumbnailCount: 767,
+      Interval: 10000
+    }
+  };
+  const item = {
+    Id: srcA,
+    Width: 1920,
+    Height: 1080,
+    MediaSources: [{ Id: srcA }, { Id: srcB }],
+    Trickplay: { [srcA]: manifest, [srcB]: manifest }
+  };
+
+  it('顶层两个 UUID 键时不再误判为无 Trickplay', () => {
+    const info = getTrickplayInfo(item);
+    expect(info.hasTrickplay).toBe(true);
+    expect(info.width).toBe(560);
+    expect(info.height).toBe(314);
+    expect(info.cols).toBe(10);
+    expect(info.rows).toBe(10);
+  });
+
+  it('指定版本时取该版本的清单且 id 为该版本 MediaSourceId', () => {
+    const info = getTrickplayInfo(item, { preferredSourceId: srcB });
+    expect(info.hasTrickplay).toBe(true);
+    expect(info.width).toBe(560);
+    expect(info.id).toBe(srcB);
+    expect(getTrickplayStyle(item, 25, { preferredSourceId: srcB })).not.toBeNull();
+  });
+
+  it('版本不存在时回退第一个清单，仍返回可用预览', () => {
+    const info = getTrickplayInfo(item, { preferredSourceId: 'not-exist' });
+    expect(info.hasTrickplay).toBe(true);
+    expect(info.width).toBe(560);
+  });
+});

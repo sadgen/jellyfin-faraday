@@ -51,9 +51,19 @@ export function getTrickplayInfo(item, { preferredWidth = null, preferredSourceI
 
   let config = manifests;
   const keys = Object.keys(manifests);
-  
-  // Unpack nested MediaSourceId if present
-  if (keys.length === 1 && manifests[keys[0]] && typeof manifests[keys[0]] === 'object' && !manifests.Width && !manifests[320] && !manifests[640]) {
+
+  // 多版本条目：Jellyfin 把清单按 MediaSourceId 分组
+  // （{srcA: {560: {...}}, srcB: {560: {...}}}）。必须按当前版本取一层，
+  // 否则两个 UUID 键会被当成「没有数字宽度档位」→ hasTrickplay=false，
+  // 整个条目的进度条/海报预览全部消失（实测加 cq40 第二版本后必现）。
+  const SOURCE_KEY_RE = /^[0-9a-f]{32}$|^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const sourceKeyed = keys.length > 0 && keys.every(k => SOURCE_KEY_RE.test(k));
+  if (sourceKeyed) {
+    config = (id && manifests[id] && typeof manifests[id] === 'object')
+      ? manifests[id]
+      : manifests[keys[0]];
+  } else if (keys.length === 1 && manifests[keys[0]] && typeof manifests[keys[0]] === 'object' && !manifests.Width && !manifests[320] && !manifests[640]) {
+    // 老格式：{MediaSourceId: {...}} 单键嵌套
     config = manifests[keys[0]];
   }
 

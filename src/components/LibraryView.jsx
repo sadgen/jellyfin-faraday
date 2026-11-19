@@ -11,6 +11,7 @@ import { useViewport } from '../hooks/useViewport';
 import { getPlaybackDefaults, setPlaybackDefaults, QUALITY_OPTIONS, SPEED_PRESETS, PATROL_INTERVALS, GYRO_SWEEP_OPTIONS, MOBILE_OPEN_MODE_OPTIONS } from '../utils/playbackDefaults';
 import { SEEK_SPEED_OPTIONS, getStoredSeekSpeed, setStoredSeekSpeed } from '../utils/seekSettings';
 import { GESTURE_ACTIONS, getGestureSettings, setGestureSettings } from '../utils/gestureSettings';
+import { getAutoTrickplayEnabled } from '../utils/trickplaySettings';
 import { pushSentinel, consumeSentinel, sentinelDepth } from '../utils/backSentinel';
 import MobileActionSheet from './MobileActionSheet';
 import DeleteConfirmModal from './DeleteConfirmModal';
@@ -370,6 +371,10 @@ const MediaCard = memo(function MediaCard({
   const handleCoverMouseMove = useCallback((e) => {
     // 框内视频播放中不弹悬停预览（滑动擦洗预览仍可用，见 touch handlers）
     if (inlineStateRef.current) return;
+    // 设置里关掉「悬停自动加载 Trickplay」后，鼠标移动不再写预览时间：
+    // tpStyle 保持 null → 不渲染预览窗、不拼雪碧图 URL（零请求）。
+    // 右键自动预览 / 右下角按钮 / 手机触摸擦洗都是显式操作，走各自处理器，不受此开关影响。
+    if (!getAutoTrickplayEnabled()) return;
     // 自动播放中鼠标移动 = 直接跳转定位，定时器从新位置继续逐帧前进
     const target = e.currentTarget;    if (!target) return;
     const rect = target.getBoundingClientRect();

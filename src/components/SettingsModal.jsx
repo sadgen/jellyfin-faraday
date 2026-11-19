@@ -3,9 +3,10 @@ import { jellyfin } from '../api/jellyfinClient';
 import { clearLibraryCache } from '../utils/mediaCache';
 import { getSavedAccounts, removeAccount } from '../utils/accountStore';
 import { SEEK_SPEED_OPTIONS, getStoredSeekSpeed, setStoredSeekSpeed } from '../utils/seekSettings';
+import { getAutoTrickplayEnabled, setAutoTrickplayEnabled } from '../utils/trickplaySettings';
 import {
   Settings, Server, User, LogOut, RefreshCw, ShieldCheck, X, HardDrive, Clock,
-  FastForward, Users as UsersIcon, ArrowLeftRight, Trash2, BarChart3, Check
+  FastForward, Images, Users as UsersIcon, ArrowLeftRight, Trash2, BarChart3, Check
 } from 'lucide-react';
 
 export default function SettingsModal({
@@ -20,6 +21,7 @@ export default function SettingsModal({
   onSwitchAccount
 }) {
   const [seekSpeed, setSeekSpeed] = useState(() => getStoredSeekSpeed());
+  const [autoTrickplay, setAutoTrickplay] = useState(() => getAutoTrickplayEnabled());
   const [accounts, setAccounts] = useState(() => getSavedAccounts());
 
   if (!isOpen) return null;
@@ -222,6 +224,37 @@ export default function SettingsModal({
           <div className="text-[10px] text-gray-500">
             影响电脑版滚轮寻轨步长、手机版滑动手势跨度、键盘 ←/→ 快进快退与播放窗口快进快退。
           </div>
+        </div>
+
+        {/* 悬停自动加载 Trickplay 开关 */}
+        <div className="bg-black/40 rounded-xl p-4 border border-white/5 flex items-center justify-between gap-3 text-xs">
+          <div className="flex items-start gap-2.5 min-w-0">
+            <Images size={15} className="text-cyan-400 mt-0.5 flex-shrink-0" />
+            <div className="flex flex-col gap-0.5 min-w-0">
+              <span className="text-gray-300 font-medium">悬停自动加载 Trickplay 预览</span>
+              <span className="text-[10px] text-gray-500 leading-relaxed">
+                关闭后鼠标移到海报上不再加载预览帧（省流量）；右键自动预览、右下角按钮与手机擦洗仍可手动触发。
+              </span>
+            </div>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={autoTrickplay}
+            onClick={() => {
+              const next = !autoTrickplay;
+              setAutoTrickplayEnabled(next);
+              setAutoTrickplay(next);
+            }}
+            className={`relative flex-shrink-0 w-11 h-6 rounded-full border transition-colors ${
+              autoTrickplay ? 'bg-cyan-500/40 border-cyan-400/60' : 'bg-white/10 border-white/10'
+            }`}
+            title={autoTrickplay ? '已开启：鼠标移到海报上自动加载 trickplay' : '已关闭：鼠标移到海报上不加载 trickplay'}
+          >
+            <span className={`absolute top-[3px] left-[3px] w-[18px] h-[18px] rounded-full shadow transition-transform ${
+              autoTrickplay ? 'translate-x-[20px] bg-cyan-300' : 'translate-x-0 bg-gray-400'
+            }`} />
+          </button>
         </div>
 
         {/* Actions */}

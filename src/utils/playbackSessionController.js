@@ -341,8 +341,11 @@ export class PlaybackSessionController {
         const source = sources.find(s => s?.Id === this.mediaSourceId) || sources[0];
         const video = (source?.MediaStreams || []).find(s => s.Type === 'Video');
         const codec = String(video?.Codec || '').toLowerCase();
+        // 显式「📡 串流」档：允许 AV1 走零转码 Remux HLS（仅用户主动选择才生效，
+        // 自动分流规则 isHevc10VideoStream 不动，默认仍按原路径）。用于 A/B 对比
+        // AV1 直推 vs HLS 的起播/seek 体感；AV1-in-TS 的端侧兼容性由用户实测确认。
         const eligible = force
-          ? codec === 'hevc' || codec === 'h264'
+          ? codec === 'hevc' || codec === 'h264' || codec === 'av1'
           : isHevc10VideoStream(video);
         if (eligible && canMsePlayVideoStream(video)) {
           useRemux = true;

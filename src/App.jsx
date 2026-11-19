@@ -10,7 +10,7 @@ import {
 import { sortMediaItems } from './utils/mediaSorter';
 import { getPlaybackDefaults, setPlaybackDefaults } from './utils/playbackDefaults';
 import { saveAccount } from './utils/accountStore';
-import { suppressPopOnce } from './utils/backSentinel';
+import { suppressPopOnce, pushSentinel, consumeSentinel } from './utils/backSentinel';
 import { calculateMiniStyle } from './utils/windowLayout';
 import LibraryView from './components/LibraryView';
 import FloatingWindowsContainer from './components/FloatingWindowsContainer';
@@ -124,6 +124,8 @@ export default function App() {
   modalPlayingItemRef.current = modalPlayingItem;
   const [vrPlayingItem, setVrPlayingItem] = useState(null);
   const [detailItem, setDetailItem] = useState(null);
+  const detailItemRef = useRef(null);
+  detailItemRef.current = detailItem;
   const [showStatsModal, setShowStatsModal] = useState(false);
 
   // Change View & Persist
@@ -798,12 +800,18 @@ export default function App() {
   useEffect(() => { miniWindowsRef.current = miniWindows; }, [miniWindows]);
 
   // 安卓壳返回手势/按键的网页侧处理器：原生 dispatcher 调它，返回 'exit'
-  // 时原生才退出 app。语义与手机浏览器后退一致——关最新浮窗 > 关迷你窗 >
-  // 关影院弹窗 > 关多选层（触发其自身 popstate 流程）> 退出。浏览器端无人调用，零影响。
+  // 时原生才退出 app。语义与手机浏览器后退一致——关详情页 > 关最新浮窗 >
+  // 关迷你窗 > 关影院弹窗 > 关多选层（触发其自身 popstate 流程）> 退出。
+  // 浏览器端无人调用，零影响。
   useEffect(() => {
     window.__faradayHandleBack = () => {
       if (window.__faradayLayerActive) {
         window.history.back(); // 多选层的 pushState 条目走其自身 popstate 关闭流程
+        return 'consumed';
+      }
+      // 详情页优先级高于浮窗：海报点进详情后按返回只关详情，绝不退出网页/app
+      if (detailItemRef.current) {
+        window.history.back(); // 详情哨兵 popstate 回调负责 setDetailItem(null)
         return 'consumed';
       }
       const wins = floatingWindowsRef.current;
@@ -837,6 +845,12 @@ export default function App() {
         window.__faradaySuppressWinPopOnce = false;
         return;
       }
+      // 详情页哨兵已消费本次后退（backSentinel 监听器先于本处理器执行）：
+      // 让出本次 pop，避免一次后退既关详情又顺手关掉正在播放的浮窗
+      if (window.__faradayDetailPopHandled) {
+        window.__faradayDetailPopHandled = false;
+        return;
+      }
       if (ignoreWinPopRef.current) {
         ignoreWinPopRef.current = false;
         return;
@@ -856,6 +870,25 @@ export default function App() {
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
   }, [handleCloseFloatingWindow]);
+
+  // 详情页返回哨兵：与多选层/剧集页共用全局返回协调器。详情打开时压入同 URL 历史态，
+  // 手机浏览器后退/安卓壳返回只关详情页，不再退出整个网页（与播放/多选后退语义一致）。
+  // 必须声明在下方浮窗历史 effect 之前：详情→开浮窗同批发生时先消费详情历史态、
+  // 再压浮窗历史态，保证浏览器历史栈与浮窗计数一一对应。
+  const detailActive = !!detailItem;
+  const prevDetailActiveRef = useRef(false);
+  useEffect(() => {
+    const was = prevDetailActiveRef.current;
+    if (detailActive && !was) {
+      pushSentinel(() => {
+        window.__faradayDetailPopHandled = true; // 让 App 的 onPopState 别再关浮窗
+        setDetailItem(null);
+      });
+    } else if (!detailActive && was) {
+      consumeSentinel();
+    }
+    prevDetailActiveRef.current = detailActive;
+  }, [detailActive]);
 
   useEffect(() => {
     const isPhone = window.innerWidth < 768 ||

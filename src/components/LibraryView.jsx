@@ -977,13 +977,6 @@ const MediaCard = memo(function MediaCard({
               <span>{playCount}</span>
             </div>
           )}
-
-          {item.CommunityRating && (
-            <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-black/60 backdrop-blur-md border border-white/10 text-[10px] font-mono text-amber-300">
-              <Star size={10} className="fill-amber-400 text-amber-400" />
-              <span>{item.CommunityRating.toFixed(1)}</span>
-            </div>
-          )}
         </div>
 
         {/* Hover Action Buttons（收藏/详情/刷新/更多）——放海报顶部：底部已被
@@ -1305,13 +1298,6 @@ const MediaListRow = memo(function MediaListRow({
       </div>
 
       <div className="hidden md:flex items-center gap-6 text-gray-400">
-        {item.CommunityRating && (
-          <div className="flex items-center gap-1 font-mono text-amber-300">
-            <Star size={12} className="fill-amber-400 text-amber-400" />
-            <span>{item.CommunityRating.toFixed(1)}</span>
-          </div>
-        )}
-
         <div className="flex items-center gap-1 font-mono text-cyan-300">
           <Eye size={12} />
           <span>{playCount} 次</span>

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { jellyfin } from '../api/jellyfinClient';
 import { useExternalPlayer } from '../hooks/useExternalPlayer';
 import { cleanMediaTitle } from '../utils/titleCleaner';
+import { prepareSentinelHandoff } from '../utils/backSentinel';
 import QuickTagSelector from './QuickTagSelector';
 import ItemFilePath from './ItemFilePath';
 import {
@@ -138,7 +139,13 @@ export default function MobileActionSheet({
           {/* Detail / Similar */}
           {onOpenDetail && (
             <button
-              onClick={() => { onOpenDetail(item); onClose(); }}
+              onClick={() => {
+                // 面板关闭 + 详情打开同批发生：把面板那条返回历史态直接交接给详情，
+                // 否则异步 go(-1) 会冲掉详情的历史态，后退变成退出网页
+                prepareSentinelHandoff();
+                onOpenDetail(item);
+                onClose();
+              }}
               className="p-3 rounded-xl bg-black/40 border border-white/5 text-gray-300 flex items-center gap-2.5"
             >
               <Info size={15} />

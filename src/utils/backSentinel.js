@@ -10,10 +10,28 @@
 
 const layerStack = []; // { onPop }
 let suppressNext = false;
+// 「关旧层 + 开新层」同批发生时的历史态交接（2026-11-19 手机实测定罪）：
+// 浏览器 go(-1) 是异步的，若同批又 pushState，pending 的那次后退会把新层刚压入的
+// 历史条目吃掉（Chrome 实测：select push → go(-1) → detail push，popstate 却落在
+// 最初的 null 历史上），下一次后退直接离开网页。交接模式下 consume 不 go(-1)、
+// push 不再 pushState，旧层那条历史态原样转给新层。
+let handoffRequested = false; // 调用方预告：即将关旧层并开新层
+let handoffPending = false;   // 旧层已让出历史态，等新层接管
+
+/** 关旧层 + 开新层同批时，在关层动作之前调用（如 ⋮ 面板里的「详情」按钮） */
+export function prepareSentinelHandoff() {
+  handoffRequested = true;
+}
 
 /** 压入一层浮层哨兵（同 URL 历史态），onPop 在用户后退触发时执行 */
 export function pushSentinel(onPop) {
   layerStack.push({ onPop });
+  if (handoffPending) {
+    // 复用上一层的历史态，不新增条目——避免异步 go(-1) 冲掉它
+    handoffPending = false;
+    return;
+  }
+  handoffRequested = false; // 无旧层可交接时兜底清理
   try {
     window.history.pushState({ faradayLayer: layerStack.length }, '');
   } catch {
@@ -23,8 +41,16 @@ export function pushSentinel(onPop) {
 
 /** UI 主动关闭时消费对应历史条目（下一次 popstate 为程序性后退，协调器忽略） */
 export function consumeSentinel() {
-  if (!layerStack.length) return;
+  if (!layerStack.length) {
+    handoffRequested = false;
+    return;
+  }
   layerStack.pop();
+  if (handoffRequested) {
+    handoffRequested = false;
+    handoffPending = true; // 历史态留给随后 pushSentinel 的新层
+    return;
+  }
   suppressNext = true;
   try {
     window.history.go(-1);

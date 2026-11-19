@@ -3449,7 +3449,7 @@ export default function LibraryView({
                       <span>子文件夹 ({sortedFolderItems.filter(it => it.IsFolder || it.Type === 'Folder' || it.Type === 'CollectionFolder').length})</span>
                     </div>
                     <div
-                      className="grid gap-1.5 sm:gap-2"
+                      className="grid gap-0.5 sm:gap-1"
                       style={{ gridTemplateColumns: `repeat(${effectiveGridColumns}, minmax(0, 1fr))` }}
                     >
                       {sortedFolderItems
@@ -3533,7 +3533,7 @@ export default function LibraryView({
                       </div>
                     ) : (
                       <div
-                        className="grid gap-1.5 sm:gap-2.5"
+                        className="grid gap-0.5 sm:gap-1"
                         style={{ gridTemplateColumns: `repeat(${effectiveGridColumns}, minmax(0, 1fr))` }}
                       >
                         {sortedFolderItems
@@ -3578,7 +3578,7 @@ export default function LibraryView({
 
         {/* SUB-VIEW 1: Genres */}
         {activeSubTab === 'genres' && (
-          <div className="grid gap-1.5 sm:gap-2.5" style={{ gridTemplateColumns: `repeat(${effectiveGridColumns}, minmax(0, 1fr))` }}>
+          <div className="grid gap-0.5 sm:gap-1" style={{ gridTemplateColumns: `repeat(${effectiveGridColumns}, minmax(0, 1fr))` }}>
             {genresList.map(genre => (
               <div
                 key={genre.Id}
@@ -3681,7 +3681,7 @@ export default function LibraryView({
               <div className="text-sm">暂无年份数据</div>
             </div>
           ) : (
-            <div className="grid gap-1.5 sm:gap-2.5" style={{ gridTemplateColumns: `repeat(${effectiveGridColumns}, minmax(0, 1fr))` }}>
+            <div className="grid gap-0.5 sm:gap-1" style={{ gridTemplateColumns: `repeat(${effectiveGridColumns}, minmax(0, 1fr))` }}>
               {yearsList.map(year => (
                 <div
                   key={year.Id}
@@ -3711,7 +3711,7 @@ export default function LibraryView({
               <div className="text-sm">暂未观看 / 没有看到一半的影片</div>
             </div>
           ) : (
-            <div className="grid gap-1.5 sm:gap-2.5" style={{ gridTemplateColumns: `repeat(${effectiveGridColumns}, minmax(0, 1fr))` }}>
+            <div className="grid gap-0.5 sm:gap-1" style={{ gridTemplateColumns: `repeat(${effectiveGridColumns}, minmax(0, 1fr))` }}>
               {resumeList.map(item => {
                 const resumePercent = item.UserData?.PlaybackPositionTicks && item.RunTimeTicks
                   ? Math.min(100, (item.UserData.PlaybackPositionTicks / item.RunTimeTicks) * 100)
@@ -3848,7 +3848,7 @@ export default function LibraryView({
                   <div className="text-sm text-center px-6">暂无关注的剧集<br /><span className="text-xs text-gray-600">在剧集卡片或详情页点击 ★ 收藏即可追更</span></div>
                 </div>
               ) : (
-                <div className="grid gap-1.5 sm:gap-2.5" style={{ gridTemplateColumns: `repeat(${effectiveGridColumns}, minmax(0, 1fr))` }}>
+                <div className="grid gap-0.5 sm:gap-1" style={{ gridTemplateColumns: `repeat(${effectiveGridColumns}, minmax(0, 1fr))` }}>
                   {followedList.map(series => {
                     const poster = jellyfin.getBestImageUrl(series, { maxWidth: 360 });
                     const unplayed = series.UserData?.UnplayedItemCount || 0;
@@ -3907,7 +3907,7 @@ export default function LibraryView({
               <div className="text-sm">暂无待看的下一集</div>
             </div>
           ) : (
-            <div className="grid gap-1.5 sm:gap-2.5" style={{ gridTemplateColumns: `repeat(${effectiveGridColumns}, minmax(0, 1fr))` }}>
+            <div className="grid gap-0.5 sm:gap-1" style={{ gridTemplateColumns: `repeat(${effectiveGridColumns}, minmax(0, 1fr))` }}>
               {nextUpList.map(item => {
                 const poster = jellyfin.getBestImageUrl(item, { maxWidth: 360 });
                 const epLabel = `${item.ParentIndexNumber !== undefined && item.ParentIndexNumber !== null ? `S${String(item.ParentIndexNumber).padStart(2, '0')}` : ''}${item.IndexNumber !== undefined && item.IndexNumber !== null ? `E${String(item.IndexNumber).padStart(2, '0')}` : ''}`;
@@ -3963,7 +3963,7 @@ export default function LibraryView({
               <div className="text-sm">暂无观看历史</div>
             </div>
           ) : (
-            <div className="grid gap-1.5 sm:gap-2.5" style={{ gridTemplateColumns: `repeat(${effectiveGridColumns}, minmax(0, 1fr))` }}>
+            <div className="grid gap-0.5 sm:gap-1" style={{ gridTemplateColumns: `repeat(${effectiveGridColumns}, minmax(0, 1fr))` }}>
               {historyList.map(item => {
                 const lastPlayed = item.UserData?.LastPlayedDate
                   ? new Date(item.UserData.LastPlayedDate)
@@ -4081,7 +4081,7 @@ export default function LibraryView({
               </div>
             ) : (
               <div 
-                className="grid gap-1.5 sm:gap-2.5"
+                className="grid gap-0.5 sm:gap-1"
                 style={{
                   gridTemplateColumns: `repeat(${gridColumns}, minmax(0, 1fr))`
                 }}

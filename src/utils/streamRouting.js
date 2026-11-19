@@ -74,16 +74,6 @@ export function canMsePlayVideoStream(videoStream) {
       const profileId = isHevc10VideoStream(videoStream) ? '2.4' : '1.6';
       return MediaSource.isTypeSupported(`video/mp4; codecs="${tag}.${profileId}.L120.B0"`);
     }
-    // AV1: 显式串流档用 Remux HLS（-c copy，不重编码）。检查浏览器 MSE 是否声明
-    // 支持 av01（10-bit Main10 用 av01.2.xxM.10，8-bit 用 av01.0.xxM.08），
-    // 无匹配声明时不强行走 HLS，避免黑屏。
-    if (codec === 'av1') {
-      const bd = Number(videoStream?.BitDepth) === 10 ? '10' : '08';
-      const level = String(videoStream?.Level || '');
-      const lvl = /^\d+$/.test(level) ? String(Number(level)).padStart(2, '0') : '08';
-      return MediaSource.isTypeSupported(`video/mp4; codecs="av01.2.${lvl}M.${bd}"`) ||
-             MediaSource.isTypeSupported('video/mp4; codecs="av01.0.08M.08"');
-    }
     return false;
   } catch {
     return false;
